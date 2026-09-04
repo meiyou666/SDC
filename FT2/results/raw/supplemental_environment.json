@@ -1,0 +1,18 @@
+{
+  "scope": "scaling_factor_and_critical_layer_supplemental_runs",
+  "provenance": "runtime inspection on the RTX 4090 experiment host after the supplemental campaigns; the two experiment logs also record that the Transformers generation compatibility wrapper was enabled",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "gpu_memory_mib": 24564,
+  "driver": "550.142",
+  "nvidia_smi_cuda": "12.4",
+  "os": "Ubuntu 22.04.5 LTS",
+  "kernel": "5.15.0-128-generic",
+  "python": "3.12.8",
+  "pytorch": "2.5.1+cu124",
+  "torch_cuda_runtime": "12.4",
+  "cudnn": 90100,
+  "transformers": "4.49.0",
+  "datasets": "3.3.2",
+  "numpy": "1.26.4",
+  "caveat": "The original supplemental protocol artifacts did not embed this environment block, so this file is supporting provenance rather than a hash-locked campaign identity."
+}

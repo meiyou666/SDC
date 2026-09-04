@@ -1,0 +1,8 @@
+projection,paper_expected_critical,descriptive_critical,inferential_critical,omit_sdc,omit_sdc_rate,full_sdc,full_sdc_rate,candidate_worse,candidate_better,mcnemar_p
+v_proj,true,true,false,3,0.0075000000,1,0.0025000000,2,0,0.5
+k_proj,false,false,false,1,0.0025000000,1,0.0025000000,0,0,1
+q_proj,false,false,false,1,0.0025000000,1,0.0025000000,0,0,1
+o_proj,true,false,false,1,0.0025000000,1,0.0025000000,1,1,1
+up_proj,true,false,false,1,0.0025000000,1,0.0025000000,0,0,1
+gate_proj,false,false,false,1,0.0025000000,1,0.0025000000,0,0,1
+down_proj,true,true,false,6,0.0150000000,1,0.0025000000,5,0,0.0625

@@ -1,0 +1,22 @@
+{
+  "artifact_sha256": "54d04e8d40eb270f1685a5cedef906455b8b457f0198d0fd135e8365815e87ac",
+  "created_at": "2026-09-03T16:02:55.637178+00:00",
+  "critical_layers_fingerprint": "5bfa9431f4c2f5212db1e2d8fac12040a6cd0c0ea0175188c4a4ab81294c867f",
+  "fault_specs_per_mode": 400,
+  "gpu_inferences": 3280,
+  "logical_modes": [
+    "protect_all_linear",
+    "leave_v_proj_unprotected",
+    "leave_k_proj_unprotected",
+    "leave_q_proj_unprotected",
+    "leave_o_proj_unprotected",
+    "leave_up_proj_unprotected",
+    "leave_gate_proj_unprotected",
+    "leave_down_proj_unprotected"
+  ],
+  "paper_method": "Protect every linear layer except the projection class under test; inject faults across all linear layers and measure SDC.",
+  "primary_metric": "author_binary_reference_recall",
+  "schema_version": 1,
+  "scope": "qwen2_math_7b/gsm8k/fp16_exponent_bit",
+  "status": "frozen"
+}

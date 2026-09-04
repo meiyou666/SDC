@@ -1,0 +1,227 @@
+nohup: ignoring input
+[critical-layers] fingerprint=5bfa9431f4c2f5212db1e2d8fac12040a6cd0c0ea0175188c4a4ab81294c867f modes=8 specs_per_mode=400 gpu_inferences=3280
+[model] loading qwen2_math_7b from /mnt/ft2-data/cache/huggingface/hub/models--Qwen--Qwen2-Math-7B/snapshots/47a44ff4136da8960adbab02b2326787086bcf6c
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.76it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.65it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.13it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.12s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.02it/s]
+[compat] transformers generation update wrapper enabled
+[mode] 1/8 protect_all_linear omit=None
+[control] mode=protect_all_linear 1/10 source=11 clean_equals_base=True
+[control] mode=protect_all_linear 2/10 source=12 clean_equals_base=False
+[control] mode=protect_all_linear 3/10 source=14 clean_equals_base=False
+[control] mode=protect_all_linear 4/10 source=15 clean_equals_base=True
+[control] mode=protect_all_linear 5/10 source=18 clean_equals_base=False
+[control] mode=protect_all_linear 6/10 source=19 clean_equals_base=True
+[control] mode=protect_all_linear 7/10 source=30 clean_equals_base=False
+[control] mode=protect_all_linear 8/10 source=31 clean_equals_base=False
+[control] mode=protect_all_linear 9/10 source=34 clean_equals_base=True
+[control] mode=protect_all_linear 10/10 source=35 clean_equals_base=False
+[run] mode=protect_all_linear 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=protect_all_linear 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=protect_all_linear 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 2/8 leave_v_proj_unprotected omit=v_proj
+[control] mode=leave_v_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_v_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_v_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_v_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_v_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_v_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_v_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_v_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_v_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_v_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_v_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_v_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_v_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 3/8 leave_k_proj_unprotected omit=k_proj
+[control] mode=leave_k_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_k_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_k_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_k_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_k_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_k_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_k_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_k_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_k_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_k_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_k_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_k_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_k_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 4/8 leave_q_proj_unprotected omit=q_proj
+[control] mode=leave_q_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_q_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_q_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_q_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_q_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_q_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_q_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_q_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_q_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_q_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_q_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_q_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_q_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 5/8 leave_o_proj_unprotected omit=o_proj
+[control] mode=leave_o_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 2/10 source=12 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 3/10 source=14 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 5/10 source=18 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 7/10 source=30 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 8/10 source=31 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_o_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_o_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_o_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_o_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_o_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 6/8 leave_up_proj_unprotected omit=up_proj
+[control] mode=leave_up_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_up_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_up_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_up_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_up_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_up_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_up_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_up_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_up_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_up_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_up_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_up_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_up_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 7/8 leave_gate_proj_unprotected omit=gate_proj
+[control] mode=leave_gate_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_gate_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_gate_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_gate_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_gate_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_gate_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_gate_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_gate_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_gate_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_gate_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_gate_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_gate_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_gate_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[mode] 8/8 leave_down_proj_unprotected omit=down_proj
+[control] mode=leave_down_proj_unprotected 1/10 source=11 clean_equals_base=True
+[control] mode=leave_down_proj_unprotected 2/10 source=12 clean_equals_base=False
+[control] mode=leave_down_proj_unprotected 3/10 source=14 clean_equals_base=False
+[control] mode=leave_down_proj_unprotected 4/10 source=15 clean_equals_base=True
+[control] mode=leave_down_proj_unprotected 5/10 source=18 clean_equals_base=False
+[control] mode=leave_down_proj_unprotected 6/10 source=19 clean_equals_base=True
+[control] mode=leave_down_proj_unprotected 7/10 source=30 clean_equals_base=False
+[control] mode=leave_down_proj_unprotected 8/10 source=31 clean_equals_base=False
+[control] mode=leave_down_proj_unprotected 9/10 source=34 clean_equals_base=True
+[control] mode=leave_down_proj_unprotected 10/10 source=35 clean_equals_base=False
+[run] mode=leave_down_proj_unprotected 25/400 spec=8c9344273a target=down_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 50/400 spec=4c05863e85 target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 75/400 spec=bb32655f94 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 100/400 spec=dc127534d0 target=q_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 125/400 spec=9e3ffe0c12 target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_down_proj_unprotected 150/400 spec=a0f9bd6a40 target=gate_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_down_proj_unprotected 175/400 spec=fb4474f26a target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 200/400 spec=34ff84f45c target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 225/400 spec=db23b9f1fa target=up_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_down_proj_unprotected 250/400 spec=e373ff8865 target=o_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 275/400 spec=9998a22b70 target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 300/400 spec=18e33f40ae target=up_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 325/400 spec=0d8186917c target=down_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_down_proj_unprotected 350/400 spec=3437dcb7bd target=q_proj outcome=MASKED_IDENTICAL
+[run] mode=leave_down_proj_unprotected 375/400 spec=265538b6fb target=gate_proj outcome=MASKED_SEMANTIC
+[run] mode=leave_down_proj_unprotected 400/400 spec=c908d613d5 target=gate_proj outcome=MASKED_SEMANTIC
+[model] unloaded qwen2_math_7b
+{
+  "status": "completed",
+  "summary": "/mnt/ft2-data/src/FT2-LLM-inference-protection/reproduction/results/critical_layer_identification_v1/summary.json"
+}

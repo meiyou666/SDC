@@ -1,0 +1,1339 @@
+{
+  "analysis_id": "author_repo_scoring_v1",
+  "clean_controls_author_scorer": {
+    "opt_2_7b__squad_v2": {
+      "no_protection": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_first_token_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_offline_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      }
+    },
+    "opt_2_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_first_token_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_offline_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      }
+    },
+    "qwen2_math_7b__gsm8k": {
+      "no_protection": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_first_token_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_offline_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      }
+    },
+    "qwen2_math_7b__squad_v2": {
+      "no_protection": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_first_token_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_offline_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      }
+    },
+    "qwen2_math_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_first_token_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      },
+      "paper_clamp_offline_bounds": {
+        "author_correct": 10,
+        "author_incorrect": 0,
+        "mean_reference_recall_literal_repo": 1.0,
+        "total": 10
+      }
+    }
+  },
+  "counts": {
+    "controls": 150,
+    "fault_runs": 18000,
+    "reclassified_original_non_evaluable": 240
+  },
+  "created_at": "2026-09-03T07:49:56.083851+00:00",
+  "mode_totals": {
+    "no_protection": {
+      "evaluable": 6000,
+      "mean_reference_recall_literal_repo": 0.9530694444444443,
+      "original_outcome_counts": {
+        "MASKED_IDENTICAL": 5266,
+        "MASKED_SEMANTIC": 384,
+        "SDC": 350
+      },
+      "outcome_counts": {
+        "MASKED_IDENTICAL": 5266,
+        "MASKED_SEMANTIC": 428,
+        "SDC": 306
+      },
+      "planned": 6000,
+      "sdc": 306,
+      "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0469305555555557,
+      "sdc_rate": 0.051
+    },
+    "paper_clamp_first_token_bounds": {
+      "evaluable": 6000,
+      "mean_reference_recall_literal_repo": 0.9966666666666667,
+      "original_outcome_counts": {
+        "MASKED_IDENTICAL": 5349,
+        "MASKED_SEMANTIC": 356,
+        "NON_EVALUABLE_CLEAN_FAILURE": 240,
+        "SDC": 55
+      },
+      "outcome_counts": {
+        "MASKED_IDENTICAL": 5577,
+        "MASKED_SEMANTIC": 399,
+        "SDC": 24
+      },
+      "planned": 6000,
+      "sdc": 24,
+      "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0033333333333332993,
+      "sdc_rate": 0.004
+    },
+    "paper_clamp_offline_bounds": {
+      "evaluable": 6000,
+      "mean_reference_recall_literal_repo": 0.9957777777777777,
+      "original_outcome_counts": {
+        "MASKED_IDENTICAL": 5642,
+        "MASKED_SEMANTIC": 286,
+        "SDC": 72
+      },
+      "outcome_counts": {
+        "MASKED_IDENTICAL": 5642,
+        "MASKED_SEMANTIC": 327,
+        "SDC": 31
+      },
+      "planned": 6000,
+      "sdc": 31,
+      "sdc_proxy_one_minus_mean_recall_literal_repo": 0.004222222222222349,
+      "sdc_rate": 0.005166666666666667
+    }
+  },
+  "outcome_counts": {
+    "MASKED_IDENTICAL": 16485,
+    "MASKED_SEMANTIC": 1154,
+    "SDC": 361
+  },
+  "overall": {
+    "evaluable": 18000,
+    "mean_reference_recall_literal_repo": 0.9818379629629631,
+    "original_outcome_counts": {
+      "MASKED_IDENTICAL": 16257,
+      "MASKED_SEMANTIC": 1026,
+      "NON_EVALUABLE_CLEAN_FAILURE": 240,
+      "SDC": 477
+    },
+    "outcome_counts": {
+      "MASKED_IDENTICAL": 16485,
+      "MASKED_SEMANTIC": 1154,
+      "SDC": 361
+    },
+    "planned": 18000,
+    "sdc": 361,
+    "sdc_proxy_one_minus_mean_recall_literal_repo": 0.018162037037036893,
+    "sdc_rate": 0.020055555555555556
+  },
+  "pair_mode_totals": {
+    "opt_2_7b__squad_v2": {
+      "no_protection": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9465972222222221,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1086,
+          "MASKED_SEMANTIC": 48,
+          "SDC": 66
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1086,
+          "MASKED_SEMANTIC": 48,
+          "SDC": 66
+        },
+        "planned": 1200,
+        "sdc": 66,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.05340277777777791,
+        "sdc_rate": 0.055
+      },
+      "paper_clamp_first_token_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9991666666666666,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1160,
+          "MASKED_SEMANTIC": 39,
+          "SDC": 1
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1160,
+          "MASKED_SEMANTIC": 39,
+          "SDC": 1
+        },
+        "planned": 1200,
+        "sdc": 1,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0008333333333333526,
+        "sdc_rate": 0.0008333333333333334
+      },
+      "paper_clamp_offline_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.998611111111111,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1150,
+          "MASKED_SEMANTIC": 48,
+          "SDC": 2
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1150,
+          "MASKED_SEMANTIC": 48,
+          "SDC": 2
+        },
+        "planned": 1200,
+        "sdc": 2,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.001388888888888995,
+        "sdc_rate": 0.0016666666666666668
+      }
+    },
+    "opt_2_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9377777777777779,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1093,
+          "MASKED_SEMANTIC": 26,
+          "SDC": 81
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1093,
+          "MASKED_SEMANTIC": 26,
+          "SDC": 81
+        },
+        "planned": 1200,
+        "sdc": 81,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.06222222222222207,
+        "sdc_rate": 0.0675
+      },
+      "paper_clamp_first_token_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9991666666666666,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1184,
+          "MASKED_SEMANTIC": 15,
+          "SDC": 1
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1184,
+          "MASKED_SEMANTIC": 15,
+          "SDC": 1
+        },
+        "planned": 1200,
+        "sdc": 1,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0008333333333333526,
+        "sdc_rate": 0.0008333333333333334
+      },
+      "paper_clamp_offline_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9983333333333333,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1180,
+          "MASKED_SEMANTIC": 18,
+          "SDC": 2
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1180,
+          "MASKED_SEMANTIC": 18,
+          "SDC": 2
+        },
+        "planned": 1200,
+        "sdc": 2,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0016666666666667052,
+        "sdc_rate": 0.0016666666666666668
+      }
+    },
+    "qwen2_math_7b__gsm8k": {
+      "no_protection": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9658333333333333,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1038,
+          "MASKED_SEMANTIC": 77,
+          "SDC": 85
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1038,
+          "MASKED_SEMANTIC": 121,
+          "SDC": 41
+        },
+        "planned": 1200,
+        "sdc": 41,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.03416666666666668,
+        "sdc_rate": 0.034166666666666665
+      },
+      "paper_clamp_first_token_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9991666666666666,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 882,
+          "MASKED_SEMANTIC": 46,
+          "NON_EVALUABLE_CLEAN_FAILURE": 240,
+          "SDC": 32
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1110,
+          "MASKED_SEMANTIC": 89,
+          "SDC": 1
+        },
+        "planned": 1200,
+        "sdc": 1,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0008333333333333526,
+        "sdc_rate": 0.0008333333333333334
+      },
+      "paper_clamp_offline_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9991666666666666,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1129,
+          "MASKED_SEMANTIC": 29,
+          "SDC": 42
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1129,
+          "MASKED_SEMANTIC": 70,
+          "SDC": 1
+        },
+        "planned": 1200,
+        "sdc": 1,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0008333333333333526,
+        "sdc_rate": 0.0008333333333333334
+      }
+    },
+    "qwen2_math_7b__squad_v2": {
+      "no_protection": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9558333333333331,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1000,
+          "MASKED_SEMANTIC": 137,
+          "SDC": 63
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1000,
+          "MASKED_SEMANTIC": 137,
+          "SDC": 63
+        },
+        "planned": 1200,
+        "sdc": 63,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.04416666666666691,
+        "sdc_rate": 0.0525
+      },
+      "paper_clamp_first_token_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9941666666666666,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1003,
+          "MASKED_SEMANTIC": 188,
+          "SDC": 9
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1003,
+          "MASKED_SEMANTIC": 188,
+          "SDC": 9
+        },
+        "planned": 1200,
+        "sdc": 9,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.005833333333333357,
+        "sdc_rate": 0.0075
+      },
+      "paper_clamp_offline_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.99375,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1070,
+          "MASKED_SEMANTIC": 120,
+          "SDC": 10
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1070,
+          "MASKED_SEMANTIC": 120,
+          "SDC": 10
+        },
+        "planned": 1200,
+        "sdc": 10,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.006249999999999978,
+        "sdc_rate": 0.008333333333333333
+      }
+    },
+    "qwen2_math_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9593055555555556,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1049,
+          "MASKED_SEMANTIC": 96,
+          "SDC": 55
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1049,
+          "MASKED_SEMANTIC": 96,
+          "SDC": 55
+        },
+        "planned": 1200,
+        "sdc": 55,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.040694444444444366,
+        "sdc_rate": 0.04583333333333333
+      },
+      "paper_clamp_first_token_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.9916666666666667,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1120,
+          "MASKED_SEMANTIC": 68,
+          "SDC": 12
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1120,
+          "MASKED_SEMANTIC": 68,
+          "SDC": 12
+        },
+        "planned": 1200,
+        "sdc": 12,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.008333333333333304,
+        "sdc_rate": 0.01
+      },
+      "paper_clamp_offline_bounds": {
+        "evaluable": 1200,
+        "mean_reference_recall_literal_repo": 0.989027777777778,
+        "original_outcome_counts": {
+          "MASKED_IDENTICAL": 1113,
+          "MASKED_SEMANTIC": 71,
+          "SDC": 16
+        },
+        "outcome_counts": {
+          "MASKED_IDENTICAL": 1113,
+          "MASKED_SEMANTIC": 71,
+          "SDC": 16
+        },
+        "planned": 1200,
+        "sdc": 16,
+        "sdc_proxy_one_minus_mean_recall_literal_repo": 0.01097222222222205,
+        "sdc_rate": 0.013333333333333334
+      }
+    }
+  },
+  "reclassified_original_non_evaluable": {
+    "MASKED_IDENTICAL": 228,
+    "MASKED_SEMANTIC": 12
+  },
+  "result_tables": {
+    "opt_2_7b__squad_v2": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9775,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 14,
+            "SDC": 9
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 14,
+            "SDC": 9
+          },
+          "planned": 400,
+          "sdc": 9,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.022499999999999964,
+          "sdc_rate": 0.0225
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9620833333333333,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 21,
+            "SDC": 16
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 21,
+            "SDC": 16
+          },
+          "planned": 400,
+          "sdc": 16,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.03791666666666671,
+          "sdc_rate": 0.04
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9002083333333333,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 346,
+            "MASKED_SEMANTIC": 13,
+            "SDC": 41
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 346,
+            "MASKED_SEMANTIC": 13,
+            "SDC": 41
+          },
+          "planned": 400,
+          "sdc": 41,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.09979166666666672,
+          "sdc_rate": 0.1025
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 393,
+            "MASKED_SEMANTIC": 7
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 393,
+            "MASKED_SEMANTIC": 7
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9975,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 380,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 1
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 380,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0024999999999999467,
+          "sdc_rate": 0.0025
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 387,
+            "MASKED_SEMANTIC": 13
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 387,
+            "MASKED_SEMANTIC": 13
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 388,
+            "MASKED_SEMANTIC": 12
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 388,
+            "MASKED_SEMANTIC": 12
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9975,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 379,
+            "MASKED_SEMANTIC": 20,
+            "SDC": 1
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 379,
+            "MASKED_SEMANTIC": 20,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0024999999999999467,
+          "sdc_rate": 0.0025
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9983333333333334,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 16,
+            "SDC": 1
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 16,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0016666666666665941,
+          "sdc_rate": 0.0025
+        }
+      }
+    },
+    "opt_2_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9645833333333335,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 2,
+            "SDC": 15
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 2,
+            "SDC": 15
+          },
+          "planned": 400,
+          "sdc": 15,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.03541666666666654,
+          "sdc_rate": 0.0375
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9658333333333334,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 370,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 15
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 370,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 15
+          },
+          "planned": 400,
+          "sdc": 15,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.03416666666666657,
+          "sdc_rate": 0.0375
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.8829166666666666,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 340,
+            "MASKED_SEMANTIC": 9,
+            "SDC": 51
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 340,
+            "MASKED_SEMANTIC": 9,
+            "SDC": 51
+          },
+          "planned": 400,
+          "sdc": 51,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.11708333333333343,
+          "sdc_rate": 0.1275
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9975,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 5,
+            "SDC": 1
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 5,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0024999999999999467,
+          "sdc_rate": 0.0025
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.995,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 390,
+            "MASKED_SEMANTIC": 8,
+            "SDC": 2
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 390,
+            "MASKED_SEMANTIC": 8,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0050000000000000044,
+          "sdc_rate": 0.005
+        }
+      }
+    },
+    "qwen2_math_7b__gsm8k": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9925,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 369,
+            "MASKED_SEMANTIC": 16,
+            "SDC": 15
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 369,
+            "MASKED_SEMANTIC": 28,
+            "SDC": 3
+          },
+          "planned": 400,
+          "sdc": 3,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.007499999999999951,
+          "sdc_rate": 0.0075
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.98,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 23,
+            "SDC": 24
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 39,
+            "SDC": 8
+          },
+          "planned": 400,
+          "sdc": 8,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.020000000000000018,
+          "sdc_rate": 0.02
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.925,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 316,
+            "MASKED_SEMANTIC": 38,
+            "SDC": 46
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 316,
+            "MASKED_SEMANTIC": 54,
+            "SDC": 30
+          },
+          "planned": 400,
+          "sdc": 30,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.07499999999999996,
+          "sdc_rate": 0.075
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 299,
+            "MASKED_SEMANTIC": 14,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 7
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 378,
+            "MASKED_SEMANTIC": 22
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 294,
+            "MASKED_SEMANTIC": 14,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 12
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 369,
+            "MASKED_SEMANTIC": 31
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9975,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 289,
+            "MASKED_SEMANTIC": 18,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 13
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 36,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0024999999999999467,
+          "sdc_rate": 0.0025
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9975,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 384,
+            "MASKED_SEMANTIC": 4,
+            "SDC": 12
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 384,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0024999999999999467,
+          "sdc_rate": 0.0025
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 373,
+            "MASKED_SEMANTIC": 10,
+            "SDC": 17
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 373,
+            "MASKED_SEMANTIC": 27
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 1.0,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 13
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 28
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0,
+          "sdc_rate": 0.0
+        }
+      }
+    },
+    "qwen2_math_7b__squad_v2": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9758333333333333,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 350,
+            "MASKED_SEMANTIC": 39,
+            "SDC": 11
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 350,
+            "MASKED_SEMANTIC": 39,
+            "SDC": 11
+          },
+          "planned": 400,
+          "sdc": 11,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.02416666666666667,
+          "sdc_rate": 0.0275
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9531249999999999,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 24
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 24
+          },
+          "planned": 400,
+          "sdc": 24,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.04687500000000011,
+          "sdc_rate": 0.06
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9385416666666667,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 317,
+            "MASKED_SEMANTIC": 55,
+            "SDC": 28
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 317,
+            "MASKED_SEMANTIC": 55,
+            "SDC": 28
+          },
+          "planned": 400,
+          "sdc": 28,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.06145833333333328,
+          "sdc_rate": 0.07
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.995,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 339,
+            "MASKED_SEMANTIC": 59,
+            "SDC": 2
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 339,
+            "MASKED_SEMANTIC": 59,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0050000000000000044,
+          "sdc_rate": 0.005
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.99625,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 331,
+            "MASKED_SEMANTIC": 67,
+            "SDC": 2
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 331,
+            "MASKED_SEMANTIC": 67,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.003750000000000031,
+          "sdc_rate": 0.005
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.99125,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 62,
+            "SDC": 5
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 62,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.008750000000000036,
+          "sdc_rate": 0.0125
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.995,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 35,
+            "SDC": 2
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 35,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.0050000000000000044,
+          "sdc_rate": 0.005
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.995625,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 354,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 3
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 354,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 3
+          },
+          "planned": 400,
+          "sdc": 3,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.004375000000000018,
+          "sdc_rate": 0.0075
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.990625,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 42,
+            "SDC": 5
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 42,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.009375000000000022,
+          "sdc_rate": 0.0125
+        }
+      }
+    },
+    "qwen2_math_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9745833333333335,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 367,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 11
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 367,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 11
+          },
+          "planned": 400,
+          "sdc": 11,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.025416666666666532,
+          "sdc_rate": 0.0275
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9595833333333332,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 352,
+            "MASKED_SEMANTIC": 30,
+            "SDC": 18
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 352,
+            "MASKED_SEMANTIC": 30,
+            "SDC": 18
+          },
+          "planned": 400,
+          "sdc": 18,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.04041666666666677,
+          "sdc_rate": 0.045
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.94375,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 330,
+            "MASKED_SEMANTIC": 44,
+            "SDC": 26
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 330,
+            "MASKED_SEMANTIC": 44,
+            "SDC": 26
+          },
+          "planned": 400,
+          "sdc": 26,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.05625000000000002,
+          "sdc_rate": 0.065
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.99,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 4
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 4
+          },
+          "planned": 400,
+          "sdc": 4,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.010000000000000009,
+          "sdc_rate": 0.01
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9925,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 24,
+            "SDC": 5
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 24,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.007499999999999951,
+          "sdc_rate": 0.0125
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9925,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 25,
+            "SDC": 3
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 25,
+            "SDC": 3
+          },
+          "planned": 400,
+          "sdc": 3,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.007499999999999951,
+          "sdc_rate": 0.0075
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.99,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 378,
+            "MASKED_SEMANTIC": 18,
+            "SDC": 4
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 378,
+            "MASKED_SEMANTIC": 18,
+            "SDC": 4
+          },
+          "planned": 400,
+          "sdc": 4,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.010000000000000009,
+          "sdc_rate": 0.01
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9875,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 7
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 7
+          },
+          "planned": 400,
+          "sdc": 7,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.012499999999999956,
+          "sdc_rate": 0.0175
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "mean_reference_recall_literal_repo": 0.9895833333333333,
+          "original_outcome_counts": {
+            "MASKED_IDENTICAL": 364,
+            "MASKED_SEMANTIC": 31,
+            "SDC": 5
+          },
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 364,
+            "MASKED_SEMANTIC": 31,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_proxy_one_minus_mean_recall_literal_repo": 0.01041666666666674,
+          "sdc_rate": 0.0125
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "scoring": {
+    "clean_control_gate": false,
+    "correct_rule": "normalized reference token recall equals 1.0",
+    "eos_truncation": false,
+    "exact_mask_rule": "faulty decoded text equals the clean decoded text from the same protection mode",
+    "gsm8k_normalization": "literal upstream GSM8K normalize_answer (LaTeX cleanup; ordinary punctuation retained)",
+    "literal_repo_secondary_metric": "mean reference recall; upstream uses `re2 == 0` rather than assignment when recall < 1",
+    "primary": "author_intended_binary_reference_recall",
+    "qa_normalization": "literal upstream QA normalize_answer (lowercase, ASCII punctuation/articles removed, whitespace normalized)",
+    "reference_selection": "first_reference_only"
+  },
+  "source": {
+    "analysis_script_sha256": "3c6f9b3dbf00a36c20117dd98599b35fe8f85c0a0ebb4d48a587723a3e8e59b9",
+    "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+    "results_dir": "/mnt/ft2-data/src/FT2-LLM-inference-protection/reproduction/results/main_18k_v1",
+    "source_controls": 150,
+    "source_runs": 18000,
+    "summary_sha256": "83b488d678e39c60791ec41ea9cbc524f271861fe5ae29d3c5aeb83f84bf3d2f",
+    "upstream_author_repo": "https://github.com/pipijing13/FT2-LLM-inference-protection",
+    "upstream_commit": "90510aec5d26850739cf583c97c65cbd71256cb1"
+  },
+  "status": "completed"
+}

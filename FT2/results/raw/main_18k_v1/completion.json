@@ -1,0 +1,16 @@
+{
+  "artifact_sha256": "7850932853d5a2e19fa4c31c5e151230eb7d8e14c19d7a3e931cddac7ccdf071",
+  "audit_artifact_sha256": "203351dd0f1ec30872e6b77e5d97a3185cb76efebd997c09e49476a7c567c0b6",
+  "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+  "completed_at": "2026-09-03T02:20:44.922144+00:00",
+  "counts": {
+    "controls": 150,
+    "fault_runs": 18000,
+    "fault_specs": 6000,
+    "pairs": 5,
+    "prompts": 50
+  },
+  "schema_version": 1,
+  "status": "completed",
+  "summary_artifact_sha256": "7defe3593c5afff4a9817b91df710e86d4900124c7b58c950762a123035d93a1"
+}

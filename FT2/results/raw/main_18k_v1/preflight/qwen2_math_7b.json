@@ -1,0 +1,30 @@
+{
+  "artifact_sha256": "e117cfd62b2e2784d4809b82f0fb8f0baf208d46c4732b115ba9e6c2a89b766c",
+  "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+  "candidate_dataset_index": 9605,
+  "candidate_sites": 196,
+  "completed_at": "2026-09-02T04:38:42.560781+00:00",
+  "critical_sites": 112,
+  "custom_tokens": [
+    576,
+    296
+  ],
+  "first_token_bounds": 112,
+  "forward_input_lengths": [
+    1024,
+    1
+  ],
+  "model_key": "qwen2_math_7b",
+  "model_revision": "47a44ff4136da8960adbab02b2326787086bcf6c",
+  "native_tokens": [
+    576,
+    296
+  ],
+  "references": [
+    "silver",
+    "silver",
+    "silver and inlaid with gold"
+  ],
+  "schema_version": 1,
+  "status": "passed"
+}

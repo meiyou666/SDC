@@ -1,0 +1,180 @@
+{
+  "artifact_sha256": "babd0617c212f6025dc6e24de8b5ca857b3343d7944db6558c55fcd83e4de248",
+  "created_at": "2026-09-03T16:02:55.611782+00:00",
+  "critical_layers_fingerprint": "5bfa9431f4c2f5212db1e2d8fac12040a6cd0c0ea0175188c4a4ab81294c867f",
+  "immutable": {
+    "expected": {
+      "controls": 80,
+      "fault_runs": 3200,
+      "gpu_inferences": 3280,
+      "nominal_4090_hours_at_10_seconds_per_inference": 9.11111111111111
+    },
+    "experiment_id": "ft2_qwen_gsm_critical_layer_identification_v1",
+    "generation": {
+      "batch_size": 1,
+      "dtype": "float16",
+      "greedy": true,
+      "num_new_tokens": 180,
+      "stop_on_eos": false
+    },
+    "logical_modes": [
+      "protect_all_linear",
+      "leave_v_proj_unprotected",
+      "leave_k_proj_unprotected",
+      "leave_q_proj_unprotected",
+      "leave_o_proj_unprotected",
+      "leave_up_proj_unprotected",
+      "leave_gate_proj_unprotected",
+      "leave_down_proj_unprotected"
+    ],
+    "main_inputs": {
+      "audit": {
+        "path": "reproduction/results/main_18k_v1/audit.json",
+        "sha256": "a8b66bae4fca62bd4b5ff3f5256171cfca61f9a8b7649dab34f9908e86265f6e"
+      },
+      "campaign": {
+        "path": "reproduction/results/main_18k_v1/campaign.json",
+        "sha256": "c93f9089f6639cc8a65d08231dd43f8251a693c8944542e9f5874f81588f6b2e"
+      },
+      "completion": {
+        "path": "reproduction/results/main_18k_v1/completion.json",
+        "sha256": "daf7373f0dbba3f3f3a8666d2a41a460002c8feec9b3577a7c53a4bdd8ae71b6"
+      },
+      "manifest": {
+        "path": "reproduction/results/main_18k_v1/manifests/qwen2_math_7b__gsm8k.json",
+        "sha256": "8b08c6b8e1956d2f00756b6c0b01c0ba92463a6f52a89c77c623a9e021dde0da"
+      },
+      "selection": {
+        "path": "reproduction/results/main_18k_v1/selection.json",
+        "sha256": "58ee03babcde1e5e3583f8955508a7aa6ee26bb84d05710d43fd5d8b425586e0"
+      }
+    },
+    "mode_to_omitted_projection": {
+      "leave_down_proj_unprotected": "down_proj",
+      "leave_gate_proj_unprotected": "gate_proj",
+      "leave_k_proj_unprotected": "k_proj",
+      "leave_o_proj_unprotected": "o_proj",
+      "leave_q_proj_unprotected": "q_proj",
+      "leave_up_proj_unprotected": "up_proj",
+      "leave_v_proj_unprotected": "v_proj",
+      "protect_all_linear": null
+    },
+    "paper_expected_critical": {
+      "down_proj": true,
+      "gate_proj": false,
+      "k_proj": false,
+      "o_proj": true,
+      "q_proj": false,
+      "up_proj": true,
+      "v_proj": true
+    },
+    "paper_mapping": "Qwen Table-1 architectural analogue, not the GPT-J/SQuAD Figure-6 model",
+    "paper_method": "Protect every linear layer except the projection class under test; inject faults across all linear layers and measure SDC.",
+    "parent_campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+    "protection": {
+      "bounds_source": "first_token",
+      "correction": "paper_clamp",
+      "full_mode_scope": "all_196_qwen_linear_sites",
+      "scaling_factor": 2.0
+    },
+    "schema_version": 1,
+    "scope": {
+      "dataset": "gsm8k",
+      "fault_specs_per_mode": 400,
+      "fault_type": "fp16_exponent_bit",
+      "model": "qwen2_math_7b",
+      "projection_classes": [
+        "v_proj",
+        "k_proj",
+        "q_proj",
+        "o_proj",
+        "up_proj",
+        "gate_proj",
+        "down_proj"
+      ],
+      "prompts": 10,
+      "trials_per_prompt": 40
+    },
+    "scoring": {
+      "clean_comparator": "frozen_no_protection_control_from_main_18k_v1",
+      "clean_gate": false,
+      "correct": "normalized_reference_token_recall_equals_1",
+      "identical": "decoded_faulty_text_equals_unprotected_clean_text",
+      "reference_policy": "first_reference_only",
+      "source": "author_repository_qwengsmprotect"
+    },
+    "seed": 196,
+    "source_files": [
+      {
+        "path": "reproduction/src/ft2_formal/__init__.py",
+        "sha256": "00fdf48f30cd630b75a967f947ec8328a3162901232183f6411abb96dcdf261a"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/adapters.py",
+        "sha256": "99564ebcc8cd0e7c5fb3596bc787d02dcb20a931ba0a0b33dd294d65c3a30353"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/artifacts.py",
+        "sha256": "ecd82da3868540a1f79d2385b092b1c0b6d67cee72ed9b32b60c8e3696c25420"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/audit.py",
+        "sha256": "159d86b37de0bcd3a3a9abbeb95bead2c127fcd1e7d521d9b566fc2efa39fb77"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/campaign.py",
+        "sha256": "151efdab9b44b32353d304ff3ca5d886ecac799cf72de5c328ed97f62a5630b5"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/decoding.py",
+        "sha256": "92a070c9c8146c92313c874e0cc4875a6c341f3e3a41f7c29c9d31e563a75949"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/engine.py",
+        "sha256": "198d8aa34997d769dec14815e9b8ffeea255e46ee7c6a590daf6fd745d4189d1"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/main18k.py",
+        "sha256": "ea3fe3b3bd01faf790300a91d4acc1bb92d2a1602c7e47607072e43399620c15"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/manifest.py",
+        "sha256": "d39833619dadd65698ff9ce533b3c024e0836bb5c3cb9e3c1af2cd46f9de3a7d"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/reduced_campaign.py",
+        "sha256": "15c1eeadeb206374af5ada6ffc163edc745443a2b984be2b5ba0c3b3931bac65"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/schema.py",
+        "sha256": "d5c50c867b80cccd4cfe6f862379ad6b05ce5a83afdbe71771597221679e8195"
+      },
+      {
+        "path": "reproduction/src/ft2_formal/tasks.py",
+        "sha256": "aafdd6eec205c7c3330b5f43a6c49839964afb3057f095eda16420011e79fc03"
+      },
+      {
+        "path": "reproduction/experiments/run_scaling_ablation_v2.py",
+        "sha256": "d89da810d71e9ea461b15b2ec07d4a642d5f7e7ff57853a219c1f2b84a9d626f"
+      },
+      {
+        "path": "performance/sigcode/evaluation/qwengsmprotect.py",
+        "sha256": "2038687967838f11345a22e191a420a29046db2c3e02fbd8c6659d32ac005482"
+      },
+      {
+        "path": "performance/sigcode/modeling/modeling_qwen2_protected.py",
+        "sha256": "701848e5610fd675e0e1608039f805ed0c4f1450ccb84c42c2bd0b12899991df"
+      },
+      {
+        "path": "reproduction/experiments/run_critical_layer_identification.py",
+        "sha256": "caeec5be11379c65fd5cce1de2b60d7bed8863ee2141939e061cbbe551acbda2"
+      }
+    ],
+    "statistics": {
+      "inferential_critical": "candidate_worse > candidate_better and p < 0.05",
+      "interval": "Wilson 95%",
+      "paired_test": "two-sided exact McNemar versus protect_all_linear"
+    }
+  },
+  "schema_version": 1
+}

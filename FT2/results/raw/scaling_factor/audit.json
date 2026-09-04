@@ -1,0 +1,26 @@
+{
+  "artifact_sha256": "8235ff4fe57fda5928a6d60e632dff32dc8dd8405f604cb81474b3d3be592097",
+  "audited_at": "2026-09-03T15:29:33.697988+00:00",
+  "counts": {
+    "fault_specs_per_mode": 400,
+    "logical_controls": 80,
+    "logical_fault_runs": 3200,
+    "new_controls": 60,
+    "new_fault_runs": 2400,
+    "prompts": 10
+  },
+  "invariants": {
+    "author_reference_recall_scorer": true,
+    "fixed_180_token_generation": true,
+    "main_parent_completed_and_audited": true,
+    "no_clean_evaluability_gate": true,
+    "one_verified_xor_per_fault_run": true,
+    "only_frozen_exponent_specs": true,
+    "same_400_fault_specs_for_every_mode": true,
+    "same_mode_clean_comparator": true
+  },
+  "scaling_fingerprint": "97cd99b61e30234cccd5f91655eb7ec2d49d8d6ec4d1bb69631bb71456fa3f8e",
+  "schema_version": 1,
+  "status": "passed",
+  "summary_artifact_sha256": "0e4f3abc70c6dd13dc62136a01a9bb666e0cadb6d1386409ad3e99e5808d23e1"
+}

@@ -1,0 +1,20 @@
+{
+  "artifact_sha256": "8478483dcaf6bff9f7bef0c86921a9845ea28bf069981bba9b46655f79150487",
+  "created_at": "2026-09-03T08:29:36.171323+00:00",
+  "factors": [
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.25,
+    2.5
+  ],
+  "fault_specs_per_factor": 400,
+  "new_gpu_inferences": 2460,
+  "primary_metric": "author_binary_reference_recall",
+  "scaling_fingerprint": "97cd99b61e30234cccd5f91655eb7ec2d49d8d6ec4d1bb69631bb71456fa3f8e",
+  "schema_version": 1,
+  "scope": "qwen2_math_7b/gsm8k/fp16_exponent_bit",
+  "status": "frozen"
+}

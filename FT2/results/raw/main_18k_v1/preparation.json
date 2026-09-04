@@ -1,0 +1,38 @@
+{
+  "artifact_sha256": "abbbd662ee88554c123fc526f4b96c52ed7e7634bdb845d7f76b1a8250981aa4",
+  "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+  "completed_at": "2026-09-02T04:38:44.359907+00:00",
+  "counts": {
+    "fault_specs": 6000,
+    "manifest_files": 5,
+    "pairs": 5,
+    "planned_controls": 150,
+    "planned_fault_runs": 18000,
+    "prompts": 50
+  },
+  "manifest_files": [
+    {
+      "path": "reproduction/results/main_18k_v1/manifests/opt_2_7b__squad_v2.json",
+      "sha256": "b8c7a0f6d6d4e0fff5292923cc35385f689ac8224dfc0b81393f2fc101251a78"
+    },
+    {
+      "path": "reproduction/results/main_18k_v1/manifests/opt_2_7b__xtreme_mlqa_en_en.json",
+      "sha256": "c42bef8659a0aed279a11027ad372c6a3c1f0202a066b41d2f719d7b885fdff0"
+    },
+    {
+      "path": "reproduction/results/main_18k_v1/manifests/qwen2_math_7b__gsm8k.json",
+      "sha256": "8b08c6b8e1956d2f00756b6c0b01c0ba92463a6f52a89c77c623a9e021dde0da"
+    },
+    {
+      "path": "reproduction/results/main_18k_v1/manifests/qwen2_math_7b__squad_v2.json",
+      "sha256": "e591866dcdfde20111ed3d6cc5a8f4cad15f779cc7fa939f349826a1c5960923"
+    },
+    {
+      "path": "reproduction/results/main_18k_v1/manifests/qwen2_math_7b__xtreme_mlqa_en_en.json",
+      "sha256": "056011a8d760079d5900a7980c366c3ad712b9b267a65879e93c723b3d960906"
+    }
+  ],
+  "schema_version": 1,
+  "selection_artifact_sha256": "b3bb8d61bd25413e219c31a78a2cb7f0bed2eb367b0d5af3ea415f48b2508a76",
+  "status": "prepared"
+}
