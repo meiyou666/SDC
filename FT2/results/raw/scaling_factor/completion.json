@@ -1,0 +1,9 @@
+{
+  "artifact_sha256": "00a8aa4bb81b984a7bc2490deed49fde5813368b2716ee395314c33167f3bbbc",
+  "audit_artifact_sha256": "8235ff4fe57fda5928a6d60e632dff32dc8dd8405f604cb81474b3d3be592097",
+  "completed_at": "2026-09-03T15:29:33.718513+00:00",
+  "scaling_fingerprint": "97cd99b61e30234cccd5f91655eb7ec2d49d8d6ec4d1bb69631bb71456fa3f8e",
+  "schema_version": 1,
+  "status": "completed",
+  "summary_artifact_sha256": "0e4f3abc70c6dd13dc62136a01a9bb666e0cadb6d1386409ad3e99e5808d23e1"
+}

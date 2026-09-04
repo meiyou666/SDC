@@ -1,0 +1,626 @@
+{
+  "artifact_sha256": "7defe3593c5afff4a9817b91df710e86d4900124c7b58c950762a123035d93a1",
+  "audit_artifact_sha256": "203351dd0f1ec30872e6b77e5d97a3185cb76efebd997c09e49476a7c567c0b6",
+  "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+  "clean_controls": {
+    "opt_2_7b__squad_v2": {
+      "no_protection": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_first_token_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_offline_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      }
+    },
+    "opt_2_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_first_token_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_offline_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      }
+    },
+    "qwen2_math_7b__gsm8k": {
+      "no_protection": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_first_token_bounds": {
+        "clean_correct": 8,
+        "clean_incorrect": 2
+      },
+      "paper_clamp_offline_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      }
+    },
+    "qwen2_math_7b__squad_v2": {
+      "no_protection": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_first_token_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_offline_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      }
+    },
+    "qwen2_math_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_first_token_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      },
+      "paper_clamp_offline_bounds": {
+        "clean_correct": 10,
+        "clean_incorrect": 0
+      }
+    }
+  },
+  "counts": {
+    "controls": 150,
+    "fault_runs": 18000,
+    "fault_specs": 6000,
+    "pairs": 5,
+    "prompts": 50
+  },
+  "created_at": "2026-09-03T02:20:44.917298+00:00",
+  "outcome_counts": {
+    "MASKED_IDENTICAL": 16257,
+    "MASKED_SEMANTIC": 1026,
+    "NON_EVALUABLE_CLEAN_FAILURE": 240,
+    "SDC": 477
+  },
+  "result_tables": {
+    "opt_2_7b__squad_v2": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 14,
+            "SDC": 9
+          },
+          "planned": 400,
+          "sdc": 9,
+          "sdc_rate_evaluable": 0.0225
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 21,
+            "SDC": 16
+          },
+          "planned": 400,
+          "sdc": 16,
+          "sdc_rate_evaluable": 0.04
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 346,
+            "MASKED_SEMANTIC": 13,
+            "SDC": 41
+          },
+          "planned": 400,
+          "sdc": 41,
+          "sdc_rate_evaluable": 0.1025
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 393,
+            "MASKED_SEMANTIC": 7
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 380,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_rate_evaluable": 0.0025
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 387,
+            "MASKED_SEMANTIC": 13
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 388,
+            "MASKED_SEMANTIC": 12
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 379,
+            "MASKED_SEMANTIC": 20,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_rate_evaluable": 0.0025
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 16,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_rate_evaluable": 0.0025
+        }
+      }
+    },
+    "opt_2_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 383,
+            "MASKED_SEMANTIC": 2,
+            "SDC": 15
+          },
+          "planned": 400,
+          "sdc": 15,
+          "sdc_rate_evaluable": 0.0375
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 370,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 15
+          },
+          "planned": 400,
+          "sdc": 15,
+          "sdc_rate_evaluable": 0.0375
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 340,
+            "MASKED_SEMANTIC": 9,
+            "SDC": 51
+          },
+          "planned": 400,
+          "sdc": 51,
+          "sdc_rate_evaluable": 0.1275
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 5,
+            "SDC": 1
+          },
+          "planned": 400,
+          "sdc": 1,
+          "sdc_rate_evaluable": 0.0025
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 396,
+            "MASKED_SEMANTIC": 4
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 394,
+            "MASKED_SEMANTIC": 6
+          },
+          "planned": 400,
+          "sdc": 0,
+          "sdc_rate_evaluable": 0.0
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 390,
+            "MASKED_SEMANTIC": 8,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_rate_evaluable": 0.005
+        }
+      }
+    },
+    "qwen2_math_7b__gsm8k": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 369,
+            "MASKED_SEMANTIC": 16,
+            "SDC": 15
+          },
+          "planned": 400,
+          "sdc": 15,
+          "sdc_rate_evaluable": 0.0375
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 23,
+            "SDC": 24
+          },
+          "planned": 400,
+          "sdc": 24,
+          "sdc_rate_evaluable": 0.06
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 316,
+            "MASKED_SEMANTIC": 38,
+            "SDC": 46
+          },
+          "planned": 400,
+          "sdc": 46,
+          "sdc_rate_evaluable": 0.115
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 320,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 299,
+            "MASKED_SEMANTIC": 14,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 7
+          },
+          "planned": 400,
+          "sdc": 7,
+          "sdc_rate_evaluable": 0.021875
+        },
+        "fp16_2bit": {
+          "evaluable": 320,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 294,
+            "MASKED_SEMANTIC": 14,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 12
+          },
+          "planned": 400,
+          "sdc": 12,
+          "sdc_rate_evaluable": 0.0375
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 320,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 289,
+            "MASKED_SEMANTIC": 18,
+            "NON_EVALUABLE_CLEAN_FAILURE": 80,
+            "SDC": 13
+          },
+          "planned": 400,
+          "sdc": 13,
+          "sdc_rate_evaluable": 0.040625
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 384,
+            "MASKED_SEMANTIC": 4,
+            "SDC": 12
+          },
+          "planned": 400,
+          "sdc": 12,
+          "sdc_rate_evaluable": 0.03
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 373,
+            "MASKED_SEMANTIC": 10,
+            "SDC": 17
+          },
+          "planned": 400,
+          "sdc": 17,
+          "sdc_rate_evaluable": 0.0425
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 15,
+            "SDC": 13
+          },
+          "planned": 400,
+          "sdc": 13,
+          "sdc_rate_evaluable": 0.0325
+        }
+      }
+    },
+    "qwen2_math_7b__squad_v2": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 350,
+            "MASKED_SEMANTIC": 39,
+            "SDC": 11
+          },
+          "planned": 400,
+          "sdc": 11,
+          "sdc_rate_evaluable": 0.0275
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 24
+          },
+          "planned": 400,
+          "sdc": 24,
+          "sdc_rate_evaluable": 0.06
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 317,
+            "MASKED_SEMANTIC": 55,
+            "SDC": 28
+          },
+          "planned": 400,
+          "sdc": 28,
+          "sdc_rate_evaluable": 0.07
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 339,
+            "MASKED_SEMANTIC": 59,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_rate_evaluable": 0.005
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 331,
+            "MASKED_SEMANTIC": 67,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_rate_evaluable": 0.005
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 333,
+            "MASKED_SEMANTIC": 62,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_rate_evaluable": 0.0125
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 363,
+            "MASKED_SEMANTIC": 35,
+            "SDC": 2
+          },
+          "planned": 400,
+          "sdc": 2,
+          "sdc_rate_evaluable": 0.005
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 354,
+            "MASKED_SEMANTIC": 43,
+            "SDC": 3
+          },
+          "planned": 400,
+          "sdc": 3,
+          "sdc_rate_evaluable": 0.0075
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 353,
+            "MASKED_SEMANTIC": 42,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_rate_evaluable": 0.0125
+        }
+      }
+    },
+    "qwen2_math_7b__xtreme_mlqa_en_en": {
+      "no_protection": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 367,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 11
+          },
+          "planned": 400,
+          "sdc": 11,
+          "sdc_rate_evaluable": 0.0275
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 352,
+            "MASKED_SEMANTIC": 30,
+            "SDC": 18
+          },
+          "planned": 400,
+          "sdc": 18,
+          "sdc_rate_evaluable": 0.045
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 330,
+            "MASKED_SEMANTIC": 44,
+            "SDC": 26
+          },
+          "planned": 400,
+          "sdc": 26,
+          "sdc_rate_evaluable": 0.065
+        }
+      },
+      "paper_clamp_first_token_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 377,
+            "MASKED_SEMANTIC": 19,
+            "SDC": 4
+          },
+          "planned": 400,
+          "sdc": 4,
+          "sdc_rate_evaluable": 0.01
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 24,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_rate_evaluable": 0.0125
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 372,
+            "MASKED_SEMANTIC": 25,
+            "SDC": 3
+          },
+          "planned": 400,
+          "sdc": 3,
+          "sdc_rate_evaluable": 0.0075
+        }
+      },
+      "paper_clamp_offline_bounds": {
+        "fp16_1bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 378,
+            "MASKED_SEMANTIC": 18,
+            "SDC": 4
+          },
+          "planned": 400,
+          "sdc": 4,
+          "sdc_rate_evaluable": 0.01
+        },
+        "fp16_2bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 371,
+            "MASKED_SEMANTIC": 22,
+            "SDC": 7
+          },
+          "planned": 400,
+          "sdc": 7,
+          "sdc_rate_evaluable": 0.0175
+        },
+        "fp16_exponent_bit": {
+          "evaluable": 400,
+          "outcome_counts": {
+            "MASKED_IDENTICAL": 364,
+            "MASKED_SEMANTIC": 31,
+            "SDC": 5
+          },
+          "planned": 400,
+          "sdc": 5,
+          "sdc_rate_evaluable": 0.0125
+        }
+      }
+    }
+  },
+  "schema_version": 1,
+  "status": "completed"
+}

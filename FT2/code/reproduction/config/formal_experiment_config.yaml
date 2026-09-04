@@ -1,0 +1,414 @@
+#  FT2 reduced reproduction configuration
+# Sources are labeled explicitly:
+#   author_repository   - directly recoverable from commit 90510aec...
+#   paper               - specified by the paper
+#   reproduction_frozen - version fixed by this reproduction
+#   reproduction_defined- missing from the released artifact and defined here
+
+schema_version: 1
+
+experiment:
+  id: ft2_rtx4090_reduced_v1
+  stage_order:
+    - pilot
+    - reduced_formal
+  seed: 196
+  goal: reproduce_core_ft2_sdc_results
+  repo_commit: 90510aec5d26850739cf583c97c65cbd71256cb1
+
+hardware:
+  actual_gpu: NVIDIA_GeForce_RTX_4090_24GB
+  paper_requested_gpu: NVIDIA_A100
+  compute_and_memory_overhead:
+    enabled: false
+    reason: deferred_due_to_hardware_mismatch
+
+runtime:
+  os: Ubuntu_22.04.5_LTS
+  python: "3.10.21"
+  pytorch: "2.3.0+cu118"
+  cuda_driver_api: "12.4"
+  nvcc: "11.8"
+  transformers: "4.42.4"
+  datasets: "2.15.0"
+  huggingface_hub: "0.26.2"
+  numpy: "1.26.2"
+  dtype: float16
+  device: cuda:0
+  batch_size: 1
+  model_cache_root: /mnt/ft2-data/cache/huggingface
+  hf_endpoint: https://hf-mirror.com
+
+source_labels:
+  author_repository: recovered_directly_from_released_code_or_data
+  paper: stated_in_the_paper
+  reproduction_frozen: frozen_by_us_because_author_did_not_pin_a_revision
+  reproduction_defined: defined_by_us_because_release_is_incomplete
+
+models:
+  opt_2_7b:
+    model_id: facebook/opt-2.7b
+    revision: 905a4b602cda5c501f1b3a2650a4152680238254
+    identity_source: author_repository
+    revision_source: reproduction_frozen
+    decoder_layers: 32
+    attention_implementation: eager
+    model_class: OPTForCausalLM
+  qwen2_math_7b:
+    model_id: Qwen/Qwen2-Math-7B
+    revision: 47a44ff4136da8960adbab02b2326787086bcf6c
+    identity_source: author_repository
+    revision_source: reproduction_frozen
+    variant: base_not_instruct
+    decoder_layers: 28
+    attention_implementation: sdpa
+    model_class: Qwen2ForCausalLM
+
+datasets:
+  squad_v2:
+    dataset_id: rajpurkar/squad_v2
+    author_load_name: squad_v2
+    revision: 3ffb306f725f7d2ce8394bc1873b24868140c412
+    config: null
+    evaluation_split: validation
+    revision_source: reproduction_frozen
+    prompt_family: extractive_qa
+  xtreme_mlqa_en_en:
+    dataset_id: google/xtreme
+    revision: ec5f1f46e9af79639a90684a7a70a956c4998f04
+    config: MLQA.en.en
+    evaluation_split: validation
+    revision_source: reproduction_frozen
+    prompt_family: extractive_qa
+  gsm8k:
+    dataset_id: openai/gsm8k
+    revision: 740312add88f781978c0658806c59bc2815b9866
+    config: main
+    evaluation_split: test
+    revision_source: reproduction_frozen
+    prompt_family: math
+
+model_dataset_matrix:
+  opt_2_7b:
+    - squad_v2
+    - xtreme_mlqa_en_en
+  qwen2_math_7b:
+    - squad_v2
+    - xtreme_mlqa_en_en
+    - gsm8k
+
+author_selection_files:
+  qids:
+    squad_v2: qidsquadfinal.txt
+    xtreme_mlqa_en_en: qidxtremefinal.txt
+    gsm8k: qidgsmfinal.txt
+  injection_steps:
+    opt_2_7b:
+      squad_v2: squadrandomtokenopt2.7b.txt
+      xtreme_mlqa_en_en: xtremerandomtokenopt2.7b.txt
+    qwen2_math_7b:
+      squad_v2: squadrandomtokenqwen.txt
+      xtreme_mlqa_en_en: xtremerandomtokenqwen.txt
+      gsm8k: gsmrandomtokenqwen.txt
+  provenance: author_repository
+  qids_available_per_dataset: 50
+  injection_step_note: one_fixed_generation_step_per_qid_reused_across_trials
+
+sample_selection:
+  pilot_prompts_per_model_dataset: 2
+  formal_prompts_per_model_dataset: 10
+  policy: first_10_author_qids_not_used_in_pilot_clean_correct_and_step_ge_1
+  shared_qa_policy: require_same_10_unexposed_clean_correct_qids_for_both_models
+  exclude_pilot_prompts: true
+  main_fault_target_step_min: 1
+  if_fewer_than_required: stop_and_revise_configuration
+  clean_correctness_required: true
+  ordering: preserve_author_qid_file_order
+
+prompting:
+  extractive_qa:
+    template: "{context}\n\n{question}"
+    provenance: author_repository
+  math:
+    template: "{question}\n"
+    provenance: author_repository
+  system_prompt: null
+  chat_template: false
+  few_shot_examples: 0
+  answer_prefix: null
+  chain_of_thought_trigger: null
+  tokenizer:
+    padding_side: left
+    padding: max_length
+    truncation: true
+    max_input_tokens: 1024
+
+generation:
+  algorithm: handwritten_greedy_argmax
+  use_cache: true
+  do_sample: false
+  qa_generation_steps: 60
+  gsm8k_generation_steps: 180
+  stop_on_eos: false
+  no_repeat_ngram_constraint: false
+  provenance: author_repository
+  note: generate_exactly_the_configured_number_of_steps
+
+fault_campaign:
+  fault_types:
+    - fp16_1bit
+    - fp16_2bit
+    - fp16_exponent_bit
+  one_fault_per_physical_inference: true
+  trials_per_prompt_per_fault_type:
+    pilot: 2
+    reduced_formal: 3
+  manifest:
+    explicit_and_persisted: true
+    identical_across_protection_modes: true
+    seed: 196
+  target: decoder_linear_layer_activation_output
+  injection_step_source: author_selection_files
+  coordinate_sampling:
+    batch: fixed_zero_due_to_batch_size_one
+    sequence_position: uniform
+    output_feature: uniform
+  decoder_layer_sampling:
+    opt_2_7b:
+      distribution: uniform_integer
+      inclusive_range: [0, 31]
+    qwen2_math_7b:
+      distribution: uniform_integer
+      inclusive_range: [0, 27]
+  module_sampling:
+    opt_2_7b:
+      provenance: author_repository
+      weights:
+        v_proj: 1
+        k_proj: 1
+        q_proj: 1
+        out_proj: 1
+        fc1: 4
+        fc2: 4
+    qwen2_math_7b:
+      provenance: author_repository
+      weights:
+        v_proj: 1
+        k_proj: 1
+        q_proj: 7
+        o_proj: 7
+        up_proj: 37
+        gate_proj: 37
+        down_proj: 37
+  bit_sampling:
+    fp16_1bit:
+      provenance: author_repository
+      scalar: one_fp16_activation
+      bit_positions: [0, 15]
+      choose: one_uniform_bit
+      operation: xor
+    fp16_2bit:
+      provenance: reproduction_defined
+      scalar: same_fp16_activation
+      bit_positions: [0, 15]
+      choose: two_distinct_uniform_bits_without_replacement
+      operation: xor_both
+    fp16_exponent_bit:
+      provenance: reproduction_defined
+      scalar: one_fp16_activation
+      bit_positions: [10, 14]
+      choose: one_uniform_exponent_bit
+      operation: xor
+
+protection:
+  main_modes:
+    - no_protection
+    - paper_clamp_first_token_bounds
+    - paper_clamp_offline_bounds
+  supplementary_modes:
+    - repository_zero_first_token_bounds
+  bounds:
+    granularity: one_scalar_min_and_max_per_decoder_block_and_critical_module
+    scaling_factor: 2.0
+    lower_formula: observed_min_times_scaling_factor
+    upper_formula: observed_max_times_scaling_factor
+  paper_correction:
+    out_of_bounds: clamp_to_nearest_bound
+    nan: replace_with_zero
+    positive_infinity: clamp_to_upper_bound
+    negative_infinity: clamp_to_lower_bound
+  repository_zero_correction:
+    provenance: author_repository
+    out_of_bounds_nan_or_infinity: replace_with_zero
+    role: supplementary_only_due_to_paper_code_mismatch
+  first_token_bounds:
+    provenance:
+      calibration_structure: author_repository
+      clamp_semantics: paper
+    calibration_forward_scope: complete_padded_prompt_forward
+    first_step_range_restriction: false
+    first_step_nan_correction: replace_with_zero
+    reuse_scaled_bounds_for_later_generation_steps: true
+    reset_bounds_before_every_inference: true
+  offline_bounds:
+    provenance: reproduction_defined
+    name: offline_reduced_200
+    calibration_examples_per_dataset: 200
+    seed: 196
+    batch_size: 1
+    aggregate: global_extrema_across_all_calibration_examples
+    persist_sample_ids_and_bounds: true
+    disjoint_from_evaluation: true
+    calibration_splits:
+      squad_v2: train
+      xtreme_mlqa_en_en: test
+      gsm8k: train
+    caveat: released_repository_does_not_include_original_offline_bounds_or_complete_profiler
+
+critical_modules:
+  opt_2_7b:
+    protected:
+      - v_proj
+      - out_proj
+      - fc2
+    noncritical_controls:
+      - q_proj
+      - fc1
+  qwen2_math_7b:
+    protected:
+      - v_proj
+      - o_proj
+      - up_proj
+      - down_proj
+    noncritical_controls:
+      - q_proj
+      - gate_proj
+  identification_rule: output_has_no_scaling_or_activation_before_next_linear
+  provenance: paper_and_author_repository
+
+evaluation:
+  preconditions:
+    canonical_no_protection_clean_must_be_task_correct: true
+    same_mode_fault_free_clean_must_be_task_correct: true
+  clean_controls:
+    canonical: no_protection_fault_free_screening_output
+    mode_matched: one_fault_free_output_per_selected_prompt_and_main_mode
+    fault_attribution_baseline: same_mode_fault_free_output
+    note: controls_are_not_counted_in_the_180_fault_inferences
+  exact_masked:
+    definition: faulty_decoded_output_exactly_equals_same_mode_clean_decoded_output
+    equality: decoded_text
+    token_id_equality_also_recorded: true
+  semantic_masked:
+    definition: faulty_output_differs_from_same_mode_clean_but_remains_task_correct
+    exclusive_of_exact_masked: true
+  sdc:
+    definition: both_clean_controls_are_correct_and_faulty_output_is_task_incorrect
+  due:
+    definition: known_fault_induced_numerical_failure_after_one_verified_xor
+    pilot_allowed_reason:
+      - nonfinite_step_zero_first_token_bounds
+    never_retry_with_a_new_fault: true
+  invalid_run:
+    definition: manifest_hook_hamming_bounds_or_infrastructure_invariant_failure
+    action: persist_evidence_and_stop_campaign
+  task_scoring:
+    squad_v2: normalized_match_against_any_gold_answer
+    xtreme_mlqa_en_en: normalized_match_against_any_gold_answer
+    gsm8k: extracted_final_numeric_answer_match
+  uncertainty:
+    report_binomial_confidence_intervals: true
+    confidence_level: 0.95
+
+pilot:
+  model_dataset_pairs: 5
+  prompts_per_pair: 2
+  faults_per_prompt_per_fault_type: 2
+  fault_types: 3
+  main_protection_modes: 3
+  expected_fault_inferences: 180
+  acceptance_checks:
+    - all_model_dataset_pairs_load
+    - manifests_replay_identically_across_modes
+    - exactly_one_fault_is_injected_per_inference
+    - bounds_reset_between_inferences
+    - raw_records_are_complete
+
+reduced_formal:
+  model_dataset_pairs: 5
+  prompts_per_pair: 10
+  faults_per_prompt_per_fault_type: 3
+  fault_types: 3
+  main_protection_modes: 3
+  matrix_cells: 45
+  fault_inferences_per_cell: 30
+  expected_fault_inferences: 1350
+
+scaling_factor_ablation:
+  model: qwen2_math_7b
+  dataset: gsm8k
+  fault_type: fp16_exponent_bit
+  protection: paper_clamp_first_token_bounds
+  prompts: 10
+  faults_per_prompt: 3
+  include_no_protection: true
+  factors: [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5]
+
+critical_layer_ablation:
+  cases:
+    - model: opt_2_7b
+      dataset: squad_v2
+    - model: qwen2_math_7b
+      dataset: squad_v2
+  fault_type: fp16_exponent_bit
+  protection: paper_clamp_first_token_bounds
+  factor: 2.0
+  compare:
+    - full_ft2
+    - omit_each_protected_module_group
+    - protect_one_noncritical_control_group
+
+reporting:
+  required_raw_fields:
+    - experiment_id
+    - model
+    - model_revision
+    - dataset
+    - dataset_revision
+    - split
+    - qid
+    - trial
+    - seed
+    - fault_type
+    - injection_step
+    - decoder_layer
+    - module
+    - activation_coordinate
+    - bit_positions
+    - value_before
+    - value_after
+    - lower_bound
+    - upper_bound
+    - correction_action
+    - clean_output
+    - faulty_output
+    - exact_masked
+    - semantic_masked
+    - sdc
+    - due
+  raw_format: jsonl
+  summary_format: csv
+  output_root: reproduction/results
+  figures_root: reproduction/results/figures
+  raw_root: reproduction/results/raw
+
+known_release_deviations:
+  - author_did_not_pin_model_or_dataset_revisions
+  - repository_does_not_implement_fp16_2bit_faults
+  - repository_does_not_implement_fp16_exponent_only_faults
+  - original_offline_bounds_and_complete_offline_profiler_are_missing
+  - repository_zeroes_out_of_bounds_values_while_paper_specifies_clamping
+  - protected_scripts_can_leak_bounds_between_batches_without_explicit_reset
+  - paper_reports_500_campaigns_but_released_loops_execute_20_trials_per_batch
+  - overhead_results_are_deferred_on_rtx4090
+

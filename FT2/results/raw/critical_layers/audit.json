@@ -1,0 +1,28 @@
+{
+  "artifact_sha256": "3c46a77b73de5051f39f1f10d83ddcf8b2a19bc12be1639cc0d2c5c14eecfa24",
+  "audited_at": "2026-09-04T03:49:33.903453+00:00",
+  "counts": {
+    "controls": 80,
+    "fault_runs": 3200,
+    "fault_specs_per_mode": 400,
+    "gpu_inferences": 3280,
+    "logical_modes": 8,
+    "prompts": 10
+  },
+  "critical_layers_fingerprint": "5bfa9431f4c2f5212db1e2d8fac12040a6cd0c0ea0175188c4a4ab81294c867f",
+  "invariants": {
+    "all_linear_sites_protected_except_tested_projection": true,
+    "author_reference_recall_scorer": true,
+    "fixed_180_token_generation": true,
+    "main_parent_completed_and_audited": true,
+    "no_clean_evaluability_gate": true,
+    "one_verified_xor_per_fault_run": true,
+    "only_frozen_exponent_specs": true,
+    "same_400_fault_specs_for_every_mode": true,
+    "target_bounds_presence_matches_protection_scope": true,
+    "unprotected_clean_comparator_for_every_mode": true
+  },
+  "schema_version": 1,
+  "status": "passed",
+  "summary_artifact_sha256": "3c0a169e2e5e1167ab4b1642f6d9ac04dc4c00b8872d7cb6111aa330f4eb25a8"
+}

@@ -1,0 +1,174 @@
+nohup: ignoring input
+[scaling-v2] fingerprint=97cd99b61e30234cccd5f91655eb7ec2d49d8d6ec4d1bb69631bb71456fa3f8e specs=400 new_inferences=2460
+[model] loading qwen2_math_7b from /mnt/ft2-data/cache/huggingface/hub/models--Qwen--Qwen2-Math-7B/snapshots/47a44ff4136da8960adbab02b2326787086bcf6c
+Sliding Window Attention is enabled but not implemented for `sdpa`; unexpected results may be encountered.
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:01,  1.76it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.66it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.32it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.95s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:05<00:00,  1.48s/it]
+[compat] transformers generation update wrapper enabled
+[control] 1/60 source=11 factor=1.00 author_correct=True
+[control] 2/60 source=11 factor=1.25 author_correct=True
+[control] 3/60 source=11 factor=1.50 author_correct=True
+[control] 4/60 source=11 factor=1.75 author_correct=True
+[control] 5/60 source=11 factor=2.25 author_correct=True
+[control] 6/60 source=11 factor=2.50 author_correct=True
+[control] 7/60 source=12 factor=1.00 author_correct=True
+[control] 8/60 source=12 factor=1.25 author_correct=True
+[control] 9/60 source=12 factor=1.50 author_correct=True
+[control] 10/60 source=12 factor=1.75 author_correct=True
+[control] 11/60 source=12 factor=2.25 author_correct=True
+[control] 12/60 source=12 factor=2.50 author_correct=True
+[control] 13/60 source=14 factor=1.00 author_correct=True
+[control] 14/60 source=14 factor=1.25 author_correct=True
+[control] 15/60 source=14 factor=1.50 author_correct=True
+[control] 16/60 source=14 factor=1.75 author_correct=True
+[control] 17/60 source=14 factor=2.25 author_correct=True
+[control] 18/60 source=14 factor=2.50 author_correct=True
+[control] 19/60 source=15 factor=1.00 author_correct=True
+[control] 20/60 source=15 factor=1.25 author_correct=True
+[control] 21/60 source=15 factor=1.50 author_correct=True
+[control] 22/60 source=15 factor=1.75 author_correct=True
+[control] 23/60 source=15 factor=2.25 author_correct=True
+[control] 24/60 source=15 factor=2.50 author_correct=True
+[control] 25/60 source=18 factor=1.00 author_correct=True
+[control] 26/60 source=18 factor=1.25 author_correct=True
+[control] 27/60 source=18 factor=1.50 author_correct=True
+[control] 28/60 source=18 factor=1.75 author_correct=True
+[control] 29/60 source=18 factor=2.25 author_correct=True
+[control] 30/60 source=18 factor=2.50 author_correct=True
+[control] 31/60 source=19 factor=1.00 author_correct=True
+[control] 32/60 source=19 factor=1.25 author_correct=True
+[control] 33/60 source=19 factor=1.50 author_correct=True
+[control] 34/60 source=19 factor=1.75 author_correct=True
+[control] 35/60 source=19 factor=2.25 author_correct=True
+[control] 36/60 source=19 factor=2.50 author_correct=True
+[control] 37/60 source=30 factor=1.00 author_correct=True
+[control] 38/60 source=30 factor=1.25 author_correct=True
+[control] 39/60 source=30 factor=1.50 author_correct=True
+[control] 40/60 source=30 factor=1.75 author_correct=True
+[control] 41/60 source=30 factor=2.25 author_correct=True
+[control] 42/60 source=30 factor=2.50 author_correct=True
+[control] 43/60 source=31 factor=1.00 author_correct=True
+[control] 44/60 source=31 factor=1.25 author_correct=True
+[control] 45/60 source=31 factor=1.50 author_correct=True
+[control] 46/60 source=31 factor=1.75 author_correct=True
+[control] 47/60 source=31 factor=2.25 author_correct=True
+[control] 48/60 source=31 factor=2.50 author_correct=True
+[control] 49/60 source=34 factor=1.00 author_correct=True
+[control] 50/60 source=34 factor=1.25 author_correct=True
+[control] 51/60 source=34 factor=1.50 author_correct=True
+[control] 52/60 source=34 factor=1.75 author_correct=True
+[control] 53/60 source=34 factor=2.25 author_correct=True
+[control] 54/60 source=34 factor=2.50 author_correct=True
+[control] 55/60 source=35 factor=1.00 author_correct=True
+[control] 56/60 source=35 factor=1.25 author_correct=True
+[control] 57/60 source=35 factor=1.50 author_correct=True
+[control] 58/60 source=35 factor=1.75 author_correct=True
+[control] 59/60 source=35 factor=2.25 author_correct=True
+[control] 60/60 source=35 factor=2.50 author_correct=True
+[run] 25/2400 spec=7028c8f629 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 50/2400 spec=89fc47487a factor=1.25 outcome=MASKED_IDENTICAL
+[run] 75/2400 spec=6602933286 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 100/2400 spec=d17f3a63b7 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 125/2400 spec=396af08a05 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 150/2400 spec=8c9344273a factor=2.50 outcome=MASKED_IDENTICAL
+[run] 175/2400 spec=80a863d247 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 200/2400 spec=c0c9971283 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 225/2400 spec=0288156253 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 250/2400 spec=390724d336 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 275/2400 spec=ad267bd2a3 factor=2.25 outcome=MASKED_SEMANTIC
+[run] 300/2400 spec=4c05863e85 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 325/2400 spec=7661da3d08 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 350/2400 spec=e563b77cb4 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 375/2400 spec=15633a3b16 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 400/2400 spec=8e69713547 factor=1.75 outcome=MASKED_SEMANTIC
+[run] 425/2400 spec=bf73be88cd factor=2.25 outcome=MASKED_IDENTICAL
+[run] 450/2400 spec=bb32655f94 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 475/2400 spec=9acf0dc64c factor=1.00 outcome=MASKED_IDENTICAL
+[run] 500/2400 spec=ac6b8e360d factor=1.25 outcome=MASKED_IDENTICAL
+[run] 525/2400 spec=8cb2e24ce7 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 550/2400 spec=5261aa8164 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 575/2400 spec=7915d8e827 factor=2.25 outcome=MASKED_SEMANTIC
+[run] 600/2400 spec=dc127534d0 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 625/2400 spec=7c435687d4 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 650/2400 spec=8b202cd10f factor=1.25 outcome=MASKED_IDENTICAL
+[run] 675/2400 spec=7d8f6e3067 factor=1.50 outcome=MASKED_SEMANTIC
+[run] 700/2400 spec=bb3cfbbbcc factor=1.75 outcome=MASKED_IDENTICAL
+[run] 725/2400 spec=7c5b784a2b factor=2.25 outcome=MASKED_IDENTICAL
+[run] 750/2400 spec=9e3ffe0c12 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 775/2400 spec=759ea14492 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 800/2400 spec=81548a8a03 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 825/2400 spec=1f21a07d9b factor=1.50 outcome=MASKED_IDENTICAL
+[run] 850/2400 spec=c262c958eb factor=1.75 outcome=MASKED_IDENTICAL
+[run] 875/2400 spec=eb84208473 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 900/2400 spec=a0f9bd6a40 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 925/2400 spec=b42bc60987 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 950/2400 spec=81ff4a47dc factor=1.25 outcome=MASKED_IDENTICAL
+[run] 975/2400 spec=357cbcd78f factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1000/2400 spec=a9248c5014 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1025/2400 spec=bcd1284d70 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1050/2400 spec=fb4474f26a factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1075/2400 spec=d3196302cb factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1100/2400 spec=7efd50f1f0 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1125/2400 spec=13080f685d factor=1.50 outcome=MASKED_SEMANTIC
+[run] 1150/2400 spec=f2a1804a97 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1175/2400 spec=1c55cbadb2 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1200/2400 spec=34ff84f45c factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1225/2400 spec=90d62955b8 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1250/2400 spec=2495e72afd factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1275/2400 spec=40c297aa1d factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1300/2400 spec=23f8146871 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1325/2400 spec=f7ae9fb70a factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1350/2400 spec=db23b9f1fa factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1375/2400 spec=8250e2ee8e factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1400/2400 spec=fa1dfbbfc2 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1425/2400 spec=f119517e5c factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1450/2400 spec=e02d838b61 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1475/2400 spec=63c7cef7bb factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1500/2400 spec=e373ff8865 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1525/2400 spec=05ad1ac94d factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1550/2400 spec=9ad14b7ab1 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1575/2400 spec=b932d1b3c4 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1600/2400 spec=4114d5a949 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1625/2400 spec=8617986d58 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1650/2400 spec=9998a22b70 factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1675/2400 spec=5ceff9d463 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1700/2400 spec=5ce870e104 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1725/2400 spec=ea476d1055 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1750/2400 spec=6dfacb4f4a factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1775/2400 spec=fea36d3256 factor=2.25 outcome=MASKED_SEMANTIC
+[run] 1800/2400 spec=18e33f40ae factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1825/2400 spec=74e4a6cf40 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 1850/2400 spec=b9eac62a63 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 1875/2400 spec=346523b3d8 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 1900/2400 spec=cf26acaa48 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 1925/2400 spec=964fbd847e factor=2.25 outcome=MASKED_IDENTICAL
+[run] 1950/2400 spec=0d8186917c factor=2.50 outcome=MASKED_IDENTICAL
+[run] 1975/2400 spec=748dc58bf4 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 2000/2400 spec=34feafb545 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 2025/2400 spec=cfb9f89671 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 2050/2400 spec=7adf87597c factor=1.75 outcome=MASKED_IDENTICAL
+[run] 2075/2400 spec=4c7aeb9273 factor=2.25 outcome=MASKED_IDENTICAL
+[run] 2100/2400 spec=3437dcb7bd factor=2.50 outcome=MASKED_IDENTICAL
+[run] 2125/2400 spec=a6a901ac02 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 2150/2400 spec=e0d4fb48d3 factor=1.25 outcome=MASKED_IDENTICAL
+[run] 2175/2400 spec=39798bc3a9 factor=1.50 outcome=MASKED_IDENTICAL
+[run] 2200/2400 spec=67a26437e4 factor=1.75 outcome=MASKED_IDENTICAL
+[run] 2225/2400 spec=d13b265a2b factor=2.25 outcome=MASKED_SEMANTIC
+[run] 2250/2400 spec=265538b6fb factor=2.50 outcome=MASKED_IDENTICAL
+[run] 2275/2400 spec=5125614ce9 factor=1.00 outcome=MASKED_IDENTICAL
+[run] 2300/2400 spec=c30ad6031a factor=1.25 outcome=MASKED_IDENTICAL
+[run] 2325/2400 spec=eefd73951f factor=1.50 outcome=MASKED_IDENTICAL
+[run] 2350/2400 spec=77e14e00fc factor=1.75 outcome=MASKED_IDENTICAL
+[run] 2375/2400 spec=ead3fa6a4e factor=2.25 outcome=MASKED_IDENTICAL
+[run] 2400/2400 spec=c908d613d5 factor=2.50 outcome=MASKED_IDENTICAL
+[model] unloaded qwen2_math_7b
+Traceback (most recent call last):
+  File "/mnt/ft2-data/src/FT2-LLM-inference-protection/reproduction/experiments/run_scaling_ablation_v2.py", line 1007, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/mnt/ft2-data/src/FT2-LLM-inference-protection/reproduction/experiments/run_scaling_ablation_v2.py", line 998, in main
+    result = audit_and_summarize(context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ft2-data/src/FT2-LLM-inference-protection/reproduction/experiments/run_scaling_ablation_v2.py", line 718, in audit_and_summarize
+    reference = raw["references"][0]
+                ~~~^^^^^^^^^^^^^^
+KeyError: 'references'

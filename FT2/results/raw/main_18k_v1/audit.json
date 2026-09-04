@@ -1,0 +1,33 @@
+{
+  "artifact_sha256": "203351dd0f1ec30872e6b77e5d97a3185cb76efebd997c09e49476a7c567c0b6",
+  "audited_at": "2026-09-03T02:20:44.906962+00:00",
+  "campaign_fingerprint": "34b2b46640ac41adb7fde6cdc16786efabd972bc4dc3606568776b24d9cac9aa",
+  "counts": {
+    "controls": 150,
+    "fault_runs": 18000,
+    "fault_specs": 6000,
+    "pairs": 5,
+    "prompts": 50
+  },
+  "invariants": {
+    "clean_failures_excluded_from_sdc_denominator": true,
+    "exactly_one_verified_xor_per_run": true,
+    "exactly_three_modes_per_spec": true,
+    "first_token_bounds_complete": true,
+    "five_manifests_of_1200_specs": true,
+    "fixed_generation_lengths": true,
+    "hamming_distance_matches_fault_type": true,
+    "no_protection_has_zero_corrections": true,
+    "one_campaign_fingerprint": true,
+    "target_step_minimum_is_one": true,
+    "trial_0_2_matches_frozen_parent": true
+  },
+  "outcome_counts": {
+    "MASKED_IDENTICAL": 16257,
+    "MASKED_SEMANTIC": 1026,
+    "NON_EVALUABLE_CLEAN_FAILURE": 240,
+    "SDC": 477
+  },
+  "schema_version": 1,
+  "status": "passed"
+}
