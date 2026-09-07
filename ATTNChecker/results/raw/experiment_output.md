@@ -1,8 +1,14 @@
 1. computing overhead
+Bert:
+Attention Mechanism Overhead:  0.16686546259406831                                                                        
+Training Overhead:  0.02391220952910309
+gpt2:
 Attention Mechanism Overhead:  0.358206374509681                       
-* Training Overhead:  0.12417662657818716                                
-ATTNChecker Loss:  0.5328999999999999                                  
-no ATTNChecker Loss:  0.5328999999999999
+Training Overhead:  0.12417662657818716 
+roberta:
+Attention Mechanism Overhead:  0.05456632359861377                                                                        
+Training Overhead:  0.04392132284383148
+
 
 2. Detection and Correction Rating 
 grep -Ec '\[(col|row) check\].*(error detected|INF detected|NAN detected|chk inf error detected)' fixed_pos0.txt
