@@ -93,7 +93,7 @@ IV-B 使用本机 profiling 得到的 FP1-FP4、BP1-BP9，共 13 个 kernel；bi
 | BP7 + bit13 | NaN | NaN | NaN | bit13 下 NaN |
 | FP2 + bit13 | 4.3173 | 约 0 | 51.50 | attention logits 达 `2.56e20`，但可恢复 |
 
-![IV-B kernel sensitivity](figures/iv_b_bit_kernel_sensitivity_fig1_preview.png)
+![IV-B kernel sensitivity](results/figures/iv_b_bit_kernel_sensitivity_fig1_preview.png)
 
 本地结果支持论文 IV-B 的定性结论：不同 kernel 对同一 bit 的敏感性差异很大，backward kernel 明显比 forward kernel 更容易造成持久退化。bit14 在大量 kernel 上直接 NaN 饱和，适合证明灾难性传播，但不适合做细粒度 kernel 排序。
 
@@ -109,7 +109,7 @@ Backward fault 更严重，因为它直接污染梯度和 optimizer update。bit
 
 Gradient clipping 对照如下：
 
-![IV-C/D clipping comparison](figures/iv_cd_fig2_clipping_comparison_preview.png)
+![IV-C/D clipping comparison](results/figures/iv_cd_fig2_clipping_comparison_preview.png)
 
 | 指标 | Clipped | No-clipping |
 |---|---:|---:|
@@ -156,7 +156,7 @@ Duration 实验固定 step 500 开始注入，持续 `1/3/5/7/9` 个 update：
 | 7 | 4.3423 | +0.0249 | 3616 | 67.59 |
 | 9 | 4.3459 | +0.0286 | 11136 | 69.34 |
 
-![IV-F Fig.3 style](figures/iv_f_fig3_paper_style_preview.png)
+![IV-F Fig.3 style](results/figures/iv_f_fig3_paper_style_preview.png)
 
 duration 越长，final eval loss、参数差和梯度尖峰整体越大。duration=3 的时间序列显示，`R_t` 在 step 500 注入窗口内先 spike，training loss 在注入结束后出现 bump，复现了论文 Fig.3 的机制图景。
 
