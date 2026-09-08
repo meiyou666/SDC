@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+# Paper Section IV-B: kernel sensitivity, simplified to 39 FI runs.
+# Source this after scripts/configs/iv_a.sh so IV-B inherits the validated
+# mb256 training shape and paired baseline path used by IV-A.
+IV_B_CONFIG_REVISION=2
+
+IV_B_MODEL="$IV_A_MODEL"
+IV_B_MAX_LENGTH="$IV_A_MAX_LENGTH"
+IV_B_BATCH_SIZE="$IV_A_BATCH_SIZE"
+IV_B_TOTAL_BATCH_SIZE="$IV_A_TOTAL_BATCH_SIZE"
+IV_B_LR="$IV_A_LR"
+IV_B_TRAINING_SCHEDULE_STEPS="$IV_A_TRAINING_SCHEDULE_STEPS"
+IV_B_WARMUP_STEPS="$IV_A_WARMUP_STEPS"
+IV_B_EXIT_AFTER="$IV_A_EXIT_AFTER"
+IV_B_EVAL_EVERY="$IV_A_EVAL_EVERY"
+IV_B_SAVE_EVERY="$IV_A_SAVE_EVERY"
+IV_B_WORKERS="$IV_A_WORKERS"
+IV_B_SEED="$IV_A_SEED"
+IV_B_KEEP_OPTIMIZER_PT="$IV_A_KEEP_OPTIMIZER_PT"
+
+# Reduced IV-B matrix: one locally spiky exponent bit, one paper-emphasized
+# exponent bit, and one locally confirmed NaN-producing exponent bit.
+IV_B_BITS=(10 13 14)
+
+IV_B_TRIGGER_RATE="$IV_A_TRIGGER_RATE"
+IV_B_DURATION="$IV_A_DURATION"
+IV_B_TARGET_REGISTER="$IV_A_TARGET_REGISTER"
+IV_B_TARGET_SMID="$IV_A_TARGET_SMID"
+IV_B_TARGET_LANEID="$IV_A_TARGET_LANEID"
+IV_B_TARGET_OP="$IV_A_TARGET_OP"
+IV_B_TARGET_FUNC="$IV_A_TARGET_FUNC"
+
+IV_B_KERNEL_MANIFEST="$IV_A_KERNEL_MANIFEST"
+IV_B_BASELINE_DIR="$IV_A_BASELINE_DIR"
+IV_B_CHECKPOINT_ROOT=checkpoints/iv_b_mb256
+IV_B_LOG_ROOT=logs/iv_b_mb256

@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# IV-F duration rerun using the same revised injection semantics as the
+# successful IV-F rate rerun: within one selected backward kernel, instrument
+# all matching HMMA instructions and flip the first input register.
+# Source this after iv_a.sh.
+IVF_DURATION_CONFIG_REVISION=1
+
+IVF_DURATION_MODEL="$IV_A_MODEL"
+IVF_DURATION_MAX_LENGTH="$IV_A_MAX_LENGTH"
+IVF_DURATION_BATCH_SIZE="$IV_A_BATCH_SIZE"
+IVF_DURATION_TOTAL_BATCH_SIZE="$IV_A_TOTAL_BATCH_SIZE"
+IVF_DURATION_LR="$IV_A_LR"
+IVF_DURATION_TRAINING_SCHEDULE_STEPS="$IV_A_TRAINING_SCHEDULE_STEPS"
+IVF_DURATION_WARMUP_STEPS="$IV_A_WARMUP_STEPS"
+IVF_DURATION_EXIT_AFTER="$IV_A_EXIT_AFTER"
+IVF_DURATION_EVAL_EVERY="$IV_A_EVAL_EVERY"
+IVF_DURATION_SAVE_EVERY="$IV_A_SAVE_EVERY"
+IVF_DURATION_WORKERS="$IV_A_WORKERS"
+
+# Main rerun is single-seed and paired with the mb256 baseline used by IV-A/B.
+# Full mode is available only after the matching mb256 baselines are present.
+IVF_DURATION_MAIN_SEEDS=("$IV_A_SEED")
+IVF_DURATION_FULL_SEEDS=(42 1337 351344)
+
+# Paper IV-F duration axis: one injection starts at update step 500 and remains
+# active for 1, 3, 5, 7, or 9 consecutive update steps.
+IVF_DURATION_TRIGGER_STEP=500
+IVF_DURATION_PROBE_VALUES=(3)
+IVF_DURATION_MAIN_VALUES=(1 3 5 7 9)
+IVF_DURATION_FULL_VALUES=(1 3 5 7 9)
+
+IVF_DURATION_FIG3_SEED="$IV_A_SEED"
+IVF_DURATION_FIG3_DURATION=3
+IVF_DURATION_FIG3_WINDOW_BEFORE=100
+IVF_DURATION_FIG3_WINDOW_AFTER=200
+
+# Revised local target selected from IV-B and reused by IV-F rate.
+IVF_DURATION_BIT=13
+IVF_DURATION_TARGET_BITMASK=$((1 << IVF_DURATION_BIT))
+IVF_DURATION_TARGET_REGISTER="$IV_A_TARGET_REGISTER"
+IVF_DURATION_TARGET_SMID="$IV_A_TARGET_SMID"
+IVF_DURATION_TARGET_LANEID="$IV_A_TARGET_LANEID"
+IVF_DURATION_TARGET_OP="$IV_A_TARGET_OP"
+IVF_DURATION_TARGET_FUNC="$IV_A_TARGET_FUNC"
+IVF_DURATION_TARGET_INSTR=-1
+
+IVF_DURATION_KERNEL_MANIFEST="$IV_A_KERNEL_MANIFEST"
+IVF_DURATION_BASELINE_ROOT=checkpoints/iv_f_mb256/baseline
+IVF_DURATION_CHECKPOINT_ROOT=checkpoints/iv_f_duration_all_hmma_mb256
+IVF_DURATION_LOG_ROOT=logs/iv_f_duration_all_hmma_mb256
+
+# Set to 1 only if completed runs must remain resumable.
+IVF_DURATION_KEEP_OPTIMIZER_PT=0
