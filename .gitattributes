@@ -1,0 +1,7 @@
+/environment/** text eol=lf
+/.devcontainer/** text eol=lf
+/.github/** text eol=lf
+/scripts/ci/** text eol=lf
+/tests/ci/** text eol=lf
+/compose.yaml text eol=lf
+/AGENTS.md text eol=lf

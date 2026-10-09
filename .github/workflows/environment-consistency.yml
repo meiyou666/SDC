@@ -13,7 +13,7 @@ jobs:
   environment-consistency:
     name: Environment consistency
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -37,3 +37,13 @@ jobs:
           python scripts/ci/check_environment.py
           --base "$BASE_SHA" --head "$HEAD_SHA"
           --author "$CHANGE_AUTHOR" --owner "$REPOSITORY_OWNER"
+      - name: Validate container configuration
+        run: docker compose config --quiet
+      - name: Build the shared development container
+        run: docker compose build dev
+      - name: Verify installed versions and numerical tools
+        run: docker compose run --rm -T dev python environment/verify_environment.py --smoke
+      - name: Run tests in the shared environment
+        run: docker compose run --rm -T dev python -m pytest -q -p no:cacheprovider
+      - name: Check Python errors
+        run: docker compose run --rm -T dev ruff check --no-cache .

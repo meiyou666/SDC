@@ -1,20 +1,69 @@
-# 公共环境
+# 公共开发环境
 
-由仓库拥有者维护。其他成员使用发布的环境，不自行更换依赖或训练基准。
+当前统一的是 **CPU 开发容器**，用于论文算法复现、小规模数值验证、测试和数据分析。基础环境已冻结，昇腾平台配置保持待定。
 
-## 首次填写
+| 项目 | 统一设置 |
+|---|---|
+| 系统 | Debian 12，Linux amd64 |
+| Python | 3.11.17 |
+| 数值计算 | NumPy、SciPy |
+| 数据与绘图 | pandas、Matplotlib、PyYAML |
+| 开发工具 | pytest、Ruff、uv、pip，镜像内提供 Git 和 C/C++ 编译工具 |
+| 版本依据 | `baseline.json` 和 `dependencies/requirements.lock` |
+| 后续配置 | NPU 型号、驱动、固件、CANN、PyTorch、`torch_npu` |
 
-1. 在 `baseline.json` 填写 `image`、`python` 和 `cann`。镜像使用包含 `@sha256:` 的完整 digest，Python 填写完整版本号。
-2. 将公共镜像中的固定 Python 依赖写入 `dependencies/requirements.lock`，每项使用 `包名==精确版本`。文件支持注释、哈希及公共索引选项。
-3. 如果导入名称与包名不同，在 `import_map` 中对应，例如 `"yaml": "PyYAML"`。确认后将 `state` 改为 `frozen`。
+基础镜像固定到 SHA256 digest，全部 Python 依赖固定版本并校验下载文件的哈希。容器不会在启动时自动更新软件。PyTorch 与 `torch_npu` 待硬件和 CANN 版本确定后配套加入。
 
-当前 `state` 为 `pending`。CI 允许文档、目录和环境准备工作；新增实验代码必须先完成上述冻结。
+## 成员开始开发
 
-## CI 检查
+先安装 Docker Desktop，或 Docker Engine 与 Compose v2。Windows 建议使用 Docker Desktop 的 WSL2 后端。宿主机无需另外安装 Python 或项目依赖。
 
-- 非拥有者的 PR 不得改动 `environment/`、`configs/training/` 或另增依赖、Docker 配置。
-- 已冻结环境需有镜像 digest、明确版本及固定依赖，不接受浮动版本。
-- 新框架中的 Python 显式导入及常量形式的动态导入，要属于标准库、本项目模块或锁定依赖。无法静态解析的动态导入会提示人工确认。
-- 归档材料和 CI 自身的工具不作为实验代码检查。
+### VS Code
 
-CI 核对的是版本声明和代码中的依赖，不验证镜像内部实装版本或 NPU 宿主驱动。实际运行使用维护人发布的镜像，上机时另行核对设备环境。算法正确性仍由成员人工比对与实验确认。
+安装 Dev Containers 扩展，打开仓库，执行 **Dev Containers: Reopen in Container**。首次会构建镜像；编辑器使用 `/opt/venv/bin/python`，源码仍保存在本地仓库。
+
+### 命令行
+
+在仓库根目录执行：
+
+```bash
+docker compose run --build --rm dev
+```
+
+进入容器后可以直接运行：
+
+```bash
+python environment/verify_environment.py --smoke
+python -m pytest -q
+ruff check .
+```
+
+也可以在宿主机运行一次性任务：
+
+```bash
+docker compose run --build --rm -T dev python -m pytest -q
+```
+
+容器默认以普通用户运行。Linux 宿主用户不是 UID 1000 时，命令行可使用 `docker compose run --build --rm --user "$(id -u):$(id -g)" -e HOME=/tmp dev`；VS Code 会自动匹配用户 UID。ARM 电脑使用相同的 amd64 容器，需要 Docker 支持架构模拟。
+
+## 环境更新
+
+成员在自己的分支开发，不自行安装或升级公共依赖。需要新依赖时交由维护人统一处理。拉取环境更新后重新构建容器；VS Code 使用 **Rebuild Container**。
+
+维护人修改 `dependencies/requirements.in` 后，在现有公共容器中重新生成完整依赖锁：
+
+```bash
+uv pip compile environment/dependencies/requirements.in \
+  --python-version 3.11.17 --python-platform x86_64-manylinux_2_36 \
+  --no-python-downloads \
+  --generate-hashes --only-binary :all: \
+  --output-file environment/dependencies/requirements.lock
+```
+
+若导入名与发行包名不同，在 `baseline.json` 的 `import_map` 中补充映射。随后重新构建并运行环境验证、测试和 CI。Python 或基础镜像调整时，同时修改 `baseline.json` 与 Dockerfile。
+
+## CI 与运行校验
+
+`Environment consistency` 强制检查公共环境的维护权限、固定版本和代码导入，并实际构建容器，在容器内核对安装版本、运行基础数值与绘图检查、测试及 Ruff。每次启动容器还会将实际 Python 和依赖版本与仓库基线比对，发现旧镜像或额外安装的包时退出并提示重建。
+
+拿到计算平台后，由维护人补充昇腾环境并完成设备验证。CPU 测试用于算法和工具的正确性检查，NPU 上的数值路径、计时和性能结果另行测量。
