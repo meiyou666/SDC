@@ -1,7 +1,8 @@
 {
-  "name": "SDC shared development",
+  "name": "SDC",
   "dockerComposeFile": "../compose.yaml",
   "service": "dev",
+  "runServices": ["dev"],
   "workspaceFolder": "/workspace/SDC",
   "remoteUser": "sdc",
   "updateRemoteUserUID": true,

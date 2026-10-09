@@ -13,7 +13,8 @@ dist/
 *.egg-info/
 
 # Local editor and OS files
-/.vscode/
+/.vscode/*
+!/.vscode/extensions.json
 /.idea/
 .DS_Store
 Thumbs.db

@@ -5,15 +5,7 @@ Set-Location -LiteralPath $sdcRoot
 
 $sdcDockerCommand = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $sdcDocker = if ($sdcDockerCommand) { $sdcDockerCommand.Source } else { $null }
-if (-not $sdcDocker) {
-    foreach ($sdcCandidate in @(
-        (Join-Path $env:LOCALAPPDATA "Programs\DockerDesktop\resources\bin\docker.exe"),
-        (Join-Path $env:ProgramFiles "Docker\Docker\resources\bin\docker.exe")
-    )) {
-        if (Test-Path $sdcCandidate) { $sdcDocker = $sdcCandidate; break }
-    }
-}
-if (-not $sdcDocker) { throw "Install Docker Desktop first." }
+if (-not $sdcDocker) { throw "Docker CLI was not found. Open this project in a WSL or SSH environment with Docker Engine." }
 $env:Path = (Split-Path $sdcDocker -Parent) + ";" + $env:Path
 
 # Docker's registry client does not read Windows system proxy settings itself.
@@ -33,7 +25,7 @@ if (-not $env:HTTPS_PROXY) {
 $ErrorActionPreference = "Continue"
 & $sdcDocker info *> $null
 if ($LASTEXITCODE -ne 0) {
-    [Console]::Error.WriteLine("Start Docker Desktop in Linux containers mode, then retry.")
+    [Console]::Error.WriteLine("Docker Engine is unavailable. Check the selected Docker context and engine connection.")
     exit 1
 }
 & $sdcDocker compose version *> $null

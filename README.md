@@ -2,17 +2,15 @@
 
 ## 1. 配置开发容器
 
-### 安装 Docker
+### VS Code 与 Docker 引擎
 
-按宿主机系统选择一组步骤。
+VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。扩展提供容器操作入口，后台仍需 Docker Engine。
 
-**Windows**
+Windows 使用 **WSL + Docker Engine** 或 **远程 Linux + Docker Engine**。前者通过 VS Code 的 WSL 扩展连接，后者通过 Remote - SSH 连接。仓库不依赖 Docker Desktop。
 
-1. 安装 [Git for Windows](https://git-scm.com/downloads/win) 和 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。
-2. 启动 Docker Desktop，使用 **Linux containers** 模式。
-3. 后续直接在 PowerShell 操作，无需单独安装 Ubuntu。Docker Desktop 默认使用 WSL 2 后端；支持 Hyper-V 的系统也可选择全用户安装与 Hyper-V 后端。
+**Ubuntu 24.04 后端**
 
-**Ubuntu 24.04 主机**
+在所选的 WSL 或 Linux 主机中安装 Docker Engine：
 
 ```bash
 sudo apt update
@@ -25,34 +23,28 @@ sudo usermod -aG docker "$USER"
 
 ### 获取仓库并启动
 
-在 PowerShell 或 Linux 终端获取仓库：
+在所选的 WSL 或 Linux 主机上获取仓库：
 
 ```bash
 git clone https://github.com/meiyou666/SDC.git
 cd SDC
 ```
 
-Windows 启动：
+在已连接该主机的 VS Code 窗口中：
 
-```powershell
-.\dev.cmd
-```
+1. 打开 [`SDC.code-workspace`](SDC.code-workspace)。
+2. 按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**。
+3. 等待构建完成，在容器终端中开发；Python 自动使用 `/opt/venv/bin/python`。
 
-Linux 启动：
-
-```bash
-./dev.sh
-```
-
-脚本会检查 Docker、构建镜像并进入容器。依赖通过 `pyproject.toml` 和 `uv.lock` 管理，构建使用 `uv sync --locked`。在容器内验证：
+依赖由 `pyproject.toml` 和 `uv.lock` 管理，构建使用 `uv sync --locked`。在容器内验证：
 
 ```bash
 python environment/verify_environment.py --smoke
 ```
 
-输入 `exit` 退出容器，代码保存在本机仓库。环境更新后重新执行启动命令即可重建。
+源码保存在所选主机的仓库目录。环境更新后执行 **Dev Containers: Rebuild Container**。
 
-VS Code 安装 **Dev Containers** 扩展，打开仓库后执行 **Reopen in Container**。其他设置见[环境说明](environment/README.md)。
+终端入口仍可使用：Linux/WSL 运行 `./dev.sh`；Windows 已配置 Docker CLI 和引擎连接时运行 `dev.cmd`。脚本会构建并进入容器。其他设置见[环境说明](environment/README.md)。
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
@@ -73,6 +65,8 @@ SDC/
 ├── pyproject.toml             # 项目依赖声明
 ├── uv.lock                    # uv 原生锁文件
 ├── .python-version            # Python 版本
+├── SDC.code-workspace          # VS Code 工作区入口
+├── .vscode/extensions.json     # 推荐扩展
 ├── .devcontainer/             # VS Code 容器配置
 ├── src/
 │   ├── algorithms/            # ABFT 算法

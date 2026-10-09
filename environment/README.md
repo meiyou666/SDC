@@ -11,7 +11,9 @@
 
 ## 启动与执行
 
-Windows 在仓库目录运行 `dev.cmd`，Linux 运行 `./dev.sh`；也可使用 VS Code Dev Container。首次使用步骤见[项目 README](../README.md)。
+通过 VS Code 的 WSL 或 Remote - SSH 连接配置了 Docker Engine 的主机，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。首次使用步骤见[项目 README](../README.md)。
+
+终端入口：Linux/WSL 使用 `./dev.sh`；Windows 已配置 Docker CLI 和引擎连接时使用 `dev.cmd`。仓库不绑定 Docker Desktop。
 
 容器通过 `uv sync --locked --all-groups` 安装依赖。启动时比较镜像与仓库配置，并通过 `uv sync --locked --check --offline --all-groups` 核对实际环境。
 
