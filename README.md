@@ -1,60 +1,129 @@
 # SDC
 
-团队协作开展 SDC 统一评测、算法研究与系统实现的仓库。
+## 1. 配置开发容器
 
-公共 CPU 开发容器已配置。团队使用相同的 Python、依赖和测试工具开展前期开发，昇腾平台和训练基准待硬件确定后统一补充。
+当前使用 CPU 开发容器。
 
-## 开始开发
+### 安装 Docker
 
-安装 Docker 后，在仓库根目录执行：
+按宿主机系统选择一组步骤。
+
+**Windows**
+
+1. 在管理员 PowerShell 中安装 WSL，完成后重启并打开 Ubuntu，按提示创建用户：
+
+   ```powershell
+   wsl --install -d Ubuntu-24.04
+   ```
+
+2. 安装并启动 [Docker Desktop](https://www.docker.com/products/docker-desktop/)。在 Settings 中启用 **Use the WSL 2 based engine**，再到 **Resources → WSL Integration** 启用 Ubuntu-24.04。
+3. 在 Ubuntu 终端安装 Git 和 GitHub CLI：
+
+   ```bash
+   sudo apt update
+   sudo apt install -y git gh
+   ```
+
+**Ubuntu 24.04 主机**
 
 ```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-v2 git gh
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+```
+
+注销并重新登录，使用户组生效。
+
+### 获取仓库并启动
+
+以下命令在 Ubuntu 或 WSL 的终端执行：
+
+```bash
+git clone https://github.com/meiyou666/SDC.git
+cd SDC
 docker compose run --build --rm dev
 ```
 
-也可以用 VS Code 的 **Dev Containers: Reopen in Container**。容器使用 Python 3.11.17，包含 NumPy、SciPy、pandas、Matplotlib 和测试工具。版本、使用方法及环境维护说明见 [`environment/README.md`](environment/README.md)。
+首次构建会自动安装固定版本的 Python 和依赖。进入容器后验证环境：
 
-## 目录
+```bash
+python environment/verify_environment.py --smoke
+```
 
-| 目录 | 用途 |
-|---|---|
-| `environment/docker/` | 公共 Docker 镜像及构建文件 |
-| `environment/dependencies/` | 依赖清单与版本锁定 |
-| `configs/training/` | 统一训练场景配置 |
-| `configs/evaluation/` | 故障注入、指标与评测配置 |
-| `src/training/` | 训练流程与 GEMM 采集、重放 |
-| `src/algorithms/` | 人工确认后的基线与新算法 |
-| `src/backends/ascend/` | 华为 NPU 算子与设备接口 |
-| `src/evaluation/` | 公共注入、统计与计时逻辑 |
-| `scripts/` | 统一运行入口与辅助脚本 |
-| `tests/` | 新框架的正确性与集成测试 |
-| `docs/papers/` | 论文精读记录 |
-| `docs/reproduction/` | 论文与实现对应关系及人工比对记录 |
-| `experiments/` | 实验说明、可复现配置与小型结果摘要 |
-| `data/` | 本地模型与数据，默认不提交 |
-| `results/` | 本地实验输出，默认不提交 |
-| [`archive/`](archive/README.md) | 停止使用的旧复现实验材料 |
+输入 `exit` 退出容器，代码保存在本机仓库。环境更新后重新执行启动命令即可重建。
 
-空目录中的 `.gitkeep` 仅用于保留目录结构。
+使用 VS Code 时，安装 **Dev Containers** 扩展，打开仓库后执行 **Reopen in Container**；Windows 同时安装 **WSL** 扩展，通过 WSL 打开仓库。其他环境设置见[环境说明](environment/README.md)。
 
-## 协作方式
+配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
-1. **各自在自己的分支开发。** 可以持续提交和推送，分支名称自行决定。
-2. **做好后再合并。** 非仓库拥有者不得直接推送 `main`；完成一批改动后提一次 PR，通过 CI 和一次审核后合并。PR 简单说明改动与验证结果，Issue 按需使用。
-3. **公共基础环境不自行改动。** `environment/` 和 `configs/training/` 由 [@meiyou666](https://github.com/meiyou666) 统一维护，有调整需要先沟通。
+## 2. 项目结构
 
-核心算法仍须精读论文、人工比对和小规模验证后再扩大实验。AI 可以辅助，不能代替人工确认。
+```text
+SDC/
+├── environment/
+│   ├── docker/
+│   │   ├── Dockerfile          # 镜像构建
+│   │   └── entrypoint.sh       # 容器启动
+│   ├── dependencies/          # 固定依赖
+│   ├── baseline.json          # 环境基线
+│   └── verify_environment.py  # 环境校验
+├── compose.yaml               # 命令行容器入口
+├── .devcontainer/             # VS Code 容器配置
+├── src/
+│   ├── algorithms/            # ABFT 算法
+│   ├── evaluation/            # 注入、统计与计时
+│   ├── training/              # 训练流程与 GEMM 采集
+│   └── backends/ascend/        # 昇腾算子实现
+├── configs/
+│   ├── training/              # 公共训练配置
+│   └── evaluation/            # 评测配置
+├── docs/
+│   ├── papers/                # 论文精读记录
+│   └── reproduction/          # 复现与人工比对记录
+├── experiments/               # 实验配置与小型摘要
+├── scripts/                   # 运行脚本
+├── tests/                     # 测试
+├── data/                      # 本地模型与数据，不提交
+├── results/                   # 本地实验输出，不提交
+├── archive/                   # 旧实验归档
+├── .github/                   # CI、审核规则与 PR 模板
+└── AGENTS.md                  # Codex 开发与审查规则
+```
 
-大型模型、数据和逐次输出放在 `data/`、`results/`，不提交到 Git；仓库保留必要配置和小型结果摘要。
+## 3. 协作流程
 
-## 环境一致性检查
+以下命令在**宿主机的仓库目录**执行。
 
-CI 检查环境与训练配置的维护权限、依赖锁定和 Python 导入，并实际构建公共容器，在其中核对安装版本、运行测试和基础数值检查。
+**首次配置身份**：`gh auth login` 选择 GitHub.com、HTTPS，并通过浏览器登录。
 
-CPU 开发环境已冻结，可以开始算法与评测工具开发。NPU 相关版本仍待配置；当前 CI 不执行 NPU 训练。Codex 的项目约定和自动审查重点见 [`AGENTS.md`](AGENTS.md)。
+```bash
+gh auth login
+gh auth setup-git
+git config user.name "你的名字"
+git config user.email "你的 GitHub 邮箱"
+```
 
-## 历史材料
+**开始任务**：将 `name/task` 换成自己的分支名。
 
-旧的 `ATTNChecker/`、`FT2/`、`LLM training SDC/` 和编辑器配置已完整移入 [`archive/legacy_reproduction/`](archive/legacy_reproduction/)。旧文件内容未改写，旧复现结果不作为当前已确认的实验基线。
+```bash
+git switch main
+git pull --ff-only
+git switch -c name/task
+```
 
-新工作在上述公共目录中开展。测试收集范围限定为 `tests/`，归档目录不纳入新框架测试。
+**完成后验证、提交并创建 PR**：
+
+```bash
+docker compose run --build --rm -T dev python -m pytest -q
+docker compose run --rm -T dev ruff check .
+git status
+git add .
+git commit -m "简述改动"
+git push -u origin HEAD
+gh pr create --base main
+```
+
+PR 简述改动和验证结果。Codex 自动审查；CI 通过且获得一名成员批准后合并。Issue 按需使用。
+
+非仓库拥有者不得直接推送 `main`。公共环境、CI 和训练配置由 `meiyou666` 维护，成员有调整需求先沟通。
