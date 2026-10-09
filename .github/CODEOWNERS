@@ -1,3 +1,6 @@
-# 公共环境与训练配置由仓库维护人统一维护。
+# 公共环境和 CI 规则由仓库拥有者维护。
 /environment/ @meiyou666
 /configs/training/ @meiyou666
+/.github/ @meiyou666
+/scripts/ci/ @meiyou666
+/tests/ci/ @meiyou666
