@@ -63,7 +63,8 @@ SDC/
 ├── environment/
 │   ├── docker/
 │   │   ├── Dockerfile          # 镜像构建
-│   │   └── entrypoint.sh       # 容器启动
+│   │   ├── entrypoint.sh       # 容器启动
+│   │   └── start-dev.ps1       # Windows 启动辅助
 │   ├── baseline.json          # 环境基线
 │   └── verify_environment.py  # 环境校验
 ├── compose.yaml               # 命令行容器入口
