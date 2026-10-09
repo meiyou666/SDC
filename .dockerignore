@@ -1,0 +1,9 @@
+**
+!environment/
+!environment/baseline.json
+!environment/verify_environment.py
+!environment/dependencies/
+!environment/dependencies/requirements.lock
+!environment/docker/
+!environment/docker/Dockerfile
+!environment/docker/entrypoint.sh

@@ -1,0 +1,26 @@
+{
+  "name": "SDC shared development",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "dev",
+  "workspaceFolder": "/workspace/SDC",
+  "remoteUser": "sdc",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "shutdownAction": "stopCompose",
+  "postCreateCommand": "python environment/verify_environment.py --smoke",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["tests"],
+        "ruff.path": ["/opt/venv/bin/ruff"]
+      }
+    }
+  }
+}

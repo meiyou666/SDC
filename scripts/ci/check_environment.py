@@ -14,6 +14,7 @@ import sys
 BASELINE = "environment/baseline.json"
 LOCKFILE = "environment/dependencies/requirements.lock"
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
+SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", "AGENTS.md"}
 CODE_SUFFIXES = {
     ".py", ".pyi", ".ipynb", ".sh", ".bash", ".bat", ".ps1",
     ".c", ".cc", ".cpp", ".cu", ".cuh", ".h", ".hpp", ".f", ".f90",
@@ -50,6 +51,7 @@ def dependency_file(path):
         or (name.startswith("requirements") and name.endswith((".txt", ".in", ".lock")))
         or name in {"pyproject.toml", "setup.py", "setup.cfg", "pipfile", "pipfile.lock", "poetry.lock", "uv.lock", "pdm.lock"}
         or (name.startswith(("environment", "conda")) and name.endswith((".yml", ".yaml")))
+        or name in {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", "devcontainer.json"}
     )
 
 
@@ -118,13 +120,55 @@ def imports_in(source, path):
     return imports, dynamic
 
 
+def check_cpu_container(snapshot, baseline, locked):
+    if baseline.get("profile") != "cpu-development" or baseline.get("platform") != "linux/amd64":
+        raise PolicyError("Use the shared cpu-development profile on linux/amd64.")
+    image = baseline.get("base_image", "")
+    if not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", image):
+        raise PolicyError("The base image must include an immutable @sha256 digest.")
+    accelerator = baseline.get("accelerator", {})
+    if not isinstance(accelerator, dict) or accelerator.get("state") != "pending" or accelerator.get("backend") != "ascend":
+        raise PolicyError("The CPU development profile must keep the Ascend platform pending.")
+    if any(accelerator.get(key) is not None for key in ("device", "driver", "firmware", "cann", "pytorch", "torch_npu")):
+        raise PolicyError("Do not declare unverified accelerator versions in the CPU development profile.")
+
+    dockerfile = "environment/docker/Dockerfile"
+    devcontainer = ".devcontainer/devcontainer.json"
+    for path in (dockerfile, devcontainer, "compose.yaml", ".dockerignore", "environment/verify_environment.py", "environment/docker/entrypoint.sh"):
+        if path not in snapshot.files:
+            raise PolicyError(f"Missing shared container file: {path}.")
+    source = snapshot.read(dockerfile)
+    if re.findall(r"(?im)^FROM\s+(\S+)\s*$", source) != [image]:
+        raise PolicyError("Dockerfile FROM must match the baseline's immutable base_image.")
+    if "--require-hashes" not in source or "--no-deps" not in source:
+        raise PolicyError("Install the resolved lock with --require-hashes and --no-deps.")
+    try:
+        dev = json.loads(snapshot.read(devcontainer))
+    except ValueError as exc:
+        raise PolicyError(f"Invalid Dev Container configuration: {exc}") from exc
+    if not isinstance(dev, dict) or dev.get("dockerComposeFile") != "../compose.yaml" or dev.get("service") != "dev":
+        raise PolicyError("Dev Container must use the shared Compose dev service.")
+
+    hashes, current = set(), None
+    for raw in snapshot.read(LOCKFILE).splitlines():
+        line = raw.split("#", 1)[0].strip()
+        match = re.match(r"([A-Za-z0-9][A-Za-z0-9._-]*)==", line)
+        if match:
+            current = package_name(match[1])
+        if current and re.search(r"--hash=sha256:[0-9a-fA-F]{64}(?:\s|$)", line):
+            hashes.add(current)
+    missing = sorted(set(locked) - hashes)
+    if missing:
+        raise PolicyError("Every locked package needs a SHA256 artifact hash: " + ", ".join(missing))
+
+
 def check(snapshot, changed, author, owner):
     owner_change = bool(owner) and author.casefold() == owner.casefold()
     protected = [
         path for path in changed
         if not path.startswith("archive/") and (
-            path.startswith(("environment/", "configs/training/"))
-            or dependency_file(path)
+            path.startswith(("environment/", "configs/training/", ".devcontainer/"))
+            or path in SHARED_FILES or dependency_file(path)
         )
     ]
     if protected and not owner_change:
@@ -136,7 +180,7 @@ def check(snapshot, changed, author, owner):
         baseline = json.loads(snapshot.read(BASELINE))
     except (ValueError, UnicodeError) as exc:
         raise PolicyError(f"Invalid {BASELINE}: {exc}") from exc
-    if not isinstance(baseline, dict) or baseline.get("schema_version") != 1:
+    if not isinstance(baseline, dict) or baseline.get("schema_version") not in {1, 2}:
         raise PolicyError("Unsupported environment baseline schema.")
     state = baseline.get("state")
     code = sorted(path for path in snapshot.files if experiment_code(path))
@@ -146,21 +190,26 @@ def check(snapshot, changed, author, owner):
         return {"state": "pending", "message": "Structure/documentation changes only; no experimental environment has been frozen.", "python_files": 0, "dynamic_imports": []}
     if state != "frozen":
         raise PolicyError("Environment state must be pending or frozen.")
-    if not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", baseline.get("image", "")):
-        raise PolicyError("The frozen image must include an immutable @sha256 digest.")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:[A-Za-z0-9.+-]+)?", baseline.get("python", "")):
         raise PolicyError("Set the exact Python version, including the patch version.")
-    if not re.fullmatch(r"\d+[A-Za-z0-9_.+-]*", baseline.get("cann", "")):
-        raise PolicyError("Set an explicit CANN version.")
+    if baseline["schema_version"] == 1:
+        if not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", baseline.get("image", "")):
+            raise PolicyError("The frozen image must include an immutable @sha256 digest.")
+        if not re.fullmatch(r"\d+[A-Za-z0-9_.+-]*", baseline.get("cann", "")):
+            raise PolicyError("Set an explicit CANN version.")
     if LOCKFILE not in snapshot.files:
         raise PolicyError(f"Missing {LOCKFILE}.")
     locked = parse_lock(snapshot.read(LOCKFILE))
     if not locked:
         raise PolicyError("The frozen dependency lock is empty.")
+    if baseline["schema_version"] == 2:
+        check_cpu_container(snapshot, baseline, locked)
 
     extra = sorted(
         path for path in snapshot.files
-        if not path.startswith(("archive/", "environment/", *INFRA)) and dependency_file(path)
+        if not path.startswith(("archive/", "environment/", *INFRA))
+        and path not in {"compose.yaml", ".devcontainer/devcontainer.json"}
+        and dependency_file(path)
     )
     if extra:
         raise PolicyError("Use the shared environment instead of separate dependency/Docker files: " + ", ".join(extra))

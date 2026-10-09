@@ -4,3 +4,8 @@
 /.github/ @meiyou666
 /scripts/ci/ @meiyou666
 /tests/ci/ @meiyou666
+/.devcontainer/ @meiyou666
+/compose.yaml @meiyou666
+/.dockerignore @meiyou666
+/AGENTS.md @meiyou666
+/.gitattributes @meiyou666

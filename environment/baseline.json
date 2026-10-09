@@ -1,8 +1,23 @@
 {
-  "schema_version": 1,
-  "state": "pending",
-  "image": "",
-  "python": "",
-  "cann": "",
-  "import_map": {}
+  "schema_version": 2,
+  "state": "frozen",
+  "profile": "cpu-development",
+  "base_image": "python:3.11.17-bookworm@sha256:5887f265d8d44d8b4734d3658b21d668edf5aaf92e4945bc0c984afbfab105d3",
+  "platform": "linux/amd64",
+  "python": "3.11.17",
+  "import_map": {
+    "yaml": "PyYAML",
+    "PIL": "pillow",
+    "dateutil": "python-dateutil"
+  },
+  "accelerator": {
+    "backend": "ascend",
+    "state": "pending",
+    "device": null,
+    "driver": null,
+    "firmware": null,
+    "cann": null,
+    "pytorch": null,
+    "torch_npu": null
+  }
 }

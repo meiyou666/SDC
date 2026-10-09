@@ -2,7 +2,17 @@
 
 团队协作开展 SDC 统一评测、算法研究与系统实现的仓库。
 
-当前仅初始化目录与协作入口。公共环境版本、训练配置和算法实现由后续任务逐项补充。
+公共 CPU 开发容器已配置。团队使用相同的 Python、依赖和测试工具开展前期开发，昇腾平台和训练基准待硬件确定后统一补充。
+
+## 开始开发
+
+安装 Docker 后，在仓库根目录执行：
+
+```bash
+docker compose run --build --rm dev
+```
+
+也可以用 VS Code 的 **Dev Containers: Reopen in Container**。容器使用 Python 3.11.17，包含 NumPy、SciPy、pandas、Matplotlib 和测试工具。版本、使用方法及环境维护说明见 [`environment/README.md`](environment/README.md)。
 
 ## 目录
 
@@ -39,11 +49,9 @@
 
 ## 环境一致性检查
 
-CI 检查公共环境与训练配置是否被擅自改动、依赖是否固定，以及 Python 显式导入是否属于标准库、本项目或锁定的依赖。
+CI 检查环境与训练配置的维护权限、依赖锁定和 Python 导入，并实际构建公共容器，在其中核对安装版本、运行测试和基础数值检查。
 
-当前环境基线为 `pending`，允许文档和结构调整；实验代码需要先由维护人填写镜像与版本，并将基线设为 `frozen`。填写入口见 [`environment/README.md`](environment/README.md)。
-
-CI 做配置和静态依赖检查，不在 GitHub 执行 NPU 训练，也不替代真实服务器上的驱动、固件和运行结果检查。
+CPU 开发环境已冻结，可以开始算法与评测工具开发。NPU 相关版本仍待配置；当前 CI 不执行 NPU 训练。Codex 的项目约定和自动审查重点见 [`AGENTS.md`](AGENTS.md)。
 
 ## 历史材料
 

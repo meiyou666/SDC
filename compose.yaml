@@ -1,0 +1,16 @@
+services:
+  dev:
+    image: sdc-dev:py311
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: environment/docker/Dockerfile
+    init: true
+    working_dir: /workspace/SDC
+    volumes:
+      - .:/workspace/SDC
+    environment:
+      PYTHONPATH: /workspace/SDC/src
+    stdin_open: true
+    tty: true
+    command: ["bash"]
