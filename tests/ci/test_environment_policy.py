@@ -19,19 +19,41 @@ class Snapshot:
         return self.content[path]
 
 
+def uv_lock(packages=None):
+    packages = packages if packages is not None else [("numpy", "2.4.0"), ("torch-npu", "2.5.1"), ("PyYAML", "6.0.3")]
+    text = 'version = 1\n[[package]]\nname = "sdc"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+    for name, version in packages:
+        text += f'\n[[package]]\nname = "{name}"\nversion = "{version}"\nsource = {{ registry = "https://pypi.org/simple" }}\nwheels = [{{ url = "https://example.invalid/pkg.whl", hash = "sha256:{"b" * 64}" }}]\n'
+    return text
+
+
 def snapshot(state="frozen", extra=None, **baseline_changes):
     baseline = {
-        "schema_version": 1,
+        "schema_version": 3,
         "state": state,
-        "image": "example.invalid/sdc@sha256:" + "a" * 64,
-        "python": "3.11.9",
-        "cann": "9.0.0",
+        "profile": "cpu-development",
+        "platform": "linux/amd64",
+        "base_image": "python:3.11.17-bookworm@sha256:" + "a" * 64,
+        "uv_image": "ghcr.io/astral-sh/uv:0.12.24@sha256:" + "c" * 64,
+        "python": "3.11.17",
+        "uv": "0.12.24",
+        "accelerator": {"backend": "ascend", "state": "pending"},
         "import_map": {},
     }
     baseline.update(baseline_changes)
     files = {
         policy.BASELINE: json.dumps(baseline),
-        policy.LOCKFILE: "numpy==2.1.0\ntorch-npu==2.5.1\nPyYAML==6.0.2\n",
+        policy.LOCKFILE: uv_lock(),
+        policy.PROJECT: '[project]\nname = "sdc"\nversion = "0.1.0"\nrequires-python = ">=3.11,<3.12"\n[tool.uv]\npackage = false\nrequired-version = "==' + baseline['uv'] + '"\n',
+        ".python-version": baseline["python"] + "\n",
+        "environment/docker/Dockerfile": f"FROM {baseline['uv_image']} AS uv\nFROM {baseline['base_image']} AS tooling\nFROM tooling AS development\nRUN uv sync --locked --all-groups\n",
+        ".devcontainer/devcontainer.json": json.dumps({"dockerComposeFile": "../compose.yaml", "service": "dev"}),
+        "compose.yaml": "services: {}",
+        ".dockerignore": "archive/",
+        "environment/verify_environment.py": "",
+        "environment/docker/entrypoint.sh": "",
+        "dev.cmd": "",
+        "dev.sh": "",
     }
     files.update(extra or {})
     return Snapshot(files)
@@ -71,7 +93,7 @@ class EnvironmentPolicyTests(unittest.TestCase):
 
     def test_owner_does_not_skip_validity_checks(self):
         with self.assertRaisesRegex(policy.PolicyError, "immutable"):
-            self.run_check(snapshot(image="example.invalid/sdc:latest"), [policy.BASELINE], "owner")
+            self.run_check(snapshot(base_image="example.invalid/sdc:latest"), [policy.BASELINE], "owner")
 
     def test_missing_or_invalid_baseline_fails(self):
         for files in [{}, {policy.BASELINE: "bad json"}, {policy.BASELINE: "[]"}]:
@@ -79,18 +101,32 @@ class EnvironmentPolicyTests(unittest.TestCase):
                 self.run_check(Snapshot(files))
 
     def test_versions_are_explicit(self):
-        for updates in [{"python": "3.11"}, {"cann": "latest"}, {"state": "disabled"}]:
+        for updates in [{"python": "3.11"}, {"uv": "latest"}, {"state": "disabled"}]:
             with self.subTest(updates=updates), self.assertRaises(policy.PolicyError):
                 self.run_check(snapshot(**updates))
 
     def test_unpinned_conflicting_or_empty_locks_fail(self):
-        for lock in ["numpy>=2", "numpy==2.*", "numpy==2.0\nnumpy==2.1", "# empty"]:
+        for lock in ["numpy>=2", uv_lock([("numpy", "2.*")]), uv_lock([("numpy", "2.0"), ("numpy", "2.1")]), uv_lock([])]:
             with self.subTest(lock=lock), self.assertRaises(policy.PolicyError):
                 self.run_check(snapshot(extra={policy.LOCKFILE: lock}))
 
-    def test_lock_supports_hashes_and_public_index(self):
-        text = "--index-url https://example.invalid/simple\nnumpy==2.1.0 \\\n  --hash=sha256:abcd\n"
-        self.assertEqual(policy.parse_lock(text), {"numpy": "2.1.0"})
+    def test_native_lock_skips_virtual_project_and_normalizes_names(self):
+        self.assertEqual(policy.parse_lock(uv_lock()), {"numpy": "2.4.0", "torch-npu": "2.5.1", "pyyaml": "6.0.3"})
+
+    def test_root_uv_files_are_owner_managed(self):
+        for name in ["uv.lock", "pyproject.toml", ".python-version", "dev.cmd", "dev.sh"]:
+            with self.subTest(name=name), self.assertRaisesRegex(policy.PolicyError, "Only the repository owner"):
+                self.run_check(snapshot(), [name])
+
+    def test_python_pin_must_match_baseline(self):
+        with self.assertRaisesRegex(policy.PolicyError, ".python-version"):
+            self.run_check(snapshot(extra={".python-version": "3.12.0\n"}))
+
+    def test_uv_version_pin_must_match_baseline(self):
+        state = snapshot()
+        state.content[policy.PROJECT] = state.content[policy.PROJECT].replace("0.12.24", "0.12.23")
+        with self.assertRaisesRegex(policy.PolicyError, "required-version"):
+            self.run_check(state)
 
     def test_stdlib_locked_and_local_imports_pass(self):
         state = snapshot(extra={"src/training/__init__.py": "", "src/main.py": "import json\nimport numpy\nimport torch_npu\nfrom training import core\n"})

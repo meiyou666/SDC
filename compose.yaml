@@ -5,6 +5,7 @@ services:
     build:
       context: .
       dockerfile: environment/docker/Dockerfile
+      target: development
     init: true
     working_dir: /workspace/SDC
     volumes:
@@ -14,3 +15,16 @@ services:
     stdin_open: true
     tty: true
     command: ["bash"]
+  tools:
+    image: sdc-uv-tools:py311
+    profiles: ["tools"]
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: environment/docker/Dockerfile
+      target: tooling
+    working_dir: /workspace/SDC
+    volumes:
+      - .:/workspace/SDC
+    entrypoint: ["uv"]
+    command: ["lock", "--check"]

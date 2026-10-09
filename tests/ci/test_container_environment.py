@@ -1,56 +1,25 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
+from unittest import mock
+
+from test_environment_policy import policy, snapshot, uv_lock
 
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-policy = load("container_policy", ROOT / "scripts/ci/check_environment.py")
-runtime = load("container_runtime", ROOT / "environment/verify_environment.py")
-
-
-class Snapshot:
-    def __init__(self, content):
-        self.content = content
-        self.files = set(content)
-
-    def read(self, path):
-        return self.content[path]
+spec = importlib.util.spec_from_file_location("container_runtime", ROOT / "environment/verify_environment.py")
+runtime = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runtime)
 
 
 def cpu_snapshot(**updates):
-    baseline = {
-        "schema_version": 2,
-        "state": "frozen",
-        "profile": "cpu-development",
-        "platform": "linux/amd64",
-        "python": "3.11.17",
-        "base_image": "python:3.11.17-bookworm@sha256:" + "a" * 64,
-        "accelerator": {"backend": "ascend", "state": "pending"},
-        "import_map": {},
-    }
-    baseline.update(updates)
-    content = {
-        policy.BASELINE: json.dumps(baseline),
-        policy.LOCKFILE: "numpy==2.4.0 \\\n    --hash=sha256:" + "b" * 64 + "\n",
-        "environment/docker/Dockerfile": f"FROM {baseline['base_image']}\nRUN pip install --require-hashes --no-deps\n",
-        ".devcontainer/devcontainer.json": json.dumps({"dockerComposeFile": "../compose.yaml", "service": "dev"}),
-        "compose.yaml": "services: {}",
-        ".dockerignore": "archive/",
-        "environment/verify_environment.py": "",
-        "environment/docker/entrypoint.sh": "",
-    }
-    return Snapshot(content)
+    state = snapshot(**updates)
+    state.content[policy.LOCKFILE] = uv_lock([("numpy", "2.4.0")])
+    return state
 
 
 class ContainerPolicyTests(unittest.TestCase):
@@ -58,9 +27,7 @@ class ContainerPolicyTests(unittest.TestCase):
         return policy.check(state, list(changed), author, "owner")
 
     def test_cpu_code_is_allowed_before_accelerator_is_available(self):
-        state = cpu_snapshot()
-        state.content["src/example.py"] = "import numpy\n"
-        state.files.add("src/example.py")
+        state = cpu_snapshot(extra={"src/example.py": "import numpy\n"})
         self.assertEqual(self.check(state)["python_files"], 1)
 
     def test_member_cannot_change_shared_container_or_agent_rules(self):
@@ -81,21 +48,18 @@ class ContainerPolicyTests(unittest.TestCase):
             self.check(cpu_snapshot(accelerator={"backend": "ascend", "state": "frozen"}))
 
     def test_docker_base_must_match_manifest(self):
-        state = cpu_snapshot()
-        state.content["environment/docker/Dockerfile"] = "FROM python:latest\n"
+        state = cpu_snapshot(extra={"environment/docker/Dockerfile": "FROM python:latest\n"})
         with self.assertRaisesRegex(policy.PolicyError, "Dockerfile FROM"):
             self.check(state)
 
     def test_dependency_artifact_hash_is_required(self):
-        for value in ["numpy==2.4.0\n", "numpy==2.4.0 --hash=sha256:abcd\n"]:
-            state = cpu_snapshot()
-            state.content[policy.LOCKFILE] = value
-            with self.subTest(value=value), self.assertRaisesRegex(policy.PolicyError, "SHA256"):
-                self.check(state)
+        state = cpu_snapshot()
+        state.content[policy.LOCKFILE] = state.content[policy.LOCKFILE].replace("b" * 64, "abcd")
+        with self.assertRaisesRegex(policy.PolicyError, "SHA256"):
+            self.check(state)
 
     def test_devcontainer_cannot_use_a_separate_environment(self):
-        state = cpu_snapshot()
-        state.content[".devcontainer/devcontainer.json"] = json.dumps({"image": "python:latest"})
+        state = cpu_snapshot(extra={".devcontainer/devcontainer.json": json.dumps({"image": "python:latest"})})
         with self.assertRaisesRegex(policy.PolicyError, "shared Compose"):
             self.check(state)
 
@@ -110,9 +74,7 @@ class ContainerPolicyTests(unittest.TestCase):
             self.check(cpu_snapshot(), ["experiments/compose.yaml"])
 
     def test_import_of_unconfigured_npu_library_is_rejected(self):
-        state = cpu_snapshot()
-        state.content["src/example.py"] = "import torch_npu\n"
-        state.files.add("src/example.py")
+        state = cpu_snapshot(extra={"src/example.py": "import torch_npu\n"})
         with self.assertRaisesRegex(policy.PolicyError, "Imports outside"):
             self.check(state)
 
@@ -121,41 +83,53 @@ class RuntimeEnvironmentTests(unittest.TestCase):
     def setUp(self):
         self.baseline = json.loads(cpu_snapshot().read(policy.BASELINE))
 
-    def errors(self, installed, python="3.11.17", system="Linux", machine="x86_64"):
-        return runtime.differences(self.baseline, {"numpy": "2.4.0"}, installed, python, system, machine)
+    def errors(self, python="3.11.17", system="Linux", machine="x86_64", uv="0.12.24"):
+        return runtime.differences(self.baseline, python, system, machine, uv)
 
     def test_matching_runtime_passes(self):
-        self.assertEqual(self.errors({"numpy": "2.4.0"}), [])
-
-    def test_version_drift_is_reported(self):
-        self.assertTrue(any("expected 2.4.0" in x for x in self.errors({"numpy": "2.3.0"})))
-
-    def test_extra_and_missing_packages_are_reported(self):
-        errors = self.errors({"requests": "2.32.0"})
-        self.assertTrue(any("not installed" in x for x in errors))
-        self.assertTrue(any("Unlocked installed" in x for x in errors))
+        self.assertEqual(self.errors(), [])
 
     def test_python_patch_version_is_checked(self):
-        self.assertTrue(any("Python:" in x for x in self.errors({"numpy": "2.4.0"}, python="3.11.5")))
+        self.assertTrue(any("Python:" in x for x in self.errors(python="3.11.5")))
 
     def test_architecture_is_checked(self):
-        self.assertTrue(any("Platform:" in x for x in self.errors({"numpy": "2.4.0"}, machine="aarch64")))
+        self.assertTrue(any("Platform:" in x for x in self.errors(machine="aarch64")))
 
-    def test_hashed_lock_parsing_and_distribution_names(self):
-        text = "# generated\nPyYAML==6.0.3 \\\n    --hash=sha256:" + "a" * 64 + "\nnumpy==2.4.0\n"
-        self.assertEqual(runtime.locked_versions(text), {"pyyaml": "6.0.3", "numpy": "2.4.0"})
+    def test_uv_version_is_checked(self):
+        self.assertTrue(any("uv:" in x for x in self.errors(uv="0.12.23")))
 
-    def test_changed_base_image_manifest_requires_rebuild(self):
+    def test_native_uv_failure_is_propagated(self):
+        result = subprocess.CompletedProcess([], 1, "", "Environment is not synchronized")
+        with mock.patch.object(runtime.subprocess, "run", return_value=result) as run:
+            with self.assertRaisesRegex(ValueError, "not synchronized"):
+                runtime.check_uv_environment(Path("/project"))
+            self.assertIn("--locked", run.call_args.args[0])
+            self.assertIn("--check", run.call_args.args[0])
+
+    def test_changed_image_or_lock_requires_rebuild(self):
+        for changed in ["environment/baseline.json", "uv.lock", "pyproject.toml", ".python-version"]:
+            with self.subTest(changed=changed), tempfile.TemporaryDirectory() as directory:
+                roots = [Path(directory) / "current", Path(directory) / "baked"]
+                for root in roots:
+                    (root / "environment").mkdir(parents=True)
+                    for name in ["environment/baseline.json", "uv.lock", "pyproject.toml", ".python-version"]:
+                        (root / name).write_text("same\n")
+                (roots[0] / changed).write_text("changed\n")
+                with self.assertRaisesRegex(ValueError, "files used to build"):
+                    runtime.verify_baked_files(*roots)
+
+    def test_uv_rejects_stale_project_lock(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            baked = root / "baked"
-            (baked / "dependencies").mkdir(parents=True)
-            (baked / "baseline.json").write_text('{"base_image": "old"}')
-            (baked / "dependencies/requirements.lock").write_text("numpy==2.4.0\n")
-            current = root / "baseline.json"
-            current.write_text('{"base_image": "new"}')
-            with self.assertRaisesRegex(ValueError, "files used to build"):
-                runtime.verify_baked_files(current, baked / "dependencies/requirements.lock", baked)
+            project = root / "pyproject.toml"
+            project.write_text('[project]\nname = "probe"\nversion = "0.1.0"\nrequires-python = ">=3.11,<3.12"\ndependencies = []\n[tool.uv]\npackage = false\n')
+            env = dict(os.environ, UV_PROJECT_ENVIRONMENT=str(root / ".venv"))
+            command = ["uv", "lock", "--offline", "--project", str(root)]
+            subprocess.run(command, env=env, check=True, capture_output=True, text=True)
+            subprocess.run(command + ["--check"], env=env, check=True, capture_output=True, text=True)
+            project.write_text(project.read_text().replace("dependencies = []", 'dependencies = ["numpy==2.4.6"]'))
+            result = subprocess.run(command + ["--check"], env=env, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

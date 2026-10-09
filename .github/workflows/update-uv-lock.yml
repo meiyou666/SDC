@@ -15,48 +15,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Generate the native lock inside Docker
+      - name: Update native lock inside Docker
         run: |
-          mkdir -p .uv-bootstrap
-          cat > .uv-bootstrap/pyproject.toml <<'EOF'
-          [project]
-          name = "sdc"
-          version = "0.1.0"
-          description = "ABFT research and evaluation workspace"
-          requires-python = ">=3.11,<3.12"
-          dependencies = [
-              "numpy==2.4.6",
-              "scipy==1.17.1",
-              "pandas==3.0.6",
-              "matplotlib==3.11.2",
-              "PyYAML==6.0.3",
-          ]
-
-          [dependency-groups]
-          dev = ["pytest==9.1.1", "ruff==0.16.10"]
-
-          [tool.uv]
-          package = false
-          required-version = "==0.12.24"
-          environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
-          EOF
-          cat > .uv-bootstrap/Dockerfile <<'EOF'
-          FROM ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a AS uv
-          FROM python:3.11.17-bookworm@sha256:5887f265d8d44d8b4734d3658b21d668edf5aaf92e4945bc0c984afbfab105d3
-          COPY --from=uv /uv /uvx /usr/local/bin/
-          ENV UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/local/bin/python
-          WORKDIR /project
-          EOF
-          docker build --platform linux/amd64 -t sdc-uv-lock .uv-bootstrap
-          docker run --rm -v "$PWD/.uv-bootstrap:/project" sdc-uv-lock uv lock
-          docker run --rm -v "$PWD/.uv-bootstrap:/project" sdc-uv-lock uv lock --check
-          docker run --rm sdc-uv-lock uv sync --help > .uv-bootstrap/uv-sync-help.txt
+          docker compose build tools
+          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock
+          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock --check
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: uv-lock
-          path: |
-            .uv-bootstrap/uv.lock
-            .uv-bootstrap/pyproject.toml
-            .uv-bootstrap/uv-sync-help.txt
+          path: uv.lock
           if-no-files-found: error
-          include-hidden-files: true

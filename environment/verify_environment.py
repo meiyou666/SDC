@@ -7,33 +7,18 @@ import io
 import json
 from pathlib import Path
 import platform
-import re
+import subprocess
 import sys
 
 
-def normalized(name):
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
-def locked_versions(text):
-    packages = {}
-    for line in text.splitlines():
-        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s\\]+)", line)
-        if match:
-            name, version = match.groups()
-            packages[normalized(name)] = version
-    if not packages:
-        raise ValueError("The dependency lock is empty.")
-    return packages
-
-
-def verify_baked_files(baseline_path, lock_path, baked_root):
-    for supplied, baked in ((baseline_path, baked_root / "baseline.json"), (lock_path, baked_root / "dependencies/requirements.lock")):
+def verify_baked_files(project, baked_root):
+    for relative in ("pyproject.toml", "uv.lock", ".python-version", "environment/baseline.json"):
+        supplied, baked = project / relative, baked_root / relative
         if supplied.resolve() != baked.resolve() and supplied.read_bytes() != baked.read_bytes():
             raise ValueError(f"{supplied.name} differs from the files used to build this image.")
 
 
-def differences(baseline, expected, installed, python_version, system, machine):
+def differences(baseline, python_version, system, machine, uv_version):
     errors = []
     if baseline.get("state") != "frozen" or baseline.get("profile") != "cpu-development":
         errors.append("Expected the frozen cpu-development profile.")
@@ -41,12 +26,18 @@ def differences(baseline, expected, installed, python_version, system, machine):
         errors.append(f"Python: expected {baseline.get('python')}, found {python_version}.")
     if baseline.get("platform") != "linux/amd64" or system != "Linux" or machine not in {"x86_64", "AMD64"}:
         errors.append(f"Platform: expected linux/amd64, found {system}/{machine}.")
-    for name, version in expected.items():
-        if installed.get(name) != version:
-            errors.append(f"{name}: expected {version}, found {installed.get(name, 'not installed')}.")
-    for name in sorted(set(installed) - set(expected)):
-        errors.append(f"Unlocked installed dependency: {name}=={installed[name]}.")
+    if uv_version != baseline.get("uv"):
+        errors.append(f"uv: expected {baseline.get('uv')}, found {uv_version}.")
     return errors
+
+
+def check_uv_environment(project):
+    result = subprocess.run(
+        ["uv", "sync", "--locked", "--check", "--offline", "--all-groups", "--project", str(project)],
+        capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or result.stdout.strip() or "uv environment check failed.")
 
 
 def smoke_test():
@@ -77,31 +68,27 @@ def smoke_test():
 
 
 def main():
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--baseline", type=Path, default=root / "baseline.json")
-    parser.add_argument("--lock", type=Path, default=root / "dependencies/requirements.lock")
+    parser.add_argument("--project", type=Path, default=root)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
     try:
-        verify_baked_files(args.baseline, args.lock, root)
-        baseline = json.loads(args.baseline.read_text())
-        expected = locked_versions(args.lock.read_text())
-        installed = {
-            normalized(dist.metadata["Name"]): dist.version
-            for dist in importlib.metadata.distributions()
-        }
-        errors = differences(baseline, expected, installed, platform.python_version(), platform.system(), platform.machine())
+        verify_baked_files(args.project, root)
+        baseline = json.loads((args.project / "environment/baseline.json").read_text())
+        uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
+        errors = differences(baseline, platform.python_version(), platform.system(), platform.machine(), uv_version)
         if errors:
             raise ValueError("\n".join(errors))
+        check_uv_environment(args.project)
         if args.smoke:
             smoke_test()
-    except (OSError, ValueError, ImportError, RuntimeError, AssertionError) as exc:
+    except (OSError, ValueError, ImportError, RuntimeError, AssertionError, subprocess.CalledProcessError) as exc:
         print(f"Environment verification failed:\n{exc}\nUse the shared container; rebuild it after environment updates.", file=sys.stderr)
         return 1
     if not args.quiet:
-        print(json.dumps({"profile": baseline["profile"], "python": baseline["python"], "packages": len(expected), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
+        print(json.dumps({"profile": baseline["profile"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
     return 0
 
 

@@ -1,69 +1,51 @@
 # 公共开发环境
 
-当前统一的是 **CPU 开发容器**，用于论文算法复现、小规模数值验证、测试和数据分析。基础环境已冻结，昇腾平台配置保持待定。
-
-| 项目 | 统一设置 |
+| 项目 | 设置 |
 |---|---|
-| 系统 | Debian 12，Linux amd64 |
-| Python | 3.11.17 |
-| 数值计算 | NumPy、SciPy |
-| 数据与绘图 | pandas、Matplotlib、PyYAML |
-| 开发工具 | pytest、Ruff、uv、pip，镜像内提供 Git 和 C/C++ 编译工具 |
-| 版本依据 | `baseline.json` 和 `dependencies/requirements.lock` |
-| 后续配置 | NPU 型号、驱动、固件、CANN、PyTorch、`torch_npu` |
+| 容器 | Debian 12，Linux amd64 |
+| Python | 3.11.17，固定在 `.python-version` |
+| uv | 0.12.24，工具镜像固定 digest |
+| 依赖声明 | 根目录 `pyproject.toml` |
+| 依赖锁定 | 根目录 `uv.lock` |
+| 后续平台 | 昇腾型号、驱动、固件、CANN、PyTorch 与 `torch_npu` 待统一配置 |
 
-基础镜像固定到 SHA256 digest，全部 Python 依赖固定版本并校验下载文件的哈希。容器不会在启动时自动更新软件。PyTorch 与 `torch_npu` 待硬件和 CANN 版本确定后配套加入。
+## 启动与执行
 
-## 成员开始开发
+Windows 在仓库目录运行 `dev.cmd`，Linux 运行 `./dev.sh`；也可使用 VS Code Dev Container。首次使用步骤见[项目 README](../README.md)。
 
-先安装 Docker Desktop，或 Docker Engine 与 Compose v2。Windows 建议使用 Docker Desktop 的 WSL2 后端。宿主机无需另外安装 Python 或项目依赖。
+容器通过 `uv sync --locked --all-groups` 安装依赖。启动时比较镜像与仓库配置，并通过 `uv sync --locked --check --offline --all-groups` 核对实际环境。
 
-### VS Code
-
-安装 Dev Containers 扩展，打开仓库，执行 **Dev Containers: Reopen in Container**。首次会构建镜像；编辑器使用 `/opt/venv/bin/python`，源码仍保存在本地仓库。
-
-### 命令行
-
-在仓库根目录执行：
-
-```bash
-docker compose run --build --rm dev
-```
-
-进入容器后可以直接运行：
+容器内执行：
 
 ```bash
 python environment/verify_environment.py --smoke
-python -m pytest -q
-ruff check .
+uv run --locked pytest -q
+uv run --locked ruff check .
 ```
 
-也可以在宿主机运行一次性任务：
+所有项目代码、依赖管理、测试与实验均在 Docker 中执行。宿主机用于编辑、Git 操作和启动容器。
+
+## 维护依赖
+
+由仓库拥有者修改依赖。下面的命令在宿主机调用 Docker，uv 实际运行在 `tools` 容器内：
 
 ```bash
-docker compose run --build --rm -T dev python -m pytest -q
+docker compose run --build --rm tools add --no-sync "包名==版本"
+docker compose run --build --rm tools lock --check
 ```
 
-容器默认以普通用户运行。Linux 宿主用户不是 UID 1000 时，命令行可使用 `docker compose run --build --rm --user "$(id -u):$(id -g)" -e HOME=/tmp dev`；VS Code 会自动匹配用户 UID。ARM 电脑使用相同的 amd64 容器，需要 Docker 支持架构模拟。
-
-## 环境更新
-
-成员在自己的分支开发，不自行安装或升级公共依赖。需要新依赖时交由维护人统一处理。拉取环境更新后重新构建容器；VS Code 使用 **Rebuild Container**。
-
-维护人修改 `dependencies/requirements.in` 后，在现有公共容器中重新生成完整依赖锁：
+开发工具使用 `add --dev --no-sync`。直接修改 `pyproject.toml` 后，执行：
 
 ```bash
-uv pip compile environment/dependencies/requirements.in \
-  --python-version 3.11.17 --python-platform x86_64-manylinux_2_36 \
-  --no-python-downloads \
-  --generate-hashes --only-binary :all: \
-  --output-file environment/dependencies/requirements.lock
+docker compose run --build --rm tools lock
 ```
 
-若导入名与发行包名不同，在 `baseline.json` 的 `import_map` 中补充映射。随后重新构建并运行环境验证、测试和 CI。Python 或基础镜像调整时，同时修改 `baseline.json` 与 Dockerfile。
+同时提交 `pyproject.toml` 和 `uv.lock`，再使用启动脚本重建开发容器。Python 版本调整时同步修改 `.python-version`、Dockerfile 和 `baseline.json`。导入名与发行包名不同的依赖，在 `import_map` 中登记。
 
-## CI 与运行校验
+Linux 用户 UID 不是 1000 时，运行上述维护命令需在 `tools` 前加 `--user "$(id -u):$(id -g)"`。`dev.sh` 会自动匹配当前用户。
 
-`Environment consistency` 强制检查公共环境的维护权限、固定版本和代码导入，并实际构建容器，在容器内核对安装版本、运行基础数值与绘图检查、测试及 Ruff。每次启动容器还会将实际 Python 和依赖版本与仓库基线比对，发现旧镜像或额外安装的包时退出并提示重建。
+## CI
 
-拿到计算平台后，由维护人补充昇腾环境并完成设备验证。CPU 测试用于算法和工具的正确性检查，NPU 上的数值路径、计时和性能结果另行测量。
+`Environment consistency` 在 Docker 内检查环境维护权限、导入依赖、原生锁文件与实际安装状态，并执行测试、绘图检查和 Ruff。锁文件与项目声明不一致时检查失败。
+
+维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。

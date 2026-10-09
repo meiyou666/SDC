@@ -9,3 +9,8 @@
 /.dockerignore @meiyou666
 /AGENTS.md @meiyou666
 /.gitattributes @meiyou666
+/pyproject.toml @meiyou666
+/uv.lock @meiyou666
+/.python-version @meiyou666
+/dev.cmd @meiyou666
+/dev.sh @meiyou666
