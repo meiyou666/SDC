@@ -6,6 +6,7 @@ COPY --from=uv /uv /uvx /usr/local/bin/
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONNOUSERSITE=1 \
+    UV_DEFAULT_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
     UV_PYTHON_DOWNLOADS=never \
     UV_PYTHON=/usr/local/bin/python \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
@@ -28,6 +29,8 @@ FROM tooling AS development
 ENV VIRTUAL_ENV=/opt/venv \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_PREFIX=/home/sdc/.local \
+    NPM_CONFIG_CACHE=/home/sdc/.cache/npm \
+    HF_HOME=/home/sdc/.cache/huggingface \
     PATH=/home/sdc/.local/bin:$PATH
 USER root
 RUN curl -fsSL --retry 3 https://registry.npmmirror.com/-/binary/node/v24.21.0/node-v24.21.0-linux-x64.tar.xz -o /tmp/sdc-node.tar.xz \
@@ -38,6 +41,18 @@ RUN curl -fsSL --retry 3 https://registry.npmmirror.com/-/binary/node/v24.21.0/n
     && npm cache clean --force \
     && chown -R sdc:sdc /home/sdc/.local \
     && install -d -m 0700 -o sdc -g sdc /home/sdc/.codex
+RUN sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       openssh-client rsync git git-lfs build-essential cmake ninja-build pkg-config \
+       gdb strace tmux htop procps psmisc lsof time \
+       iproute2 iputils-ping netcat-openbsd dnsutils \
+       ca-certificates curl wget aria2 jq ripgrep less file unzip zip xz-utils zstd \
+    && git lfs install --system \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -m 0700 -o sdc -g sdc /home/sdc/.ssh \
+    && mkdir -p /home/sdc/.cache \
+    && chown -R sdc:sdc /home/sdc/.cache
 WORKDIR /opt/sdc/project
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --locked --all-groups --no-build \
@@ -46,6 +61,7 @@ RUN uv sync --locked --all-groups --no-build \
 COPY environment/baseline.json environment/verify_environment.py ./environment/
 COPY environment/docker/entrypoint.sh /opt/sdc/entrypoint.sh
 COPY environment/docker/setup-codex.sh /opt/sdc/setup-codex.sh
+COPY environment/docker/codex-default.toml /opt/sdc/codex-default.toml
 RUN chmod 755 /opt/sdc/entrypoint.sh
 USER sdc
 RUN python environment/verify_environment.py --smoke

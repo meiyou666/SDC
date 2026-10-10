@@ -8,7 +8,8 @@
 | Node.js、npm | 初始安装 24.21.0、11.19.0，供 AI 工具使用 |
 | Codex CLI | 安装 latest，不锁版本 |
 | Codex 插件 | Dev Container 自动安装 `openai.chatgpt` |
-| Codex 服务地址 | `https://s2api.top` |
+| Codex 初始模型、审查模型 | `gpt-6-astra` |
+| Codex 服务地址 | `https://s2api.top/v1` |
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
@@ -36,13 +37,43 @@ uv run --locked ruff check .
 
 ## Codex 配置
 
-Codex 使用安装后的默认配置。
+首次启动从 `environment/docker/codex-default.toml` 初始化 Codex。模型和审查模型均为 `gpt-6-astra`，启用模型发现和 goals。已有个人配置不被覆盖，可自行增添插件、MCP 和 skills。
 
 根目录 `.env` 已预填服务地址，只需填写个人 `OPENAI_API_KEY`。容器启动时自动完成 API 密钥登录。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
 
 容器内执行 `codex`，或使用 VS Code 的 Codex 插件。CLI 更新命令：`npm install -g @openai/codex@latest`。
 
-AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检查或测试。额外依赖放在个人目录或独立环境，不修改项目的 `/opt/venv`。Dev Container 使用数据卷保留 `~/.codex` 和 `~/.local`。
+AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检查或测试。额外依赖放在个人目录或独立环境，不修改项目的 `/opt/venv`。两种启动入口均通过数据卷保存 `~/.codex`、`~/.local`、`~/.ssh` 和 `~/.cache`。
+
+## 实验工具
+
+| 用途 | 已安装工具 |
+|---|---|
+| 远程连接与传输 | SSH、SCP、SFTP、ssh-agent、rsync |
+| 代码与大文件 | Git、Git LFS |
+| C/C++ 编译 | GCC、G++、Make、CMake、Ninja、pkg-config |
+| 调试与进程管理 | GDB、strace、tmux、htop、lsof、time |
+| 下载与解压 | curl、wget、aria2、unzip、zip、xz、zstd |
+| 文件与配置处理 | ripgrep、jq、less |
+| 网络排查 | ip、ping、dig、nc |
+
+系统软件包使用清华 Debian 源。项目 Python 依赖仍由 `uv.lock` 管理。个人命令行工具可通过 `uv tool install 包名` 或 `npm install -g 包名` 安装到独立目录。
+
+共享内存设为 2 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
+
+## 连接远程服务器
+
+在容器终端使用：
+
+```bash
+ssh -p 22 用户名@服务器地址
+scp -P 22 results/summary.csv 用户名@服务器地址:~/
+rsync -avP -e "ssh -p 22" 用户名@服务器地址:~/results/ ./results/
+```
+
+SSH 密钥和连接配置放在持久化目录 `~/.ssh`。需要新密钥时运行 `ssh-keygen -t ed25519`，将生成的公钥配置到服务器。
+
+VS Code 自动转发容器的 6006 和 8888 端口。查看远程 TensorBoard 时可运行 `ssh -N -L 6006:127.0.0.1:6006 用户名@服务器地址`，然后在 VS Code 的端口面板打开 6006。
 
 ## 维护依赖
 

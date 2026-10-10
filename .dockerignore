@@ -9,3 +9,4 @@
 !environment/docker/Dockerfile
 !environment/docker/entrypoint.sh
 !environment/docker/setup-codex.sh
+!environment/docker/codex-default.toml

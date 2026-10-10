@@ -7,9 +7,14 @@ services:
       dockerfile: environment/docker/Dockerfile
       target: development
     init: true
+    shm_size: 2gb
     working_dir: /workspace/SDC
     volumes:
       - .:/workspace/SDC
+      - codex-state:/home/sdc/.codex
+      - ai-tools:/home/sdc/.local
+      - ssh-state:/home/sdc/.ssh
+      - download-cache:/home/sdc/.cache
     env_file:
       - path: .env
         required: false
@@ -31,3 +36,9 @@ services:
       - .:/workspace/SDC
     entrypoint: ["uv"]
     command: ["lock", "--check"]
+
+volumes:
+  codex-state:
+  ai-tools:
+  ssh-state:
+  download-cache:

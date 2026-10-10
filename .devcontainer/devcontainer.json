@@ -11,11 +11,18 @@
   "containerEnv": {
     "PYTHONPATH": "/workspace/SDC/src"
   },
-  "runArgs": ["--platform=linux/amd64", "--env-file", "${localWorkspaceFolder}/.env"],
+  "runArgs": ["--platform=linux/amd64", "--shm-size=2g", "--env-file", "${localWorkspaceFolder}/.env"],
   "mounts": [
     "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",
-    "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume"
+    "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume",
+    "source=sdc-ssh-${devcontainerId},target=/home/sdc/.ssh,type=volume",
+    "source=sdc-cache-${devcontainerId},target=/home/sdc/.cache,type=volume"
   ],
+  "forwardPorts": [6006, 8888],
+  "portsAttributes": {
+    "6006": {"label": "TensorBoard", "onAutoForward": "silent"},
+    "8888": {"label": "Jupyter", "onAutoForward": "silent"}
+  },
   "init": true,
   "remoteUser": "sdc",
   "updateRemoteUserUID": true,
