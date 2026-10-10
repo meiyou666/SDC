@@ -172,8 +172,18 @@ def check_cpu_container(snapshot, baseline, locked):
         dev = json.loads(snapshot.read(devcontainer))
     except ValueError as exc:
         raise PolicyError(f"Invalid Dev Container configuration: {exc}") from exc
-    if not isinstance(dev, dict) or dev.get("dockerComposeFile") != "../compose.yaml" or dev.get("service") != "dev":
-        raise PolicyError("Dev Container must use the shared Compose dev service.")
+    expected_build = {
+        "dockerfile": "../environment/docker/Dockerfile",
+        "context": "..",
+        "target": "development",
+    }
+    if (
+        not isinstance(dev, dict)
+        or "image" in dev or "dockerComposeFile" in dev
+        or not isinstance(dev.get("build"), dict)
+        or any(dev["build"].get(key) != value for key, value in expected_build.items())
+    ):
+        raise PolicyError("Dev Container must build the development target from the shared Dockerfile.")
 
 def check(snapshot, changed, author, owner):
     owner_change = bool(owner) and author.casefold() == owner.casefold()

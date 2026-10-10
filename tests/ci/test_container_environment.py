@@ -60,8 +60,22 @@ class ContainerPolicyTests(unittest.TestCase):
 
     def test_devcontainer_cannot_use_a_separate_environment(self):
         state = cpu_snapshot(extra={".devcontainer/devcontainer.json": json.dumps({"image": "python:latest"})})
-        with self.assertRaisesRegex(policy.PolicyError, "shared Compose"):
+        with self.assertRaisesRegex(policy.PolicyError, "shared Dockerfile"):
             self.check(state)
+
+    def test_devcontainer_cannot_change_dockerfile_context_or_target(self):
+        for key, value in [
+            ("dockerfile", "../experiments/Dockerfile"),
+            ("context", "../experiments"),
+            ("target", "tooling"),
+        ]:
+            with self.subTest(key=key):
+                state = cpu_snapshot()
+                config = json.loads(state.read(".devcontainer/devcontainer.json"))
+                config["build"][key] = value
+                state.content[".devcontainer/devcontainer.json"] = json.dumps(config)
+                with self.assertRaisesRegex(policy.PolicyError, "shared Dockerfile"):
+                    self.check(state)
 
     def test_missing_runtime_checker_is_rejected(self):
         state = cpu_snapshot()

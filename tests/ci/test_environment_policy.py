@@ -47,7 +47,11 @@ def snapshot(state="frozen", extra=None, **baseline_changes):
         policy.PROJECT: '[project]\nname = "sdc"\nversion = "0.1.0"\nrequires-python = ">=3.11,<3.12"\n[tool.uv]\npackage = false\nrequired-version = "==' + baseline['uv'] + '"\n',
         ".python-version": baseline["python"] + "\n",
         "environment/docker/Dockerfile": f"FROM {baseline['uv_image']} AS uv\nFROM {baseline['base_image']} AS tooling\nFROM tooling AS development\nRUN uv sync --locked --all-groups\n",
-        ".devcontainer/devcontainer.json": json.dumps({"dockerComposeFile": "../compose.yaml", "service": "dev"}),
+        ".devcontainer/devcontainer.json": json.dumps({"build": {
+            "dockerfile": "../environment/docker/Dockerfile",
+            "context": "..",
+            "target": "development",
+        }}),
         "compose.yaml": "services: {}",
         ".dockerignore": "archive/",
         "environment/verify_environment.py": "",

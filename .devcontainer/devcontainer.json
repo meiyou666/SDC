@@ -1,13 +1,22 @@
 {
   "name": "SDC",
-  "dockerComposeFile": "../compose.yaml",
-  "service": "dev",
-  "runServices": ["dev"],
+  "build": {
+    "dockerfile": "../environment/docker/Dockerfile",
+    "context": "..",
+    "target": "development",
+    "options": ["--platform=linux/amd64"]
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
   "workspaceFolder": "/workspace/SDC",
+  "containerEnv": {
+    "PYTHONPATH": "/workspace/SDC/src"
+  },
+  "runArgs": ["--platform=linux/amd64"],
+  "init": true,
   "remoteUser": "sdc",
   "updateRemoteUserUID": true,
   "overrideCommand": true,
-  "shutdownAction": "stopCompose",
+  "shutdownAction": "stopContainer",
   "postCreateCommand": "python environment/verify_environment.py --smoke",
   "customizations": {
     "vscode": {
