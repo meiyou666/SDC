@@ -34,7 +34,7 @@
    Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
    ```
 
-2. 安装完成后启动 Docker Desktop，重新打开 PowerShell，获取仓库：
+2. 安装完成后启动 Docker Desktop，重新打开 VS Code 和 PowerShell，获取仓库：
 
    ```powershell
    git clone https://github.com/meiyou666/SDC.git
