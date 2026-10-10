@@ -12,14 +12,17 @@
     "PYTHONPATH": "/workspace/SDC/src"
   },
   "runArgs": ["--platform=linux/amd64", "--env-file", "${localWorkspaceFolder}/.env"],
-  "mounts": ["source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume"],
+  "mounts": [
+    "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",
+    "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume"
+  ],
   "init": true,
   "remoteUser": "sdc",
   "updateRemoteUserUID": true,
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
-  "postCreateCommand": "python environment/codex/configure.py && python environment/verify_environment.py --smoke",
-  "postStartCommand": "python environment/codex/configure.py",
+  "postCreateCommand": "python environment/verify_environment.py --smoke",
+  "postStartCommand": "sh /opt/sdc/setup-codex.sh",
   "customizations": {
     "vscode": {
       "extensions": [

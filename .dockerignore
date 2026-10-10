@@ -5,9 +5,7 @@
 !environment/
 !environment/baseline.json
 !environment/verify_environment.py
-!environment/codex/
-!environment/codex/config.toml
-!environment/codex/configure.py
 !environment/docker/
 !environment/docker/Dockerfile
 !environment/docker/entrypoint.sh
+!environment/docker/setup-codex.sh

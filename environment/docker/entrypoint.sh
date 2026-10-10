@@ -12,6 +12,6 @@ if [ ! -w "${HOME:-/}" ]; then
     chmod 700 "$sdc_codex_state"
     export CODEX_HOME="$sdc_codex_state"
 fi
-python "$project_root/environment/codex/configure.py"
+sh /opt/sdc/setup-codex.sh
 
 exec "$@"

@@ -44,12 +44,11 @@ RUN uv sync --locked --all-groups --no-build \
     && touch /opt/venv/.lock \
     && chmod a+rw /opt/venv/.lock
 COPY environment/baseline.json environment/verify_environment.py ./environment/
-COPY environment/codex/ ./environment/codex/
 COPY environment/docker/entrypoint.sh /opt/sdc/entrypoint.sh
+COPY environment/docker/setup-codex.sh /opt/sdc/setup-codex.sh
 RUN chmod 755 /opt/sdc/entrypoint.sh
 USER sdc
-RUN python environment/codex/configure.py \
-    && python environment/verify_environment.py --smoke
+RUN python environment/verify_environment.py --smoke
 WORKDIR /workspace/SDC
 ENTRYPOINT ["/opt/sdc/entrypoint.sh"]
 CMD ["bash"]

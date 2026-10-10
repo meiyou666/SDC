@@ -5,7 +5,7 @@
 | 容器 | Debian 12，Linux amd64 |
 | Python | 3.11.17，固定在 `.python-version` |
 | uv | 0.12.24，工具镜像固定 digest |
-| Node.js、npm | 24.21.0、11.19.0 |
+| Node.js、npm | 初始安装 24.21.0、11.19.0，供 AI 工具使用 |
 | Codex CLI | 安装 latest，不锁版本 |
 | Codex 插件 | Dev Container 自动安装 `openai.chatgpt` |
 | Codex 服务地址 | `https://s2api.top` |
@@ -36,11 +36,13 @@ uv run --locked ruff check .
 
 ## Codex 配置
 
-公共设置在 `environment/codex/config.toml`。容器启动时自动生成当前用户的 `~/.codex/config.toml`。
+Codex 使用安装后的默认配置。
 
-个人 API 密钥写入根目录 `.env` 的 `OPENAI_API_KEY`，模型名按需填写 `CODEX_MODEL`。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
+根目录 `.env` 已预填服务地址，只需填写个人 `OPENAI_API_KEY`。容器启动时自动完成 API 密钥登录。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
 
 容器内执行 `codex`，或使用 VS Code 的 Codex 插件。CLI 更新命令：`npm install -g @openai/codex@latest`。
+
+AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检查或测试。额外依赖放在个人目录或独立环境，不修改项目的 `/opt/venv`。Dev Container 使用数据卷保留 `~/.codex` 和 `~/.local`。
 
 ## 维护依赖
 

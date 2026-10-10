@@ -14,7 +14,7 @@ Copy-Item .env.example .env
 
 随后选择下面一种环境方案。两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
-在 `.env` 中填写 `OPENAI_API_KEY`，按需填写 `CODEX_MODEL`。API 地址统一为 `https://s2api.top`。`.env` 只保存在本机。
+在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top`。Codex 使用默认配置，`.env` 只保存在本机。
 
 ### 方案一：WSL
 
@@ -52,6 +52,8 @@ Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像
 
 容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
 
+AI 工具、插件、MCP 和 skills 可自行扩展。个人 AI 依赖放在独立环境，项目实验继续使用统一的 `uv.lock`。Dev Container 保留个人 Codex 配置和 npm 全局工具。
+
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
 ## 2. 项目结构
@@ -59,11 +61,11 @@ Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像
 ```text
 SDC/
 ├── environment/
-│   ├── codex/                 # Codex 公共配置
 │   ├── docker/
 │   │   ├── Dockerfile             # 镜像构建
 │   │   ├── entrypoint.sh          # 容器启动
 │   │   ├── install-wsl-docker.sh  # WSL 安装 Docker，使用清华源
+│   │   ├── setup-codex.sh         # 读取 API 密钥并登录
 │   │   └── start-dev.ps1          # Windows 启动辅助
 │   ├── baseline.json          # 环境基线
 │   └── verify_environment.py  # 环境校验
