@@ -5,7 +5,7 @@ Set-Location -LiteralPath $sdcRoot
 
 $sdcDockerCommand = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $sdcDocker = if ($sdcDockerCommand) { $sdcDockerCommand.Source } else { $null }
-if (-not $sdcDocker) { throw "Docker CLI was not found. Open this project in a WSL or SSH environment with Docker Engine." }
+if (-not $sdcDocker) { throw "Docker CLI was not found. Complete the Windows setup in README, then reopen PowerShell." }
 $env:Path = (Split-Path $sdcDocker -Parent) + ";" + $env:Path
 
 # Docker's registry client does not read Windows system proxy settings itself.

@@ -7,15 +7,14 @@
 | uv | 0.12.24，工具镜像固定 digest |
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
-| 后续平台 | 昇腾型号、驱动、固件、CANN、PyTorch 与 `torch_npu` 待统一配置 |
 
 ## 启动与执行
 
-通过 VS Code 的 WSL 或 Remote - SSH 连接配置了 Docker Engine 的主机，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。首次使用步骤见[项目 README](../README.md)。
+按[项目 README](../README.md)选择 WSL 或 Windows 方案，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。
 
-终端入口：Linux/WSL 使用 `./dev.sh`；Windows 已配置 Docker CLI 和引擎连接时使用 `dev.cmd`。仓库不绑定 Docker Desktop。
+终端启动：WSL 使用 `./dev.sh`，Windows PowerShell 使用 `.\dev.cmd`。
 
-容器通过 `uv sync --locked --all-groups` 安装依赖。启动时比较镜像与仓库配置，并通过 `uv sync --locked --check --offline --all-groups` 核对实际环境。
+容器通过 `uv sync --locked --all-groups` 安装锁定的依赖。
 
 容器内执行：
 
@@ -44,10 +43,10 @@ docker compose run --build --rm tools lock
 
 同时提交 `pyproject.toml` 和 `uv.lock`，再使用启动脚本重建开发容器。Python 版本调整时同步修改 `.python-version`、Dockerfile 和 `baseline.json`。导入名与发行包名不同的依赖，在 `import_map` 中登记。
 
-Linux 用户 UID 不是 1000 时，运行上述维护命令需在 `tools` 前加 `--user "$(id -u):$(id -g)"`。`dev.sh` 会自动匹配当前用户。
+WSL 运行维护命令时，在 `tools` 前添加 `--user "$(id -u):$(id -g)"`，以当前用户写入文件。`dev.sh` 已包含该设置。
 
 ## CI
 
-`Environment consistency` 在 Docker 内检查环境维护权限、导入依赖、原生锁文件与实际安装状态，并执行测试、绘图检查和 Ruff。锁文件与项目声明不一致时检查失败。
+GitHub Actions 在项目容器中运行锁文件检查、测试和 Ruff。
 
 维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。

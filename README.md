@@ -2,49 +2,54 @@
 
 ## 1. 配置开发容器
 
-### VS Code 与 Docker 引擎
+两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
-VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。扩展提供容器操作入口，后台仍需 Docker Engine。
+### 方案一：WSL
 
-Windows 使用 **WSL + Docker Engine** 或 **远程 Linux + Docker Engine**。前者通过 VS Code 的 WSL 扩展连接，后者通过 Remote - SSH 连接。仓库不依赖 Docker Desktop。
+1. 在管理员 PowerShell 执行 `wsl --install -d Ubuntu-24.04`，按提示重启并完成 Ubuntu 用户初始化。
+2. 在 Ubuntu 终端安装 Docker Engine 和 Git：
 
-**Ubuntu 24.04 后端**
+   ```bash
+   sudo apt update
+   sudo apt install -y docker.io docker-compose-v2 git
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker "$USER"
+   ```
 
-在所选的 WSL 或 Linux 主机中安装 Docker Engine：
+3. 退出并重新进入 Ubuntu，在 Ubuntu 终端获取仓库：
 
-```bash
-sudo apt update
-sudo apt install -y docker.io docker-compose-v2 git
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-```
+   ```bash
+   git clone https://github.com/meiyou666/SDC.git
+   cd SDC
+   ```
 
-注销并重新登录，使用户组生效。
+4. VS Code 安装 **WSL** 扩展，连接 Ubuntu，打开仓库中的 [`SDC.code-workspace`](SDC.code-workspace)。
+5. 执行 **Dev Containers: Reopen in Container**。终端启动命令为 `./dev.sh`。
 
-### 获取仓库并启动
+### 方案二：Windows
 
-在所选的 WSL 或 Linux 主机上获取仓库：
+1. 安装 [Git for Windows](https://git-scm.com/downloads/win)，下载 [Docker Desktop 安装程序](https://docs.docker.com/desktop/setup/install/windows-install/)。在安装包所在目录打开 PowerShell，使用 Docker VMM 后端安装：
 
-```bash
-git clone https://github.com/meiyou666/SDC.git
-cd SDC
-```
+   ```powershell
+   Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
+   ```
 
-在已连接该主机的 VS Code 窗口中：
+2. 安装完成后启动 Docker Desktop，重新打开 PowerShell，获取仓库：
 
-1. 打开 [`SDC.code-workspace`](SDC.code-workspace)。
-2. 按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**。
-3. 等待构建完成，在容器终端中开发；Python 自动使用 `/opt/venv/bin/python`。
+   ```powershell
+   git clone https://github.com/meiyou666/SDC.git
+   cd SDC
+   ```
 
-依赖由 `pyproject.toml` 和 `uv.lock` 管理，构建使用 `uv sync --locked`。在容器内验证：
+3. 在 Docker Desktop 的 **Settings** 完成以下设置，然后点击 **Apply & restart**：
 
-```bash
-python environment/verify_environment.py --smoke
-```
+   - **General → Virtual Machine Manager**：选择 **Docker VMM**。
+   - **Resources**：分配至少 4 GB 内存。
+   - **Resources → File sharing**：添加仓库目录。
 
-源码保存在所选主机的仓库目录。环境更新后执行 **Dev Containers: Rebuild Container**。
+4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**。PowerShell 启动命令为 `.\dev.cmd`。
 
-终端入口仍可使用：Linux/WSL 运行 `./dev.sh`；Windows 已配置 Docker CLI 和引擎连接时运行 `dev.cmd`。脚本会构建并进入容器。其他设置见[环境说明](environment/README.md)。
+进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
@@ -61,7 +66,7 @@ SDC/
 │   └── verify_environment.py  # 环境校验
 ├── compose.yaml               # 命令行容器入口
 ├── dev.cmd                    # Windows 启动脚本
-├── dev.sh                     # Linux 启动脚本
+├── dev.sh                     # WSL 启动脚本
 ├── pyproject.toml             # 项目依赖声明
 ├── uv.lock                    # uv 原生锁文件
 ├── .python-version            # Python 版本
@@ -104,7 +109,7 @@ git config user.name "你的名字"
 git config user.email "你的 GitHub 邮箱"
 ```
 
-GitHub CLI 可选。Windows 可用 Git for Windows 的凭据管理器登录，或使用 GitHub Desktop、VS Code。命令行 HTTPS 认证可使用个人访问令牌；也可[配置 SSH](https://docs.github.com/zh/authentication/connecting-to-github-with-ssh)，将远端改为 `git@github.com:meiyou666/SDC.git`。
+通过 VS Code、GitHub Desktop 或 Git 命令行提交。HTTPS 使用凭据管理器或个人访问令牌认证；使用 [SSH](https://docs.github.com/zh/authentication/connecting-to-github-with-ssh) 时，将远端设为 `git@github.com:meiyou666/SDC.git`。
 
 **开始任务**：将 `name/task` 换成自己的分支名。
 
@@ -114,7 +119,7 @@ git pull --ff-only
 git switch -c name/task
 ```
 
-**完成后在容器内验证**：
+**在容器内运行测试**：
 
 ```bash
 uv run --locked pytest -q

@@ -3,6 +3,7 @@
 ## 项目约定
 
 - 本仓库用于 ABFT 算法复现、统一评测和昇腾算子实现。
+- README 和环境说明使用简洁中文，直接写配置步骤、项目结构与协作流程，不加入审计性说明或方法可行范围论述。
 - 仓库拥有者可直接修改和提交 `main`，不要求新建分支或 PR。其他成员在个人分支开发，通过 CI 和审核后合并。Issue 按需使用。
 - 公共环境、训练配置、CI 和本文件由 `meiyou666` 维护。不要另建依赖清单、换用其他镜像或绕过 CI；新增依赖先与维护人沟通。维护人明确安排的环境调整可以直接执行。
 - `archive/` 保留历史材料，日常开发不修改、不导入其中的旧实现。模型、数据和完整实验输出放在 `data/`、`results/`，不提交到 Git。
@@ -11,7 +12,7 @@
 
 - **项目代码、依赖解析与安装、测试、实验、绘图和基准测量必须在项目 Docker 容器中执行。禁止使用 Agent 所在的本地 Python、pip、uv、Conda 或其他本地虚拟环境代跑。**
 - 宿主机仅用于文件编辑、静态查看、Git/GitHub 操作以及 Docker 的安装和调用。
-- 优先通过 VS Code Dev Container 开发，Docker Engine 位于 WSL 或远程 Linux。Linux/WSL 可用 `./dev.sh`；已配置 Docker CLI 和引擎连接的 Windows 可用 `dev.cmd`。仓库不依赖 Docker Desktop。
+- 文档只保留 WSL 和 Windows 两套本机方案。两套均通过 VS Code Dev Container 开发，WSL 使用 `./dev.sh`，Windows 使用 `dev.cmd`。
 - 容器不可用时，先修复 Docker，或在 GitHub Actions 中使用项目容器执行；不得回退到宿主机环境。
 - 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建 requirements 清单或自行升级依赖。环境维护使用 Compose 的 `tools` 服务。
 - 容器内验证：`python environment/verify_environment.py --smoke`。测试：`uv run --locked pytest -q`。代码检查：`uv run --locked ruff check .`。
