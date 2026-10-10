@@ -16,7 +16,7 @@ BASELINE = "environment/baseline.json"
 LOCKFILE = "uv.lock"
 PROJECT = "pyproject.toml"
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
-SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", "AGENTS.md", "dev.cmd", "dev.sh"}
+SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh"}
 CODE_SUFFIXES = {
     ".py", ".pyi", ".ipynb", ".sh", ".bash", ".bat", ".ps1",
     ".c", ".cc", ".cpp", ".cu", ".cuh", ".h", ".hpp", ".f", ".f90",
@@ -186,6 +186,8 @@ def check_cpu_container(snapshot, baseline, locked):
         raise PolicyError("Dev Container must build the development target from the shared Dockerfile.")
 
 def check(snapshot, changed, author, owner):
+    if ".env" in snapshot.files:
+        raise PolicyError("Keep personal API settings in an untracked .env file.")
     owner_change = bool(owner) and author.casefold() == owner.casefold()
     protected = [
         path for path in changed

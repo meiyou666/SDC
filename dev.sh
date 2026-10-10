@@ -2,6 +2,10 @@
 set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$project_root"
+if [ ! -f .env ]; then
+    cp .env.example .env
+    chmod 600 .env
+fi
 if ! command -v docker >/dev/null 2>&1; then
     echo "Docker was not found. Install Docker Engine and Compose v2 first." >&2
     exit 1

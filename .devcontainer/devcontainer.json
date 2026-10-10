@@ -11,19 +11,22 @@
   "containerEnv": {
     "PYTHONPATH": "/workspace/SDC/src"
   },
-  "runArgs": ["--platform=linux/amd64"],
+  "runArgs": ["--platform=linux/amd64", "--env-file", "${localWorkspaceFolder}/.env"],
+  "mounts": ["source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume"],
   "init": true,
   "remoteUser": "sdc",
   "updateRemoteUserUID": true,
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
-  "postCreateCommand": "python environment/verify_environment.py --smoke",
+  "postCreateCommand": "python environment/codex/configure.py && python environment/verify_environment.py --smoke",
+  "postStartCommand": "python environment/codex/configure.py",
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "openai.chatgpt"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/opt/venv/bin/python",

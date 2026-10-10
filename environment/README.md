@@ -5,11 +5,16 @@
 | 容器 | Debian 12，Linux amd64 |
 | Python | 3.11.17，固定在 `.python-version` |
 | uv | 0.12.24，工具镜像固定 digest |
+| Node.js、npm | 24.21.0、11.19.0 |
+| Codex CLI | 安装 latest，不锁版本 |
+| Codex 插件 | Dev Container 自动安装 `openai.chatgpt` |
+| Codex 服务地址 | `https://s2api.top` |
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
 | 容器基础镜像源 | Python 使用 Docker Hub；uv 使用 GHCR |
+| Node.js、npm 软件源 | npmmirror |
 
 ## 启动与执行
 
@@ -28,6 +33,14 @@ uv run --locked ruff check .
 ```
 
 所有项目代码、依赖管理、测试与实验均在 Docker 中执行。宿主机用于编辑、Git 操作和启动容器。
+
+## Codex 配置
+
+公共设置在 `environment/codex/config.toml`。容器启动时自动生成当前用户的 `~/.codex/config.toml`。
+
+个人 API 密钥写入根目录 `.env` 的 `OPENAI_API_KEY`，模型名按需填写 `CODEX_MODEL`。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
+
+容器内执行 `codex`，或使用 VS Code 的 Codex 插件。CLI 更新命令：`npm install -g @openai/codex@latest`。
 
 ## 维护依赖
 

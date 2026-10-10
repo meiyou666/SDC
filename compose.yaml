@@ -10,6 +10,9 @@ services:
     working_dir: /workspace/SDC
     volumes:
       - .:/workspace/SDC
+    env_file:
+      - path: .env
+        required: false
     environment:
       PYTHONPATH: /workspace/SDC/src
     stdin_open: true

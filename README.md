@@ -9,9 +9,12 @@
 ```powershell
 git clone https://github.com/meiyou666/SDC.git
 cd SDC
+Copy-Item .env.example .env
 ```
 
 随后选择下面一种环境方案。两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+
+在 `.env` 中填写 `OPENAI_API_KEY`，按需填写 `CODEX_MODEL`。API 地址统一为 `https://s2api.top`。`.env` 只保存在本机。
 
 ### 方案一：WSL
 
@@ -47,6 +50,8 @@ cd SDC
 
 Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像来自 Docker Hub 和 GHCR。
 
+容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
+
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
 ## 2. 项目结构
@@ -54,6 +59,7 @@ Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像
 ```text
 SDC/
 ├── environment/
+│   ├── codex/                 # Codex 公共配置
 │   ├── docker/
 │   │   ├── Dockerfile             # 镜像构建
 │   │   ├── entrypoint.sh          # 容器启动
@@ -67,6 +73,8 @@ SDC/
 ├── pyproject.toml             # 项目依赖声明
 ├── uv.lock                    # uv 原生锁文件
 ├── .python-version            # Python 版本
+├── .env.example               # 个人 API 配置模板
+├── .env                       # 个人密钥，不提交
 ├── SDC.code-workspace          # VS Code 工作区入口
 ├── .vscode/extensions.json     # 推荐扩展
 ├── .devcontainer/             # VS Code 容器配置

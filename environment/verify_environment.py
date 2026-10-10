@@ -40,6 +40,17 @@ def check_uv_environment(project):
         raise ValueError(result.stderr.strip() or result.stdout.strip() or "uv environment check failed.")
 
 
+def check_agent_tools(baseline):
+    versions = {}
+    for name in ("node", "npm", "codex"):
+        output = subprocess.check_output([name, "--version"], text=True).strip()
+        version = output.split()[-1].removeprefix("v")
+        if name != "codex" and version != baseline.get(name):
+            raise ValueError(f"{name}: expected {baseline.get(name)}, found {version}.")
+        versions[name] = version
+    return versions
+
+
 def smoke_test():
     import matplotlib
     import numpy as np
@@ -82,13 +93,14 @@ def main():
         if errors:
             raise ValueError("\n".join(errors))
         check_uv_environment(args.project)
+        agent_tools = check_agent_tools(baseline)
         if args.smoke:
             smoke_test()
     except (OSError, ValueError, ImportError, RuntimeError, AssertionError, subprocess.CalledProcessError) as exc:
         print(f"Environment verification failed:\n{exc}\nUse the shared container; rebuild it after environment updates.", file=sys.stderr)
         return 1
     if not args.quiet:
-        print(json.dumps({"profile": baseline["profile"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
+        print(json.dumps({"profile": baseline["profile"], "python": baseline["python"], "uv": uv_version, **agent_tools, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
     return 0
 
 

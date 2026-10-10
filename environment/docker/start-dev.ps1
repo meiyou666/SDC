@@ -2,6 +2,9 @@ $ErrorActionPreference = "Stop"
 $sdcArguments = @($args)
 $sdcRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location -LiteralPath $sdcRoot
+if (-not (Test-Path -LiteralPath ".env")) {
+    Copy-Item -LiteralPath ".env.example" -Destination ".env"
+}
 
 $sdcDockerCommand = Get-Command docker -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 $sdcDocker = if ($sdcDockerCommand) { $sdcDockerCommand.Source } else { $null }

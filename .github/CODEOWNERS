@@ -8,6 +8,7 @@
 /compose.yaml @meiyou666
 /.dockerignore @meiyou666
 /AGENTS.md @meiyou666
+/.env.example @meiyou666
 /.gitattributes @meiyou666
 /pyproject.toml @meiyou666
 /uv.lock @meiyou666

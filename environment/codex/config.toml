@@ -1,0 +1,12 @@
+model_provider = "sdc"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+
+[model_providers.sdc]
+name = "SDC API"
+base_url = "https://s2api.top"
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"

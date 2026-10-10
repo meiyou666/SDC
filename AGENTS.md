@@ -11,10 +11,12 @@
 ## 执行环境
 
 - **项目代码、依赖解析与安装、测试、实验、绘图和基准测量必须在项目 Docker 容器中执行。禁止使用 Agent 所在的本地 Python、pip、uv、Conda 或其他本地虚拟环境代跑。**
+- Agent 已在 Dev Container 内时，直接运行容器中的命令；在容器外时，通过 Docker 调用项目容器。
 - 宿主机仅用于文件编辑、静态查看、Git/GitHub 操作以及 Docker 的安装和调用。
 - 文档只保留 WSL 和 Windows 两套本机方案。两套均通过 VS Code Dev Container 开发，WSL 使用 `./dev.sh`，Windows 使用 `dev.cmd`。
 - 容器不可用时，先修复 Docker，或在 GitHub Actions 中使用项目容器执行；不得回退到宿主机环境。
 - 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建 requirements 清单或自行升级依赖。环境维护使用 Compose 的 `tools` 服务。
+- Codex CLI 使用 latest，允许在容器内更新。公共 Codex 设置由维护人管理；个人 API 配置放在 `.env`，不得提交或输出密钥。
 - 容器内验证：`python environment/verify_environment.py --smoke`。测试：`uv run --locked pytest -q`。代码检查：`uv run --locked ruff check .`。
 - 根据改动运行相关检查。公共环境和 CI 改动须通过 `Environment consistency`；没有执行的检查不得写成通过。
 
