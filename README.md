@@ -2,12 +2,21 @@
 
 ## 1. 配置开发容器
 
-两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+### 第一步：克隆仓库
+
+在 PowerShell 中执行以下命令。未安装 Git 时，先安装 [Git for Windows](https://git-scm.com/downloads/win)。
+
+```powershell
+git clone https://github.com/meiyou666/SDC.git
+cd SDC
+```
+
+随后选择下面一种环境方案。两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
 ### 方案一：WSL
 
 1. 在管理员 PowerShell 执行 `wsl --install -d Ubuntu-24.04`，按提示重启并完成 Ubuntu 用户初始化。
-2. 在 Ubuntu 终端安装 Docker Engine 和 Git：
+2. 在已克隆的仓库目录打开 PowerShell，执行 `wsl -d Ubuntu-24.04`。进入 Ubuntu 后安装 Docker Engine 和 Git：
 
    ```bash
    sudo apt update
@@ -16,31 +25,19 @@
    sudo usermod -aG docker "$USER"
    ```
 
-3. 退出并重新进入 Ubuntu，在 Ubuntu 终端获取仓库：
-
-   ```bash
-   git clone https://github.com/meiyou666/SDC.git
-   cd SDC
-   ```
-
+3. 执行 `exit` 返回 PowerShell，再执行 `wsl -d Ubuntu-24.04`，使 Docker 用户组设置生效。
 4. VS Code 安装 **WSL** 扩展，连接 Ubuntu，打开仓库中的 [`SDC.code-workspace`](SDC.code-workspace)。
 5. 执行 **Dev Containers: Reopen in Container**。终端启动命令为 `./dev.sh`。
 
 ### 方案二：Windows
 
-1. 安装 [Git for Windows](https://git-scm.com/downloads/win)，下载 [Docker Desktop 安装程序](https://docs.docker.com/desktop/setup/install/windows-install/)。在安装包所在目录打开 PowerShell，使用 Docker VMM 后端安装：
+1. 下载 [Docker Desktop 安装程序](https://docs.docker.com/desktop/setup/install/windows-install/)。在安装包所在目录打开 PowerShell，使用 Docker VMM 后端安装：
 
    ```powershell
    Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
    ```
 
-2. 安装完成后启动 Docker Desktop，重新打开 VS Code 和 PowerShell，获取仓库：
-
-   ```powershell
-   git clone https://github.com/meiyou666/SDC.git
-   cd SDC
-   ```
-
+2. 安装完成后启动 Docker Desktop，重新打开 VS Code 和仓库目录中的 PowerShell。
 3. 在 Docker Desktop 的 **Settings** 完成以下设置，然后点击 **Apply & restart**：
 
    - **General → Virtual Machine Manager**：选择 **Docker VMM**。
@@ -101,13 +98,6 @@ SDC/
 仓库拥有者可直接提交 `main`；其他成员按以下流程开发和合并。
 
 以下命令在**宿主机的仓库目录**执行。
-
-**首次配置身份**：
-
-```bash
-git config user.name "你的名字"
-git config user.email "你的 GitHub 邮箱"
-```
 
 通过 VS Code、GitHub Desktop 或 Git 命令行提交。HTTPS 使用凭据管理器或个人访问令牌认证；使用 [SSH](https://docs.github.com/zh/authentication/connecting-to-github-with-ssh) 时，将远端设为 `git@github.com:meiyou666/SDC.git`。
 
