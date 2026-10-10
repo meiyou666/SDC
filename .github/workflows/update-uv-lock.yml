@@ -2,6 +2,11 @@ name: Update uv lock
 
 on:
   workflow_dispatch:
+    inputs:
+      index-url:
+        description: "依赖源地址；留空时使用 pyproject.toml 中的设置"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -16,10 +21,16 @@ jobs:
         with:
           persist-credentials: false
       - name: Update native lock inside Docker
+        env:
+          PACKAGE_INDEX: ${{ inputs.index-url }}
         run: |
           docker compose build tools
-          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock
-          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock --check
+          index_args=()
+          if [ -n "$PACKAGE_INDEX" ]; then
+            index_args=(--default-index "$PACKAGE_INDEX")
+          fi
+          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock "${index_args[@]}"
+          docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock --check "${index_args[@]}"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: uv-lock
