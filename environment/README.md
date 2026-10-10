@@ -41,6 +41,8 @@ uv run --locked ruff check .
 
 根目录 `.env` 已预填服务地址，只需填写个人 `OPENAI_API_KEY`。容器启动时自动完成 API 密钥登录。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
 
+容器已启动时，也可执行 `sh /opt/sdc/setup-codex.sh` 重新读取 `.env` 并完成登录，然后重新打开 Codex 面板。
+
 容器内执行 `codex`，或使用 VS Code 的 Codex 插件。CLI 更新命令：`npm install -g @openai/codex@latest`。
 
 AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检查或测试。额外依赖放在个人目录或独立环境，不修改项目的 `/opt/venv`。两种启动入口均通过数据卷保存 `~/.codex`、`~/.local`、`~/.ssh` 和 `~/.cache`。

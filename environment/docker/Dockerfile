@@ -77,6 +77,7 @@ RUN uv sync --locked --all-groups --no-build \
 COPY environment/baseline.json environment/verify_environment.py ./environment/
 COPY environment/docker/entrypoint.sh /opt/sdc/entrypoint.sh
 COPY environment/docker/setup-codex.sh /opt/sdc/setup-codex.sh
+COPY environment/docker/login-codex.py /opt/sdc/login-codex.py
 COPY environment/docker/codex-default.toml /opt/sdc/codex-default.toml
 RUN chmod 755 /opt/sdc/entrypoint.sh
 USER sdc

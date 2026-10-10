@@ -10,6 +10,4 @@ if [ ! -f "$sdc_codex_directory/config.toml" ]; then
     )
 fi
 
-if [ -n "${OPENAI_API_KEY:-}" ]; then
-    printf '%s\n' "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null
-fi
+python "$(dirname "$0")/login-codex.py"
