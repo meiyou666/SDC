@@ -7,6 +7,9 @@
 | uv | 0.12.24，工具镜像固定 digest |
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
+| Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
+| WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
+| 容器基础镜像源 | Python 使用 Docker Hub；uv 使用 GHCR |
 
 ## 启动与执行
 
@@ -49,4 +52,4 @@ WSL 运行维护命令时，在 `tools` 前添加 `--user "$(id -u):$(id -g)"`�
 
 GitHub Actions 在项目容器中运行锁文件检查、测试和 Ruff。
 
-维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。
+维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。切换依赖源时可填写 `index-url`，并同步修改 `pyproject.toml` 中的源地址。

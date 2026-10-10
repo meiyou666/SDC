@@ -16,13 +16,10 @@ cd SDC
 ### 方案一：WSL
 
 1. 在管理员 PowerShell 执行 `wsl --install -d Ubuntu-24.04`，按提示重启并完成 Ubuntu 用户初始化。
-2. 在已克隆的仓库目录打开 PowerShell，执行 `wsl -d Ubuntu-24.04`。进入 Ubuntu 后安装 Docker Engine 和 Git：
+2. 在已克隆的仓库目录打开 PowerShell，执行 `wsl -d Ubuntu-24.04`。进入 Ubuntu 后，从清华源安装 Docker Engine 和 Compose：
 
    ```bash
-   sudo apt update
-   sudo apt install -y docker.io docker-compose-v2 git
-   sudo systemctl enable --now docker
-   sudo usermod -aG docker "$USER"
+   bash environment/docker/install-wsl-docker.sh
    ```
 
 3. 执行 `exit` 返回 PowerShell，再执行 `wsl -d Ubuntu-24.04`，使 Docker 用户组设置生效。
@@ -48,6 +45,8 @@ cd SDC
 
 进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
 
+Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像来自 Docker Hub 和 GHCR。
+
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
 ## 2. 项目结构
@@ -56,9 +55,10 @@ cd SDC
 SDC/
 ├── environment/
 │   ├── docker/
-│   │   ├── Dockerfile          # 镜像构建
-│   │   ├── entrypoint.sh       # 容器启动
-│   │   └── start-dev.ps1       # Windows 启动辅助
+│   │   ├── Dockerfile             # 镜像构建
+│   │   ├── entrypoint.sh          # 容器启动
+│   │   ├── install-wsl-docker.sh  # WSL 安装 Docker，使用清华源
+│   │   └── start-dev.ps1          # Windows 启动辅助
 │   ├── baseline.json          # 环境基线
 │   └── verify_environment.py  # 环境校验
 ├── compose.yaml               # 命令行容器入口

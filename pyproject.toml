@@ -18,3 +18,8 @@ dev = ["pytest==9.1.1", "ruff==0.16.10"]
 package = false
 required-version = "==0.12.24"
 environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[[tool.uv.index]]
+name = "tuna"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
+default = true

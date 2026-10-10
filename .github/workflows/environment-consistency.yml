@@ -25,6 +25,8 @@ jobs:
         run: docker compose config --quiet
       - name: Build uv tooling container
         run: docker compose build tools
+      - name: Check WSL installer syntax
+        run: docker compose run --rm -T --entrypoint bash tools -n environment/docker/install-wsl-docker.sh
       - name: Check native uv lock
         run: docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock --check
       - name: Check environment consistency
