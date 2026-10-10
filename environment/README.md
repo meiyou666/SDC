@@ -2,8 +2,8 @@
 
 | 项目 | 设置 |
 |---|---|
-| 容器 | Debian 12，Linux amd64 |
-| Python | 3.11.17，固定在 `.python-version` |
+| 容器 | Ubuntu 24.04，Linux amd64，即 x86-64 |
+| Python | uv 安装 3.11.17，固定在 `.python-version` |
 | uv | 0.12.24，工具镜像固定 digest |
 | Node.js、npm | 初始安装 24.21.0、11.19.0，供 AI 工具使用 |
 | Codex CLI | 安装 latest，不锁版本 |
@@ -14,7 +14,7 @@
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
-| 容器基础镜像源 | Python 使用 Docker Hub；uv 使用 GHCR |
+| 容器基础镜像源 | Ubuntu 使用 Docker Hub；uv 使用 GHCR |
 | Node.js、npm 软件源 | npmmirror |
 
 ## 启动与执行
@@ -57,7 +57,7 @@ AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检�
 | 文件与配置处理 | ripgrep、jq、less |
 | 网络排查 | ip、ping、dig、nc |
 
-系统软件包使用清华 Debian 源。项目 Python 依赖仍由 `uv.lock` 管理。个人命令行工具可通过 `uv tool install 包名` 或 `npm install -g 包名` 安装到独立目录。
+系统软件包使用清华 Ubuntu 源。项目 Python 依赖仍由 `uv.lock` 管理。个人命令行工具可通过 `uv tool install 包名` 或 `npm install -g 包名` 安装到独立目录。
 
 共享内存设为 2 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
 

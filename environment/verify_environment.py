@@ -40,6 +40,13 @@ def check_uv_environment(project):
         raise ValueError(result.stderr.strip() or result.stdout.strip() or "uv environment check failed.")
 
 
+def check_distribution(baseline, release):
+    expected = (baseline.get("os_id"), baseline.get("os_version"))
+    actual = (release.get("ID"), release.get("VERSION_ID"))
+    if actual != expected:
+        raise ValueError(f"Distribution: expected {expected[0]} {expected[1]}, found {actual[0]} {actual[1]}.")
+
+
 def smoke_test():
     import matplotlib
     import numpy as np
@@ -77,6 +84,7 @@ def main():
     try:
         verify_baked_files(args.project, root)
         baseline = json.loads((args.project / "environment/baseline.json").read_text())
+        check_distribution(baseline, platform.freedesktop_os_release())
         uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
         errors = differences(baseline, platform.python_version(), platform.system(), platform.machine(), uv_version)
         if errors:
@@ -88,7 +96,7 @@ def main():
         print(f"Environment verification failed:\n{exc}\nUse the shared container; rebuild it after environment updates.", file=sys.stderr)
         return 1
     if not args.quiet:
-        print(json.dumps({"profile": baseline["profile"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
+        print(json.dumps({"profile": baseline["profile"], "os": baseline["os_id"] + " " + baseline["os_version"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": "not configured"}, indent=2))
     return 0
 
 

@@ -157,7 +157,7 @@ def check_cpu_container(snapshot, baseline, locked):
         if alias:
             aliases.add(alias)
     if images != [uv_image, image]:
-        raise PolicyError("Dockerfile FROM must match the baseline's immutable uv and Python images.")
+        raise PolicyError("Dockerfile FROM must match the baseline's immutable uv and base images.")
     if "uv sync --locked" not in source or "--all-groups" not in source:
         raise PolicyError("Install the native uv lock with uv sync --locked --all-groups.")
     if snapshot.read(".python-version").strip() != baseline["python"]:

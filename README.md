@@ -12,7 +12,7 @@ cd SDC
 Copy-Item .env.example .env
 ```
 
-随后选择下面一种环境方案。两套方案均在 VS Code 中开发，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+随后选择下面一种环境方案。两套方案均在 VS Code 中使用 Ubuntu 24.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
 在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 只保存在本机。
 

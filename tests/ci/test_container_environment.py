@@ -103,6 +103,14 @@ class RuntimeEnvironmentTests(unittest.TestCase):
     def test_matching_runtime_passes(self):
         self.assertEqual(self.errors(), [])
 
+    def test_ubuntu_distribution_matches_baseline(self):
+        runtime.check_distribution(self.baseline, {"ID": "ubuntu", "VERSION_ID": "24.04"})
+
+    def test_different_distribution_or_release_is_rejected(self):
+        for release in [{"ID": "debian", "VERSION_ID": "12"}, {"ID": "ubuntu", "VERSION_ID": "22.04"}]:
+            with self.subTest(release=release), self.assertRaisesRegex(ValueError, "Distribution:"):
+                runtime.check_distribution(self.baseline, release)
+
     def test_python_patch_version_is_checked(self):
         self.assertTrue(any("Python:" in x for x in self.errors(python="3.11.5")))
 

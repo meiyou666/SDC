@@ -1,7 +1,19 @@
 FROM ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a AS uv
-FROM python:3.11.17-bookworm@sha256:5887f265d8d44d8b4734d3658b21d668edf5aaf92e4945bc0c984afbfab105d3 AS tooling
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 AS tooling
 
 COPY --from=uv /uv /uvx /usr/local/bin/
+
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    UV_PYTHON_BIN_DIR=/usr/local/bin
+RUN sed -i \
+       -e 's|http://archive.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' \
+       -e 's|http://security.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' \
+       /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git xz-utils libstdc++6 \
+    && sed -i 's|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv python install --default --no-cache 3.11.17
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -16,8 +28,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/opt/venv/bin:$PATH \
     MPLBACKEND=Agg
 
-RUN groupadd --gid 1000 sdc \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash sdc \
+RUN if id ubuntu >/dev/null 2>&1; then \
+        usermod --login sdc --home /home/sdc --move-home --shell /bin/bash ubuntu \
+        && groupmod --new-name sdc ubuntu; \
+    else \
+        groupadd --gid 1000 sdc \
+        && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash sdc; \
+    fi \
     && mkdir -p /workspace/SDC \
     && chown sdc:sdc /workspace/SDC
 
@@ -41,8 +58,7 @@ RUN curl -fsSL --retry 3 https://registry.npmmirror.com/-/binary/node/v24.21.0/n
     && npm cache clean --force \
     && chown -R sdc:sdc /home/sdc/.local \
     && install -d -m 0700 -o sdc -g sdc /home/sdc/.codex
-RUN sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get update \
+RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        openssh-client rsync git git-lfs build-essential cmake ninja-build pkg-config \
        gdb strace tmux htop procps psmisc lsof time \
