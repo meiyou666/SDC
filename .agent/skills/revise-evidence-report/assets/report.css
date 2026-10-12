@@ -1,0 +1,41 @@
+@page {
+  size: A4;
+  margin: 18mm 17mm 18mm 17mm;
+  @bottom-center { content: counter(page); font-size: 8pt; color: #555; }
+}
+
+:root {
+  --ink: #171717;
+  --muted: #5d636b;
+  --rule: #b9bec4;
+  --accent: #0072b2;
+  --panel: #f5f8fa;
+}
+
+html { font-size: 10pt; }
+body {
+  color: var(--ink);
+  font-family: "Noto Serif", "Source Serif 4", "Noto Serif CJK SC", serif;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3, h4, table, figcaption {
+  font-family: "Noto Sans", "Source Sans 3", "Noto Sans CJK SC", sans-serif;
+}
+h1 { font-size: 20pt; line-height: 1.15; margin: 0 0 8mm; }
+h2 { font-size: 13pt; border-bottom: 0.6pt solid var(--rule); padding-bottom: 1.5mm; }
+h3 { font-size: 10.5pt; }
+p { widows: 3; orphans: 3; }
+a { color: var(--accent); text-decoration: none; }
+table { width: 100%; border-collapse: collapse; font-size: 8pt; margin: 3mm 0 5mm; }
+th { border-top: 1pt solid var(--ink); border-bottom: 0.6pt solid var(--ink); text-align: left; }
+td { border-bottom: 0.3pt solid var(--rule); vertical-align: top; }
+th, td { padding: 1.3mm 1mm; }
+figure, table, pre, .metric-card { break-inside: avoid; }
+figure { margin: 4mm 0 6mm; }
+figure img, img.figure, svg { display: block; max-width: 100%; width: 100%; height: auto; }
+figcaption { font-size: 8pt; color: var(--muted); margin-top: 1.5mm; }
+code, pre { font-family: "DejaVu Sans Mono", monospace; font-size: 8pt; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.metric-card { border-left: 2pt solid var(--accent); background: var(--panel); padding: 2.5mm 3mm; margin: 2.5mm 0; }
+.source-audit-tag { color: var(--muted); font-family: "Noto Sans", "Noto Sans CJK SC", sans-serif; font-size: 7.5pt; white-space: nowrap; }

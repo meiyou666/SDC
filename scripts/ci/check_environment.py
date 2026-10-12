@@ -59,7 +59,7 @@ def dependency_file(path):
 
 def experiment_code(path):
     return (
-        not path.startswith(("archive/", "docs/", "environment/", *INFRA))
+        not path.startswith(("archive/", "docs/", "environment/", ".agent/", *INFRA))
         and path not in {"dev.cmd", "dev.sh"}
         and PurePosixPath(path).suffix.lower() in CODE_SUFFIXES
     )
@@ -227,7 +227,7 @@ def check(snapshot, changed, author, owner):
     owner_change = bool(owner) and author.casefold() == owner.casefold()
     protected = [
         path for path in changed
-        if not path.startswith("archive/") and (
+        if not path.startswith(("archive/", ".agent/")) and (
             path.startswith(("environment/", "configs/training/", ".devcontainer/"))
             or path in SHARED_FILES or dependency_file(path)
         )
@@ -264,7 +264,7 @@ def check(snapshot, changed, author, owner):
 
     extra = sorted(
         path for path in snapshot.files
-        if not path.startswith(("archive/", *INFRA))
+        if not path.startswith(("archive/", ".agent/", *INFRA))
         and path not in {PROJECT, LOCKFILE, "compose.yaml", ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json", "environment/docker/Dockerfile"}
         and dependency_file(path)
     )
