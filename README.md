@@ -1,10 +1,17 @@
 # SDC
 
-## 1. 配置开发容器
+## 1. 开发环境
 
-### 第一步：克隆仓库
+先选择开发位置。本地和云端共用 Dockerfile、`pyproject.toml` 和 `uv.lock`。
 
-本机开发在 PowerShell 中执行以下命令。未安装 Git 时，先安装 [Git for Windows](https://git-scm.com/downloads/win)。云端开发直接按[方案三](#方案三云服务器)在服务器克隆。
+| 方式 | Docker 安装位置 | VS Code 打开的仓库 |
+| --- | --- | --- |
+| [本地开发](#本地开发) | Windows 或本机 WSL | 本机仓库 |
+| [云端开发](#云端开发) | 云服务器 | 通过 Remote-SSH 打开的服务器仓库 |
+
+### 本地开发
+
+**先克隆仓库。** 在本机 PowerShell 执行，未安装 Git 时先安装 [Git for Windows](https://git-scm.com/downloads/win)。
 
 ```powershell
 git clone https://github.com/meiyou666/SDC.git
@@ -12,24 +19,22 @@ cd SDC
 Copy-Item .env.example .env
 ```
 
-随后选择 WSL、Windows 或云服务器方案，均在 VS Code 中使用 Ubuntu 22.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+在 `.env` 中填写个人 `OPENAI_API_KEY`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展，再选择下面一种本地方式。
 
-在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 保存在当前开发主机，不提交 Git。
-
-### 方案一：WSL
+#### WSL
 
 1. 在管理员 PowerShell 执行 `wsl --install -d Ubuntu-24.04`，按提示重启并完成 Ubuntu 用户初始化。
 2. 在已克隆的仓库目录打开 PowerShell，执行 `wsl -d Ubuntu-24.04`。进入 Ubuntu 后，从清华源安装 Docker Engine 和 Compose：
 
    ```bash
-   bash environment/docker/install-wsl-docker.sh
+   bash environment/docker/install-docker.sh
    ```
 
 3. 执行 `exit` 返回 PowerShell，再执行 `wsl -d Ubuntu-24.04`，使 Docker 用户组设置生效。
 4. VS Code 安装 **WSL** 扩展，连接 Ubuntu，打开仓库中的 [`SDC.code-workspace`](SDC.code-workspace)。
-5. 执行 **Dev Containers: Reopen in Container**，按下方说明选择容器。
+5. 执行 **Dev Containers: Reopen in Container**，日常开发选择 **SDC**。首次进入时自动构建镜像并启动容器。
 
-### 方案二：Windows
+#### Windows
 
 1. 下载 [Docker Desktop 安装程序](https://docs.docker.com/desktop/setup/install/windows-install/)。在安装包所在目录打开 PowerShell，使用 Docker VMM 后端安装：
 
@@ -44,27 +49,36 @@ Copy-Item .env.example .env
    - **Resources**：分配至少 4 GB 内存。
    - **Resources → File sharing**：添加仓库目录。
 
-4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**，按下方说明选择容器。
+4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**，日常开发选择 **SDC**。首次进入时自动构建镜像并启动容器。
 
-### 方案三：云服务器
+### 云端开发
 
-1. VS Code 安装 **Remote-SSH** 扩展，执行 **Remote-SSH: Connect to Host**，连接租用的 Ubuntu 服务器。本机只需 VS Code 和 SSH，Docker 安装在服务器上。
-2. 在服务器终端克隆仓库，并创建服务器上的 `.env`：
+**本机 VS Code → SSH 连接云服务器 → 服务器上的 Docker 容器。** Docker 安装、镜像构建和代码运行均在服务器完成。
+
+1. **在本机 VS Code 连接服务器。** 安装 **Remote-SSH**、**Dev Containers** 和 **Container Tools** 扩展。执行 **Remote-SSH: Add New SSH Host...**，输入 `ssh 用户名@服务器地址 -p 端口`；再执行 **Remote-SSH: Connect to Host...**。连接后左下角显示 `SSH: 服务器`。
+2. **在这个 SSH 窗口新建终端，克隆服务器上的仓库：**
 
    ```bash
    git clone https://github.com/meiyou666/SDC.git
    cd SDC
-   cp .env.example .env
    ```
 
-3. 服务器尚未安装 Docker 时，执行 `bash environment/docker/install-wsl-docker.sh`。该脚本同样用于 Ubuntu 服务器，使用清华源安装 Docker Engine 和 Compose；完成后重新连接 SSH。
-4. 配置服务器的 GPU / NPU 驱动与容器设备访问，步骤见[云服务器部署](docs/cloud.md)。在 Remote-SSH 窗口打开服务器上的仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA** 或 **SDC Ascend**；普通开发选择 **SDC**。
+3. **在同一远端终端初始化环境：**
 
-代码、Python 和计算设备均在云端，本机 VS Code 负责编辑和交互。PyTorch 的 `device` 使用该服务器上的设备编号；[远程设备说明与镜像复用](docs/cloud.md#远程-device-与镜像复用)见部署文档。
+   ```bash
+   bash environment/docker/setup-cloud.sh
+   ```
+
+   选择普通开发、NVIDIA 或昇腾。脚本安装 Docker、Compose 和 Buildx，构建所选镜像，并生成服务器专用的 VS Code 入口。NVIDIA 环境会配置 Container Toolkit；昇腾环境会记录所选芯片和设备组。
+
+4. **打开服务器上的 `SDC` 文件夹。** 在生成的 `.env` 中填写个人 `OPENAI_API_KEY`。若脚本提示用户组已更新，先执行 **Remote-SSH: Kill VS Code Server on Host**，再重新连接服务器并打开仓库。
+5. **进入远端容器。** 执行 **Dev Containers: Reopen in Container**，选择脚本生成的 **SDC 云端（普通开发 / NVIDIA / Ascend）** 入口。VS Code 使用刚构建的缓存启动容器。左下角变为容器名称后，终端、Python 和 Codex 均在服务器容器中运行。
+
+在新建的容器终端执行 `pwd`，应显示 `/workspace/SDC`。GPU / NPU 环境再执行 `python environment/verify_environment.py --accelerator`。完整操作和脚本参数见[云端开发说明](docs/cloud.md)。
 
 ### 选择和切换容器
 
-打开工作区后，按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container（开发容器：在容器中重新打开）**。首次进入时会显示以下列表，由你选择；项目没有自动选择硬件的设置。恢复之前的容器窗口时，会继续连接该容器。
+打开工作区后，按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container（开发容器：在容器中重新打开）**。基本配置如下；云端初始化后，列表中还会显示脚本生成的 **SDC 云端（…）** 入口。恢复之前的容器窗口时，会继续连接该容器。
 
 ![VS Code 容器选择列表：SDC、SDC Ascend、SDC NVIDIA](docs/images/devcontainer-selection.png)
 
@@ -74,11 +88,13 @@ Copy-Item .env.example .env
 | **SDC NVIDIA** | NVIDIA GPU 上的训练与实验 | [GPU 配置](.devcontainer/nvidia/devcontainer.json) |
 | **SDC Ascend** | 昇腾 NPU 上的训练与实验 | [NPU 配置](.devcontainer/ascend/devcontainer.json) |
 
-本机日常开发选择 **SDC**。使用服务器算力时，先通过 VS Code 的 **Remote-SSH** 打开服务器上的仓库，再选择对应的训练容器。
+本机日常开发选择 **SDC**；完成云端脚本后，选择 **SDC 云端（…）**。
 
 **切换容器**：在当前容器窗口按 `Ctrl+Shift+P`，执行 **Dev Containers: Switch Container（开发容器：切换容器）**，选择另一个配置。窗口左下角可查看当前容器名称。
 
-三种配置使用独立容器，只需启动所选的一个。同一台主机上的三个容器挂载同一份仓库，代码修改会保留。首次使用某个配置需要构建，后续启动可复用已有镜像和容器；Dockerfile 或依赖更新后，执行 **Dev Containers: Rebuild Container**。
+切换云端硬件环境时，先执行 **Dev Containers: Reopen Folder in SSH**，在服务器终端重新运行 `setup-cloud.sh` 选择环境，再进入生成的云端入口。脚本为各环境保存独立入口。
+
+同一台主机上的容器共用仓库目录。首次使用需要构建，后续启动复用已有镜像和容器；Dockerfile 或依赖更新后，执行 **Dev Containers: Rebuild Container**。
 
 终端启动脚本 `./dev.sh`（WSL）和 `.\dev.cmd`（Windows）固定启动 **SDC 开发环境**。GPU、NPU 的命令行启动方式见[公共训练任务](docs/training.md)。
 
@@ -86,19 +102,9 @@ Copy-Item .env.example .env
 
 进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。详细设置见[环境说明](environment/README.md)。
 
-常规 Python 依赖和 WSL 下的 Docker 安装包使用清华源，PyTorch 使用对应硬件的官方源；容器基础镜像来自 Docker Hub 和 GHCR。
+Ubuntu 的 Docker 安装包与常规 Python 依赖使用清华源，PyTorch 和 NVIDIA Container Toolkit 使用官方源；基础镜像来自 Docker Hub 和 GHCR。
 
-容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
-
-AI 工具、插件、MCP 和 skills 可自行扩展。个人 AI 依赖放在独立环境，项目实验继续使用统一的 `uv.lock`。Dev Container 保留个人 Codex 配置和 npm 全局工具。
-
-容器提供 SSH、SCP、SFTP、rsync、编译调试工具和 tmux。SSH 配置、密钥及下载缓存会保留。连接服务器时，在容器终端执行：
-
-```bash
-ssh -p 22 用户名@服务器地址
-```
-
-VS Code 预留 6006 和 8888 端口转发。工具清单与远程使用示例见[环境说明](environment/README.md)。
+容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Python 和 Codex 插件。API 地址已预填为 `https://s2api.top/v1`，个人密钥保存在所在主机的 `.env`。工具和依赖维护见[环境说明](environment/README.md)。
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
@@ -113,7 +119,9 @@ SDC/
 │   │   ├── Dockerfile             # 镜像构建
 │   │   ├── codex-default.toml     # Codex 初始配置
 │   │   ├── entrypoint.sh          # 容器启动
-│   │   ├── install-wsl-docker.sh  # WSL 安装 Docker，使用清华源
+│   │   ├── install-docker.sh     # Ubuntu / WSL 安装 Docker，使用清华源
+│   │   ├── setup-cloud.sh        # 云端初始化与镜像构建
+│   │   ├── configure-cloud.py    # 生成服务器专用 VS Code 入口
 │   │   ├── setup-codex.sh         # 初始化 Codex 并读取 API 密钥
 │   │   └── start-dev.ps1          # Windows 启动辅助
 │   ├── baseline.json          # 环境基线
@@ -131,7 +139,8 @@ SDC/
 ├── .devcontainer/
 │   ├── devcontainer.json      # SDC：日常开发
 │   ├── nvidia/devcontainer.json  # SDC NVIDIA：GPU 训练
-│   └── ascend/devcontainer.json  # SDC Ascend：NPU 训练
+│   ├── ascend/devcontainer.json  # SDC Ascend：NPU 训练
+│   └── cloud-*/                 # 脚本生成的云端入口，不提交
 ├── src/
 │   ├── algorithms/            # ABFT 算法
 │   ├── evaluation/            # 注入、统计与计时
@@ -142,7 +151,7 @@ SDC/
 │   └── evaluation/            # 评测配置
 ├── docs/
 │   ├── project.md             # 项目目标、研究主线与实验口径
-│   ├── cloud.md               # 云服务器部署与镜像复用
+│   ├── cloud.md               # VS Code 云端开发步骤
 │   ├── training.md            # 公共训练任务
 │   ├── images/                # 文档截图
 │   ├── papers/                # 论文精读记录

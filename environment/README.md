@@ -24,7 +24,7 @@
 
 ## 启动与执行
 
-按[项目 README](../README.md)选择 WSL、Windows 或云服务器方案，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。云端通过 Remote-SSH 打开服务器仓库，部署步骤见[云服务器说明](../docs/cloud.md)。
+按[项目 README](../README.md)选择本地或云端开发。本地分 Windows、WSL；云端在 VS Code 的 Remote-SSH 终端运行 `bash environment/docker/setup-cloud.sh`，再进入生成的 **SDC 云端（…）** 容器。详细步骤见[云端开发说明](../docs/cloud.md)。
 
 终端启动：WSL 使用 `./dev.sh`，Windows PowerShell 使用 `.\dev.cmd`。
 
@@ -75,7 +75,9 @@ AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检�
 
 共享内存设为 2 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
 
-## 连接远程服务器
+## 命令行连接与文件传输
+
+VS Code 切换到云端开发的步骤见[云端开发说明](../docs/cloud.md)。下面的命令用于终端操作和文件传输。
 
 在容器终端使用：
 
