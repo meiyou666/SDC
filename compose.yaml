@@ -1,7 +1,6 @@
 services:
   dev: &development
     image: sdc-dev:py311
-    platform: linux/amd64
     build:
       context: .
       dockerfile: environment/docker/Dockerfile
@@ -27,7 +26,6 @@ services:
     <<: *development
     image: sdc-nvidia:py311
     profiles: ["nvidia"]
-    platform: ${SDC_PLATFORM:-linux/amd64}
     build:
       context: .
       dockerfile: environment/docker/Dockerfile
@@ -41,7 +39,6 @@ services:
     <<: *development
     image: sdc-ascend:py311
     profiles: ["ascend"]
-    platform: ${SDC_PLATFORM:-linux/amd64}
     build:
       context: .
       dockerfile: environment/docker/Dockerfile
@@ -74,7 +71,6 @@ services:
   tools:
     image: sdc-uv-tools:py311
     profiles: ["tools"]
-    platform: linux/amd64
     build:
       context: .
       dockerfile: environment/docker/Dockerfile

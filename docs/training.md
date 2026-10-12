@@ -27,10 +27,9 @@ docker compose --profile nvidia run --build --rm --user "$(id -u):$(id -g)" nvid
 docker compose --profile ascend run --build --rm --user "$(id -u):$(id -g)" ascend bash
 ```
 
-ARM64 服务器先执行 `export SDC_PLATFORM=linux/arm64`。昇腾芯片由 `SDC_ASCEND_SOC` 选择：A2 使用 `910b`，A3 使用 `a3`，950 使用 `950`；三者均使用 CANN 9.1.0。例如：
+Docker 默认使用宿主机的 x86-64 或 ARM64 架构。昇腾芯片由 `SDC_ASCEND_SOC` 选择：A2 使用 `910b`，A3 使用 `a3`，950 使用 `950`；三者均使用 CANN 9.1.0。例如：
 
 ```bash
-export SDC_PLATFORM=linux/arm64
 export SDC_ASCEND_SOC=a3
 export SDC_ASCEND_GID=$(stat -c '%g' /dev/davinci0)
 docker compose --profile ascend run --build --rm --user "$(id -u):$(id -g)" ascend bash
@@ -51,6 +50,8 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
 ```
 
 `prepare` 下载固定版本的模型、分词器与语料，并保存分词结果。下载中断后可执行同一命令继续。训练从本地缓存读取。
+
+空的 `prepared_dir` 会重新准备；目录已有残留文件但缺少完整清单时，会提示更换目录或清理残留。首次读取校验 SHA256，后续在清单、文件大小和时间等信息未变时复用校验结果。需要重算全部哈希时，在 `prepare` 或 `train` 命令末尾添加 `--verify-data`。
 
 中断后恢复：
 
@@ -84,8 +85,9 @@ docker logs -f sdc-qwen3-nvidia
 
 - 模型与语料固定到 Hugging Face commit；全参数训练，使用 eager attention，关闭 TF32。
 - 训练集和验证集分别分词，每条文本后添加 EOS。文本连续拼接为固定长度序列，EOS 参与损失计算。
-- `max_steps` 表示参数更新次数。有效批量 = 每卡批量 × 梯度累积次数 × 进程数。
+- `max_steps` 表示参数更新次数。当前任务按固定步数训练，数据遍历完后继续下一轮。有效批量 = 每卡批量 × 梯度累积次数 × 进程数；序列数见 `run.json`，实际遍历进度见日志和 `result.json` 的 `epoch`。
 - 日志记录 loss、梯度范数、学习率、验证 loss 和 perplexity。吞吐来自整个训练循环；GEMM 设备耗时由算子评测单独测量。
+- loss 出现 NaN 或 Inf 时明确报错并停止，`result.json` 记录失败原因和训练步数。非有限指标写为 `null`，原值类型保存在 `nonfinite_metrics`。
 - 两个平台共用数据、随机种子、精度和训练设置。结果分别保存到 `results/training/qwen3_06b_wikitext103/cuda` 与 `npu`。
 
 ```text

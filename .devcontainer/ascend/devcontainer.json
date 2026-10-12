@@ -16,8 +16,6 @@
   },
   "runArgs": [
     "--shm-size=8g",
-    "--env-file",
-    "${localWorkspaceFolder}/.env",
     "--device=/dev/davinci0",
     "--device=/dev/davinci_manager",
     "--device=/dev/devmm_svm",
@@ -50,8 +48,8 @@
   "updateRemoteUserUID": true,
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
-  "postCreateCommand": "python environment/verify_environment.py --smoke",
-  "postStartCommand": "sh /opt/sdc/setup-codex.sh",
+  "postCreateCommand": "python /opt/sdc/project/environment/verify_environment.py --project /workspace/SDC --smoke",
+  "postStartCommand": "sh /opt/sdc/setup-codex.sh || true",
   "customizations": {
     "vscode": {
       "extensions": [

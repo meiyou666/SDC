@@ -28,14 +28,15 @@ def uv_lock(packages=None):
 
 
 def snapshot(state="frozen", extra=None, **baseline_changes):
+    """Small schema 3 compatibility fixture; schema 4 uses training_snapshot."""
     baseline = {
         "schema_version": 3,
         "state": state,
         "profile": "cpu-development",
         "platform": "linux/amd64",
-        "base_image": "ubuntu:24.04@sha256:" + "a" * 64,
+        "base_image": "ubuntu:22.04@sha256:" + "a" * 64,
         "os_id": "ubuntu",
-        "os_version": "24.04",
+        "os_version": "22.04",
         "uv_image": "ghcr.io/astral-sh/uv:0.12.24@sha256:" + "c" * 64,
         "python": "3.11.17",
         "uv": "0.12.24",
@@ -124,6 +125,15 @@ class EnvironmentPolicyTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(policy.PolicyError, "Only the repository owner"):
                 self.run_check(snapshot(), [name])
 
+    def test_ci_and_check_configuration_are_owner_managed(self):
+        for name in [".github/workflows/environment-consistency.yml", ".github/CODE_REVIEW.md",
+                     "scripts/ci/check_environment.py", "tests/ci/test_environment_policy.py",
+                     "ruff.toml", "pytest.ini", "scripts/check.sh", "scripts/train.sh"]:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(policy.PolicyError, "Only the repository owner"):
+                    self.run_check(snapshot(), [name])
+                self.run_check(snapshot(), [name], author="owner")
+
     def test_python_pin_must_match_baseline(self):
         with self.assertRaisesRegex(policy.PolicyError, ".python-version"):
             self.run_check(snapshot(extra={".python-version": "3.12.0\n"}))
@@ -141,6 +151,31 @@ class EnvironmentPolicyTests(unittest.TestCase):
     def test_unlocked_import_fails(self):
         with self.assertRaisesRegex(policy.PolicyError, "Imports outside"):
             self.run_check(snapshot(extra={"src/main.py": "import requests"}))
+
+    def test_nested_module_names_do_not_become_global_imports(self):
+        for nested in ["src/training/config.py", "experiments/config.py", "scripts/config.py"]:
+            state = snapshot(extra={nested: "", "src/training/__init__.py": "", "src/main.py": "import config"})
+            with self.subTest(nested=nested), self.assertRaisesRegex(policy.PolicyError, "src/main.py: config"):
+                self.run_check(state)
+
+    def test_nested_file_does_not_whitelist_third_party_package(self):
+        with self.assertRaisesRegex(policy.PolicyError, "src/main.py: requests"):
+            self.run_check(snapshot(extra={"src/training/requests.py": "", "src/main.py": "import requests"}))
+
+    def test_real_import_roots_and_script_siblings_are_allowed(self):
+        self.run_check(snapshot(extra={
+            "src/shared.py": "", "src/training/__init__.py": "", "src/training/config.py": "",
+            "src/main.py": "import shared\nfrom training import config",
+            "scripts/helper.py": "", "scripts/probe.py": "import helper",
+            "root_module.py": "", "src/use_root.py": "import root_module",
+        }))
+
+    def test_package_sibling_requires_package_import(self):
+        with self.assertRaisesRegex(policy.PolicyError, "src/training/main.py: config"):
+            self.run_check(snapshot(extra={
+                "src/training/__init__.py": "", "src/training/config.py": "",
+                "src/training/main.py": "import config",
+            }))
 
     def test_distribution_alias_is_checked_against_lock(self):
         state = snapshot(extra={"src/main.py": "import yaml"}, import_map={"yaml": "PyYAML"})

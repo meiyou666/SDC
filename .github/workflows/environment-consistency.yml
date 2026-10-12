@@ -28,7 +28,7 @@ jobs:
       - name: Check environment script syntax
         run: |
           docker compose run --rm -T --entrypoint bash tools -c \
-            'for script in environment/docker/*.sh; do bash -n "$script" || exit; done'
+            'for script in dev.sh scripts/*.sh environment/docker/*.sh; do bash -n "$script" || exit; done'
       - name: Check native uv lock
         run: docker compose run --rm -T --user "$(id -u):$(id -g)" tools lock --check
       - name: Check environment consistency

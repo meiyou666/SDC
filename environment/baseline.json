@@ -15,6 +15,10 @@
     "PIL": "pillow",
     "dateutil": "python-dateutil"
   },
+  "development_profile": {
+    "device": "cpu",
+    "torch": "2.7.1+cpu"
+  },
   "training_profiles": {
     "nvidia": {
       "device": "cuda",

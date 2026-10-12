@@ -68,6 +68,15 @@ def check_distribution(baseline, release):
         raise ValueError(f"Distribution: expected {expected[0]} {expected[1]}, found {actual[0]} {actual[1]}.")
 
 
+def check_torch_version(baseline, runtime):
+    if baseline.get("schema_version", 3) < 4:
+        return
+    profile = baseline["development_profile"] if runtime == "development" else baseline["training_profiles"][runtime]
+    expected = profile["torch"]
+    if importlib.metadata.version("torch") != expected:
+        raise ValueError(f"The {runtime} profile requires torch {expected}.")
+
+
 def smoke_test():
     import matplotlib
     import numpy as np
@@ -104,7 +113,7 @@ def main():
     parser.add_argument("--accelerator", action="store_true", help="Exercise the selected GPU/NPU")
     args = parser.parse_args()
     try:
-        verify_baked_files(args.project, root)
+        verify_baked_files(args.project, Path("/opt/sdc/project"))
         baseline = json.loads((args.project / "environment/baseline.json").read_text())
         check_distribution(baseline, platform.freedesktop_os_release())
         uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
@@ -115,9 +124,7 @@ def main():
         if runtime not in {"development", "nvidia", "ascend"}:
             raise ValueError(f"Unknown SDC_RUNTIME: {runtime}")
         check_uv_environment(args.project, runtime if baseline.get("schema_version", 3) >= 4 else None)
-        expected_torch = "2.7.1+cpu" if runtime == "development" else baseline["training_profiles"][runtime]["torch"]
-        if baseline.get("schema_version", 3) >= 4 and importlib.metadata.version("torch") != expected_torch:
-            raise ValueError(f"The {runtime} profile requires torch {expected_torch}.")
+        check_torch_version(baseline, runtime)
         if args.smoke:
             smoke_test()
         accelerator = accelerator_smoke(runtime, baseline) if args.accelerator else "not checked"

@@ -1,6 +1,10 @@
 from dataclasses import replace
 import json
 import math
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from tokenizers import Tokenizer
@@ -11,11 +15,12 @@ from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM,
 
 from training.config import Config, DataConfig, ModelConfig, TrainConfig, load_config, validate
 from training.data import CausalCollator, load_tokenizer, pack_texts, prepare_data, read_prepared
-from training.runner import resolve_runtime_config, train
+from training.runner import JsonMetrics, NonFiniteLossError, resolve_runtime_config, train, write_json
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "cache"))
     model_dir = tmp_path / "model"
     words = ["[UNK]", "[EOS]", "[PAD]", "the", "model", "learns", "from", "text", "training",
              "uses", "gradients", "and", "validation", "measures", "loss", ".", "data", "is", "fixed"]
@@ -92,6 +97,129 @@ def test_prepared_artifact_changes_are_detected(config):
         read_prepared(config)
 
 
+def test_prepare_recovers_empty_directory(config):
+    Path(config.data.prepared_dir).mkdir()
+    manifest = prepare_data(config)
+    assert manifest["statistics"]["train"]["blocks"] > 0
+
+
+@pytest.mark.parametrize("content", [None, "{", "{}"])
+def test_incomplete_prepared_directory_has_actionable_error(config, content):
+    directory = Path(config.data.prepared_dir)
+    directory.mkdir()
+    residual = directory / "partial.arrow"
+    residual.write_bytes(b"unfinished")
+    if content is not None:
+        (directory / "manifest.json").write_text(content)
+    with pytest.raises(ValueError, match="directory is incomplete"):
+        prepare_data(config)
+    assert residual.read_bytes() == b"unfinished"
+
+
+def test_unprepared_and_incomplete_data_are_distinct(config):
+    with pytest.raises(ValueError, match="Run the prepare command first"):
+        read_prepared(config)
+    Path(config.data.prepared_dir).mkdir()
+    with pytest.raises(ValueError, match="directory is incomplete"):
+        read_prepared(config)
+
+
+def test_prepared_hashes_are_cached_and_can_be_forced(config):
+    from training import data
+
+    prepare_data(config)
+    with patch.object(data, "_artifact_hashes", wraps=data._artifact_hashes) as hash_files:
+        read_prepared(config)
+        read_prepared(config)
+        assert hash_files.call_count == 1
+        read_prepared(config, verify_data=True)
+        assert hash_files.call_count == 2
+        prepare_data(config, verify_data=True)
+        assert hash_files.call_count == 3
+
+
+@pytest.mark.parametrize("change", ["modify", "add", "delete"])
+def test_cached_verification_detects_file_changes(config, change):
+    prepare_data(config)
+    read_prepared(config)
+    filename = Path(config.data.prepared_dir) / "train/state.json"
+    if change == "modify":
+        old = filename.stat()
+        value = filename.read_bytes()
+        filename.write_bytes(b" " + value[1:])
+        os.utime(filename, ns=(old.st_atime_ns, old.st_mtime_ns))
+    elif change == "add":
+        (filename.parent / "unexpected.arrow").write_bytes(b"extra")
+    else:
+        filename.unlink()
+    with pytest.raises(ValueError, match="files have changed"):
+        read_prepared(config)
+
+
+def test_corrupt_verification_cache_is_rebuilt(config):
+    prepare_data(config)
+    read_prepared(config)
+    cache = next((Path(os.environ["HF_HOME"]) / "sdc-verification").glob("*.json"))
+    cache.write_text("{")
+    read_prepared(config)
+    assert json.loads(cache.read_text())["files"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("world_zero", [True, False])
+def test_nonfinite_loss_is_explicit_on_every_rank(tmp_path, value, world_zero):
+    callback = JsonMetrics(tmp_path, "test")
+    state = SimpleNamespace(is_world_process_zero=world_zero, global_step=3)
+    with pytest.raises(NonFiniteLossError, match="loss 非有限值"):
+        callback.on_log(None, state, None, logs={"loss": value})
+    if world_zero:
+        record = json.loads((tmp_path / "metrics.jsonl").read_text())
+        assert record["loss"] is None
+        assert record["nonfinite_metrics"] == {"loss": str(value)}
+    else:
+        assert not (tmp_path / "metrics.jsonl").exists()
+
+
+def test_nonfinite_nonloss_metrics_are_recorded_without_stopping(tmp_path):
+    callback = JsonMetrics(tmp_path, "test")
+    callback.on_log(None, SimpleNamespace(is_world_process_zero=True, global_step=3), None,
+                    logs={"loss": 1.0, "grad_norm": float("inf")})
+    result = json.loads((tmp_path / "metrics.jsonl").read_text())
+    assert result["loss"] == 1.0 and result["grad_norm"] is None
+    assert result["nonfinite_metrics"] == {"grad_norm": "inf"}
+
+
+def test_json_writer_preserves_nonfinite_metric_names(tmp_path):
+    filename = tmp_path / "result.json"
+    write_json(filename, {"loss": float("nan"), "nested": {"values": [1.0, float("inf")]}})
+    result = json.loads(filename.read_text(), parse_constant=lambda value: pytest.fail(value))
+    assert result["loss"] is None
+    assert result["nested"]["values"] == [1.0, None]
+    assert result["nonfinite_metrics"] == {"loss": "nan", "nested.values[1]": "inf"}
+
+
+def test_divergent_training_writes_failure_result(config):
+    from transformers import Trainer
+
+    prepare_data(config)
+    original = Trainer.compute_loss
+
+    def divergent_loss(self, *args, **kwargs):
+        value = original(self, *args, **kwargs)
+        if isinstance(value, tuple):
+            return value[0] * float("nan"), value[1]
+        return value * float("nan")
+
+    with patch.object(Trainer, "compute_loss", divergent_loss):
+        with pytest.raises(NonFiniteLossError, match="Non-finite loss"):
+            train(config, offline=True)
+    result = json.loads((Path(config.training.output_dir) / "result.json").read_text())
+    assert result["status"] == "failed"
+    assert result["reason"] == "nonfinite_loss"
+    assert result["loss"] is None
+    assert result["global_step"] == 1
+
+
 class StopAtOne(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step == 1:
@@ -120,6 +248,9 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path):
         for name, value in state.items():
             assert torch.equal(value, resumed.optimizer.state_dict()["state"][key][name])
     assert (tmp_path / "resumed" / "result.json").is_file()
+    record = json.loads((tmp_path / "resumed" / "run.json").read_text())
+    assert record["training_budget"] == {"unit": "optimizer_updates", "max_steps": 3, "repeat_dataset": True}
+    assert resumed_metrics["epoch"] == resumed.state.epoch
     with pytest.raises(ValueError, match="not empty"):
         train(config, offline=True)
     with pytest.raises(ValueError, match="already reached"):

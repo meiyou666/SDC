@@ -20,10 +20,45 @@ from .config import ROOT, file_digest, model_source, path, run_signature
 from .data import CausalCollator, load_tokenizer, prepared_digest, read_prepared
 
 
+def json_record(value):
+    nonfinite = {}
+
+    def clean(item, key=""):
+        if isinstance(item, float) and not math.isfinite(item):
+            nonfinite[key] = str(item)
+            return None
+        if isinstance(item, dict):
+            return {name: clean(child, f"{key}.{name}" if key else str(name)) for name, child in item.items()}
+        if isinstance(item, (list, tuple)):
+            return [clean(child, f"{key}[{index}]") for index, child in enumerate(item)]
+        return item
+
+    record = clean(value)
+    if nonfinite:
+        record["nonfinite_metrics"] = nonfinite
+    return record
+
+
+class NonFiniteLossError(ValueError):
+    def __init__(self, metrics):
+        self.metrics = metrics
+        names = ", ".join(f"{name}={value}" for name, value in metrics.items())
+        super().__init__(f"Non-finite loss (loss 非有限值): {names}. Check the learning rate, precision and training data.")
+
+
+def check_finite_loss(metrics):
+    invalid = {
+        name: value for name, value in metrics.items()
+        if (name == "loss" or name.endswith("_loss")) and not math.isfinite(value)
+    }
+    if invalid:
+        raise NonFiniteLossError(invalid)
+
+
 def write_json(filename, value):
     filename = Path(filename)
     temporary = filename.with_suffix(filename.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
+    temporary.write_text(json.dumps(json_record(value), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     temporary.replace(filename)
 
 
@@ -50,10 +85,13 @@ class JsonMetrics(TrainerCallback):
         self.session = session
 
     def on_log(self, args, state, control, logs=None, **kwargs):
-        if state.is_world_process_zero and logs:
+        if not logs:
+            return
+        if state.is_world_process_zero:
             record = {"session": self.session, "step": state.global_step, **logs}
             with self.filename.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, allow_nan=False) + "\n")
+                handle.write(json.dumps(json_record(record), allow_nan=False) + "\n")
+        check_finite_loss(logs)
 
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step >= state.max_steps:
@@ -75,6 +113,7 @@ def training_arguments(config):
         learning_rate=t.learning_rate, weight_decay=t.weight_decay, warmup_steps=t.warmup_steps,
         lr_scheduler_type="cosine", optim="adamw_torch", max_grad_norm=t.max_grad_norm,
         logging_strategy="steps", logging_steps=t.logging_steps, logging_first_step=True,
+        logging_nan_inf_filter=False,
         eval_strategy="steps", eval_steps=t.eval_steps,
         save_strategy="steps", save_steps=t.save_steps, save_total_limit=t.save_total_limit,
         gradient_checkpointing=config.model.gradient_checkpointing,
@@ -143,11 +182,11 @@ def resolve_runtime_config(config):
     ))
 
 
-def train(config, resume=None, offline=False, callbacks=()):
+def train(config, resume=None, offline=False, callbacks=(), verify_data=False):
     config = resolve_runtime_config(config)
     output = path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
-    datasets, data_manifest = read_prepared(config)
+    datasets, data_manifest = read_prepared(config, verify_data=verify_data)
     versions = package_versions()
     args = training_arguments(config)
     data_hash = prepared_digest(data_manifest)
@@ -178,6 +217,10 @@ def train(config, resume=None, offline=False, callbacks=()):
             "effective_batch_size": config.training.batch_size * config.training.gradient_accumulation_steps * args.world_size,
             "block_size": config.data.block_size,
             "train_sequences": len(datasets["train"]), "validation_sequences": len(datasets["validation"]),
+            "training_budget": {
+                "unit": "optimizer_updates", "max_steps": config.training.max_steps,
+                "repeat_dataset": True,
+            },
             "started_at": datetime.now(timezone.utc).isoformat(), "resume_from": checkpoint,
             "timing": "Trainer wall-clock metrics include the training loop; they are not GEMM kernel timings.",
         }
@@ -202,11 +245,22 @@ def train(config, resume=None, offline=False, callbacks=()):
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
         data_collator=CausalCollator(), callbacks=[JsonMetrics(output, session), *callbacks],
     )
-    result = trainer.train(resume_from_checkpoint=checkpoint)
-    evaluation = trainer.evaluate(metric_key_prefix="validation")
+    try:
+        result = trainer.train(resume_from_checkpoint=checkpoint)
+        evaluation = trainer.evaluate(metric_key_prefix="validation")
+        check_finite_loss({**result.metrics, **evaluation})
+    except NonFiniteLossError as exc:
+        if args.process_index == 0:
+            write_json(output / "result.json", {
+                "status": "failed", "reason": "nonfinite_loss", "message": str(exc),
+                "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
+                **exc.metrics,
+            })
+        raise
     loss = evaluation["validation_loss"]
     metrics = {
-        **result.metrics, **evaluation, "global_step": trainer.state.global_step,
+        **result.metrics, **evaluation, "status": "completed",
+        "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
         "validation_perplexity": math.exp(loss) if math.isfinite(loss) and loss < 700 else None,
     }
     if args.process_index == 0:

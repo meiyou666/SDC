@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -104,10 +105,10 @@ class RuntimeEnvironmentTests(unittest.TestCase):
         self.assertEqual(self.errors(), [])
 
     def test_ubuntu_distribution_matches_baseline(self):
-        runtime.check_distribution(self.baseline, {"ID": "ubuntu", "VERSION_ID": "24.04"})
+        runtime.check_distribution(self.baseline, {"ID": "ubuntu", "VERSION_ID": "22.04"})
 
     def test_different_distribution_or_release_is_rejected(self):
-        for release in [{"ID": "debian", "VERSION_ID": "12"}, {"ID": "ubuntu", "VERSION_ID": "22.04"}]:
+        for release in [{"ID": "debian", "VERSION_ID": "12"}, {"ID": "ubuntu", "VERSION_ID": "24.04"}]:
             with self.subTest(release=release), self.assertRaisesRegex(ValueError, "Distribution:"):
                 runtime.check_distribution(self.baseline, release)
 
@@ -116,6 +117,50 @@ class RuntimeEnvironmentTests(unittest.TestCase):
 
     def test_architecture_is_checked(self):
         self.assertTrue(any("Platform:" in x for x in self.errors(machine="aarch64")))
+
+    def test_declared_arm64_runtime_is_accepted(self):
+        self.baseline["platforms"] = ["linux/amd64", "linux/arm64"]
+        self.assertEqual(self.errors(machine="aarch64"), [])
+
+    def test_development_torch_version_comes_from_baseline(self):
+        baseline = {"schema_version": 4, "development_profile": {"torch": "2.9.0+cpu"}}
+        with mock.patch.object(runtime.importlib.metadata, "version", return_value="2.9.0+cpu"):
+            runtime.check_torch_version(baseline, "development")
+        with mock.patch.object(runtime.importlib.metadata, "version", return_value="2.7.1+cpu"):
+            with self.assertRaisesRegex(ValueError, "2.9.0"):
+                runtime.check_torch_version(baseline, "development")
+
+    def test_workspace_verifier_compares_against_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / "environment").mkdir()
+            for name in ["environment/baseline.json", "uv.lock", "pyproject.toml", ".python-version"]:
+                (project / name).write_bytes((ROOT / name).read_bytes())
+            with (project / "pyproject.toml").open("a") as handle:
+                handle.write("\n# Different from image\n")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "environment/verify_environment.py"), "--project", str(project)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("files used to build this image", result.stderr)
+
+    def test_optional_startup_failure_still_executes_container_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "project").mkdir()
+            (root / "activate-accelerator.sh").write_text("")
+            (root / "setup-codex.sh").write_text("exit 19\n")
+            # No AI tool or network request: simulate a failed optional initializer.
+            entrypoint = (ROOT / "environment/docker/entrypoint.sh").read_text().replace("/opt/sdc", str(root))
+            entrypoint = entrypoint.replace("/workspace/SDC", str(root / "workspace"))
+            command = 'python() { return 0; }\n' + entrypoint
+            result = subprocess.run(
+                ["bash", "-c", command, "entrypoint-test", "bash", "-c", "echo COMMAND_RAN; exit 7"],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 7)
+            self.assertIn("COMMAND_RAN", result.stdout)
 
     def test_uv_version_is_checked(self):
         self.assertTrue(any("uv:" in x for x in self.errors(uv="0.12.23")))
