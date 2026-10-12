@@ -33,13 +33,15 @@ def configure(project, profile, platform, uid, soc="", device_gid=0):
     if uid == 0:
         config["containerUser"] = "root"
         config["remoteUser"] = "root"
-        config["mounts"] = [x.replace("target=/home/sdc/", "target=/root/") for x in config["mounts"]]
+        # Keep the shared npm prefix and PATH, including accelerator SDK paths.
+        config["mounts"] = [
+            x if "target=/home/sdc/.local," in x else x.replace("target=/home/sdc/", "target=/root/")
+            for x in config["mounts"]
+        ]
         config["containerEnv"].update({
-            "NPM_CONFIG_PREFIX": "/root/.local",
             "NPM_CONFIG_CACHE": "/root/.cache/npm",
             "HF_HOME": "/root/.cache/huggingface",
         })
-        config.setdefault("remoteEnv", {})["PATH"] = "/root/.local/bin:${containerEnv:PATH}"
 
     directory = project / f".devcontainer/cloud-{profile}"
     if directory.is_symlink():
