@@ -1,14 +1,34 @@
-"""Full-parameter training through the shared Transformers Trainer."""
+"""Full-parameter continued pretraining through the shared Transformers Trainer.
 
-from datetime import datetime, timezone
+One call to :func:`train` performs a complete run: it resolves the device from
+the container, loads the prepared data, builds the model in FP32 with BF16
+autocast, trains for ``max_steps`` optimizer updates, evaluates, and writes
+
+``config.resolved.json``
+    the configuration actually used, after device resolution
+``run.json``
+    software versions, data digest, device and training budget
+``metrics.jsonl``
+    one JSON object per Trainer log line
+``result.json``
+    final training and validation metrics, or the failure reason
+``checkpoint-<step>/``
+    model, optimizer, scheduler and RNG state for ``--resume``
+
+``callbacks`` takes ``TrainerCallback`` instances, which reach the live model
+and step counter.
+"""
+
+from collections.abc import Sequence
 from dataclasses import replace
-import importlib.metadata
+from datetime import datetime, timezone
 import json
 import math
 import os
 from pathlib import Path
 import platform
 import subprocess
+from typing import Any
 import uuid
 
 from accelerate.utils import is_npu_available
@@ -16,95 +36,52 @@ import torch
 from transformers import AutoConfig, AutoModelForCausalLM, Trainer, TrainerCallback, TrainingArguments
 from transformers.trainer_utils import get_last_checkpoint
 
-from .config import ROOT, file_digest, model_source, path, run_signature
+from .config import ROOT, Config, file_digest, model_source, resolve_path, run_signature
 from .data import CausalCollator, load_tokenizer, prepared_digest, read_prepared
+from .metrics import (
+    JsonMetrics, NonFiniteLossError, check_finite_loss, package_versions, write_json,
+)
 
 
-def json_record(value):
-    nonfinite = {}
+#: ``device: accelerator`` resolves through the container's SDC_RUNTIME.
+RUNTIME_DEVICES = {"nvidia": "cuda", "ascend": "npu"}
 
-    def clean(item, key=""):
-        if isinstance(item, float) and not math.isfinite(item):
-            nonfinite[key] = str(item)
-            return None
-        if isinstance(item, dict):
-            return {name: clean(child, f"{key}.{name}" if key else str(name)) for name, child in item.items()}
-        if isinstance(item, (list, tuple)):
-            return [clean(child, f"{key}[{index}]") for index, child in enumerate(item)]
-        return item
-
-    record = clean(value)
-    if nonfinite:
-        record["nonfinite_metrics"] = nonfinite
-    return record
+#: Files a checkpoint must contain before it is accepted for ``--resume``.
+CHECKPOINT_FILES = ("optimizer.pt", "scheduler.pt")
 
 
-class NonFiniteLossError(ValueError):
-    def __init__(self, metrics):
-        self.metrics = metrics
-        names = ", ".join(f"{name}={value}" for name, value in metrics.items())
-        super().__init__(f"Non-finite loss (loss 非有限值): {names}. Check the learning rate, precision and training data.")
-
-
-def check_finite_loss(metrics):
-    invalid = {
-        name: value for name, value in metrics.items()
-        if (name == "loss" or name.endswith("_loss")) and not math.isfinite(value)
-    }
-    if invalid:
-        raise NonFiniteLossError(invalid)
-
-
-def write_json(filename, value):
-    filename = Path(filename)
-    temporary = filename.with_suffix(filename.suffix + ".tmp")
-    temporary.write_text(json.dumps(json_record(value), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
-    temporary.replace(filename)
-
-
-def package_versions():
-    versions = {}
-    for name in ("torch", "transformers", "datasets", "accelerate", "tokenizers", "torch-npu"):
-        try:
-            versions[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            continue
-    return versions
-
-
-def require_device(device):
+def require_device(device: str) -> None:
+    """Check the requested device before the model is loaded."""
     if device == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA is unavailable in this container; select the maintained CUDA environment.")
+        raise ValueError("容器中没有可用的 CUDA 设备，请使用维护好的 NVIDIA 容器。")
     if device == "npu" and not is_npu_available():
-        raise ValueError("NPU is unavailable. The Ascend container needs matching CANN, torch_npu and device mounts.")
+        raise ValueError("没有可用的 NPU：昇腾容器需要匹配的 CANN、torch_npu 和设备映射。")
 
 
-class JsonMetrics(TrainerCallback):
-    def __init__(self, output, session):
-        self.filename = output / "metrics.jsonl"
-        self.session = session
-
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        if not logs:
-            return
-        if state.is_world_process_zero:
-            record = {"session": self.session, "step": state.global_step, **logs}
-            with self.filename.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(json_record(record), allow_nan=False) + "\n")
-        check_finite_loss(logs)
-
-    def on_step_end(self, args, state, control, **kwargs):
-        if state.global_step >= state.max_steps:
-            control.should_save = True
-        return control
+def resolve_runtime_config(config: Config) -> Config:
+    """Resolve ``device: accelerator`` and ``{backend}`` from the container."""
+    device = config.training.device
+    if device == "accelerator":
+        device = RUNTIME_DEVICES.get(os.environ.get("SDC_RUNTIME", ""))
+        if device is None:
+            raise ValueError("Qwen 训练任务请在 nvidia 或 ascend 容器中运行。")
+    return replace(config, training=replace(
+        config.training, device=device,
+        output_dir=config.training.output_dir.replace("{backend}", device),
+    ))
 
 
-def training_arguments(config):
+def training_arguments(config: Config) -> TrainingArguments:
+    """Translate the config into Trainer arguments.
+
+    FP32 master weights with BF16 autocast, TF32 off, attention kernel from the
+    config.
+    """
     t = config.training
     require_device(t.device)
     torch.set_num_threads(t.cpu_threads)
     args = TrainingArguments(
-        output_dir=str(path(t.output_dir)),
+        output_dir=str(resolve_path(t.output_dir)),
         use_cpu=t.device == "cpu", bf16=t.precision == "bf16", fp16=t.precision == "fp16",
         tf32=False, seed=t.seed, data_seed=t.seed, full_determinism=t.full_determinism,
         max_steps=t.max_steps,
@@ -124,33 +101,37 @@ def training_arguments(config):
         prediction_loss_only=True, save_safetensors=True,
     )
     if args.device.type != t.device:
-        raise ValueError(f"Requested {t.device}, but Trainer selected {args.device.type}.")
+        raise ValueError(f"配置要求 {t.device}，但 Trainer 选择了 {args.device.type}。")
     if args.world_size == 1 and args.n_gpu > 1:
-        raise ValueError("Launch multiple devices with torchrun, or expose one device for a single-process run.")
+        raise ValueError("实验按单卡运行：请只开放一张设备（多卡需用 torchrun 启动）。")
     return args
 
 
-def resolve_checkpoint(output, resume):
+def resolve_checkpoint(output: Path, resume: str | None) -> str | None:
+    """Pick the checkpoint to resume from, or verify the output dir is unused."""
     if resume is None:
         if output.exists() and any(output.iterdir()):
-            raise ValueError("output_dir is not empty. Set a new directory or use --resume latest.")
+            raise ValueError("output_dir 非空：请换一个目录，或使用 --resume latest。")
         return None
     checkpoint = get_last_checkpoint(str(output)) if resume == "latest" and output.is_dir() else None
     if resume != "latest":
-        checkpoint = str(path(resume))
+        checkpoint = str(resolve_path(resume))
     if not checkpoint or not (Path(checkpoint) / "trainer_state.json").is_file():
-        raise ValueError("No complete Trainer checkpoint found.")
-    for name in ("optimizer.pt", "scheduler.pt"):
+        raise ValueError("没有找到完整的 Trainer 检查点。")
+    for name in CHECKPOINT_FILES:
         if not (Path(checkpoint) / name).is_file():
-            raise ValueError(f"Checkpoint is missing {name}.")
+            raise ValueError(f"检查点缺少 {name}。")
     return checkpoint
 
 
-def validate_resume(checkpoint, config, data_hash, versions, world_size):
-    checkpoint = Path(checkpoint)
-    filename = checkpoint.parent / "run.json"
+def validate_resume(
+    checkpoint: str, config: Config, data_hash: str, versions: dict[str, str], world_size: int,
+) -> None:
+    """Refuse to resume into different settings, data or software."""
+    directory = Path(checkpoint)
+    filename = directory.parent / "run.json"
     if not filename.is_file():
-        raise ValueError("The checkpoint needs its original run.json.")
+        raise ValueError("续训需要原始运行目录中的 run.json。")
     previous = json.loads(filename.read_text())
     current = {
         "config_signature": run_signature(config), "data_digest": data_hash,
@@ -159,34 +140,83 @@ def validate_resume(checkpoint, config, data_hash, versions, world_size):
     }
     for key, value in current.items():
         if previous.get(key) != value:
-            raise ValueError(f"Resume settings differ: {key}.")
-    state = json.loads((checkpoint / "trainer_state.json").read_text())
+            raise ValueError(f"续训设置不一致：{key}。")
+    state = json.loads((directory / "trainer_state.json").read_text())
     if state["global_step"] >= config.training.max_steps:
-        raise ValueError("This checkpoint has already reached max_steps.")
+        raise ValueError("这个检查点已经达到 max_steps。")
     ranks = range(world_size) if world_size > 1 else [None]
     for rank in ranks:
-        filename = checkpoint / ("rng_state.pth" if rank is None else f"rng_state_{rank}.pth")
+        filename = directory / ("rng_state.pth" if rank is None else f"rng_state_{rank}.pth")
         if not filename.is_file():
-            raise ValueError(f"Checkpoint is missing {filename.name}.")
+            raise ValueError(f"检查点缺少 {filename.name}。")
 
 
-def resolve_runtime_config(config):
-    device = config.training.device
-    if device == "accelerator":
-        device = {"nvidia": "cuda", "ascend": "npu"}.get(os.environ.get("SDC_RUNTIME"))
-        if device is None:
-            raise ValueError("Run the Qwen task in the nvidia or ascend container.")
-    return replace(config, training=replace(
-        config.training, device=device,
-        output_dir=config.training.output_dir.replace("{backend}", device),
-    ))
+def _git_commit() -> str | None:
+    """Current commit, or None outside a git checkout."""
+    try:
+        return subprocess.check_output(
+            ["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"],
+            cwd=ROOT, text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
-def train(config, resume=None, offline=False, callbacks=(), verify_data=False):
+def _run_record(
+    config: Config, args: TrainingArguments, datasets: Any, data_hash: str,
+    versions: dict[str, str], checkpoint: str | None,
+) -> dict[str, Any]:
+    """Assemble the run.json provenance record."""
+    device = getattr(torch, args.device.type, None)
+    device_name = device.get_device_name(args.device) if hasattr(device, "get_device_name") else platform.machine()
+    t = config.training
+    return {
+        "schema_version": 1, "task": "full_parameter_causal_language_modeling",
+        "config_signature": run_signature(config), "data_digest": data_hash,
+        "packages": versions, "world_size": args.world_size,
+        "lock_sha256": file_digest(ROOT / "uv.lock"), "git_commit": _git_commit(),
+        "python": platform.python_version(), "device": str(args.device), "device_name": device_name,
+        "master_weights": "float32", "autocast": t.precision,
+        "effective_batch_size": t.batch_size * t.gradient_accumulation_steps * args.world_size,
+        "block_size": config.data.block_size,
+        "train_sequences": len(datasets["train"]), "validation_sequences": len(datasets["validation"]),
+        "training_budget": {
+            "unit": "optimizer_updates", "max_steps": t.max_steps, "repeat_dataset": True,
+        },
+        "started_at": datetime.now(timezone.utc).isoformat(), "resume_from": checkpoint,
+        "timing": "Trainer wall-clock metrics include the training loop; they are not GEMM kernel timings.",
+    }
+
+
+def _load_model(config: Config, offline: bool):
+    """Load the pinned model in FP32 with the configured attention kernel."""
+    source = model_source(config.model)
+    model_config = AutoConfig.from_pretrained(
+        source, revision=config.model.revision, trust_remote_code=False, local_files_only=offline,
+    )
+    limit = getattr(model_config, "max_position_embeddings", getattr(model_config, "n_positions", None))
+    if limit is not None and config.data.block_size > limit:
+        raise ValueError(f"block_size 超过模型上下文长度 {limit}。")
+    model = AutoModelForCausalLM.from_pretrained(
+        source, revision=config.model.revision, config=model_config,
+        torch_dtype=torch.float32, attn_implementation=config.model.attention,
+        trust_remote_code=False, local_files_only=offline,
+    )
+    model.config.use_cache = False
+    return model
+
+
+def train(
+    config: Config,
+    resume: str | None = None,
+    offline: bool = False,
+    callbacks: Sequence[TrainerCallback] = (),
+) -> tuple[Trainer, dict[str, Any]]:
+    """Run one training job and return the Trainer and its final metrics."""
     config = resolve_runtime_config(config)
-    output = path(config.training.output_dir)
+    output = resolve_path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
-    datasets, data_manifest = read_prepared(config, verify_data=verify_data)
+    datasets, data_manifest = read_prepared(config)
     versions = package_versions()
     args = training_arguments(config)
     data_hash = prepared_digest(data_manifest)
@@ -198,50 +228,15 @@ def train(config, resume=None, offline=False, callbacks=(), verify_data=False):
     session = uuid.uuid4().hex
     if args.process_index == 0:
         output.mkdir(parents=True, exist_ok=True)
-        try:
-            commit = subprocess.check_output(
-                ["git", "-c", f"safe.directory={ROOT}", "rev-parse", "HEAD"],
-                cwd=ROOT, text=True, stderr=subprocess.DEVNULL,
-            ).strip()
-        except (OSError, subprocess.CalledProcessError):
-            commit = None
-        device = getattr(torch, args.device.type, None)
-        device_name = device.get_device_name(args.device) if hasattr(device, "get_device_name") else platform.machine()
-        record = {
-            "schema_version": 1, "task": "full_parameter_causal_language_modeling",
-            "config_signature": run_signature(config), "data_digest": data_hash,
-            "packages": versions, "world_size": args.world_size,
-            "lock_sha256": file_digest(ROOT / "uv.lock"), "git_commit": commit,
-            "python": platform.python_version(), "device": str(args.device), "device_name": device_name,
-            "master_weights": "float32", "autocast": config.training.precision,
-            "effective_batch_size": config.training.batch_size * config.training.gradient_accumulation_steps * args.world_size,
-            "block_size": config.data.block_size,
-            "train_sequences": len(datasets["train"]), "validation_sequences": len(datasets["validation"]),
-            "training_budget": {
-                "unit": "optimizer_updates", "max_steps": config.training.max_steps,
-                "repeat_dataset": True,
-            },
-            "started_at": datetime.now(timezone.utc).isoformat(), "resume_from": checkpoint,
-            "timing": "Trainer wall-clock metrics include the training loop; they are not GEMM kernel timings.",
-        }
-        write_json(output / "run.json", record)
+        write_json(output / "run.json", _run_record(
+            config, args, datasets, data_hash, versions, checkpoint,
+        ))
         write_json(output / "config.resolved.json", config.to_dict())
     if args.world_size > 1:
         torch.distributed.barrier()
     tokenizer = load_tokenizer(config, offline)
-    source = model_source(config.model)
-    model_config = AutoConfig.from_pretrained(source, revision=config.model.revision, trust_remote_code=False, local_files_only=offline)
-    limit = getattr(model_config, "max_position_embeddings", getattr(model_config, "n_positions", None))
-    if limit is not None and config.data.block_size > limit:
-        raise ValueError(f"block_size exceeds the model context length {limit}.")
-    model = AutoModelForCausalLM.from_pretrained(
-        source, revision=config.model.revision, config=model_config,
-        torch_dtype=torch.float32, attn_implementation=config.model.attention,
-        trust_remote_code=False, local_files_only=offline,
-    )
-    model.config.use_cache = False
     trainer = Trainer(
-        model=model, args=args, processing_class=tokenizer,
+        model=_load_model(config, offline), args=args, processing_class=tokenizer,
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
         data_collator=CausalCollator(), callbacks=[JsonMetrics(output, session), *callbacks],
     )
