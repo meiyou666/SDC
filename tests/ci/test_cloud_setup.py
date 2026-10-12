@@ -53,9 +53,10 @@ def test_root_session_has_writable_tools_and_persistent_personal_state(project):
     config = json.loads(cloud.configure(project, "dev", "linux/amd64", uid=0).read_text())
     assert config["containerUser"] == config["remoteUser"] == "root"
     assert any("target=/root/.codex" in value for value in config["mounts"])
-    assert any("target=/root/.local" in value for value in config["mounts"])
+    assert any("target=/home/sdc/.local" in value for value in config["mounts"])
     assert config["containerEnv"]["HF_HOME"] == "/root/.cache/huggingface"
-    assert config["remoteEnv"]["PATH"].startswith("/root/.local/bin:")
+    assert "PATH" not in config.get("remoteEnv", {})
+    assert "NPM_CONFIG_PREFIX" not in config["containerEnv"]
 
 
 def test_rerun_preserves_api_settings_and_other_profiles(project):
