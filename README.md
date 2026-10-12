@@ -27,7 +27,7 @@ Copy-Item .env.example .env
 
 3. 执行 `exit` 返回 PowerShell，再执行 `wsl -d Ubuntu-24.04`，使 Docker 用户组设置生效。
 4. VS Code 安装 **WSL** 扩展，连接 Ubuntu，打开仓库中的 [`SDC.code-workspace`](SDC.code-workspace)。
-5. 执行 **Dev Containers: Reopen in Container**。终端启动命令为 `./dev.sh`。
+5. 执行 **Dev Containers: Reopen in Container**，按下方说明选择容器。
 
 ### 方案二：Windows
 
@@ -44,9 +44,31 @@ Copy-Item .env.example .env
    - **Resources**：分配至少 4 GB 内存。
    - **Resources → File sharing**：添加仓库目录。
 
-4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**。PowerShell 启动命令为 `.\dev.cmd`。
+4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**，按下方说明选择容器。
 
-进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
+### 选择和切换容器
+
+打开工作区后，按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container（开发容器：在容器中重新打开）**。首次进入时会显示以下列表，由你选择；项目没有自动选择硬件的设置。恢复之前的容器窗口时，会继续连接该容器。
+
+![VS Code 容器选择列表：SDC、SDC Ascend、SDC NVIDIA](docs/images/devcontainer-selection.png)
+
+| 容器名称 | 用途 | 配置文件 |
+| --- | --- | --- |
+| **SDC** | 日常开发、调试和单元测试 | [开发配置](.devcontainer/devcontainer.json) |
+| **SDC NVIDIA** | NVIDIA GPU 上的训练与实验 | [GPU 配置](.devcontainer/nvidia/devcontainer.json) |
+| **SDC Ascend** | 昇腾 NPU 上的训练与实验 | [NPU 配置](.devcontainer/ascend/devcontainer.json) |
+
+本机日常开发选择 **SDC**。使用服务器算力时，先通过 VS Code 的 **Remote-SSH** 打开服务器上的仓库，再选择对应的训练容器。
+
+**切换容器**：在当前容器窗口按 `Ctrl+Shift+P`，执行 **Dev Containers: Switch Container（开发容器：切换容器）**，选择另一个配置。窗口左下角可查看当前容器名称。
+
+三种配置使用独立容器，只需启动所选的一个。同一台主机上的三个容器挂载同一份仓库，代码修改会保留。首次使用某个配置需要构建，后续启动可复用已有镜像和容器；Dockerfile 或依赖更新后，执行 **Dev Containers: Rebuild Container**。
+
+终端启动脚本 `./dev.sh`（WSL）和 `.\dev.cmd`（Windows）固定启动 **SDC 开发环境**。GPU、NPU 的命令行启动方式见[公共训练任务](docs/training.md)。
+
+### 容器内使用
+
+进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。详细设置见[环境说明](environment/README.md)。
 
 常规 Python 依赖和 WSL 下的 Docker 安装包使用清华源，PyTorch 使用对应硬件的官方源；容器基础镜像来自 Docker Hub 和 GHCR。
 
@@ -90,7 +112,10 @@ SDC/
 ├── .env                       # 个人密钥，不提交
 ├── SDC.code-workspace          # VS Code 工作区入口
 ├── .vscode/extensions.json     # 推荐扩展
-├── .devcontainer/             # VS Code 容器配置
+├── .devcontainer/
+│   ├── devcontainer.json      # SDC：日常开发
+│   ├── nvidia/devcontainer.json  # SDC NVIDIA：GPU 训练
+│   └── ascend/devcontainer.json  # SDC Ascend：NPU 训练
 ├── src/
 │   ├── algorithms/            # ABFT 算法
 │   ├── evaluation/            # 注入、统计与计时
@@ -100,6 +125,7 @@ SDC/
 │   ├── training/              # 公共训练配置
 │   └── evaluation/            # 评测配置
 ├── docs/
+│   ├── images/                # 文档截图
 │   ├── papers/                # 论文精读记录
 │   └── reproduction/          # 复现与人工比对记录
 ├── experiments/               # 实验配置与小型摘要
