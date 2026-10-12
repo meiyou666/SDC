@@ -1,4 +1,4 @@
 interface:
-  display_name: "Revise Evidence Report"
-  short_description: "Audit and deliver an existing evidence-backed report"
-  default_prompt: "Use $revise-evidence-report to audit this report against its evidence, co-review the revisions, and deliver verified Markdown, HTML, and PDF artifacts."
+  display_name: "研究报告写作"
+  short_description: "依据论文、数据和批注整理研究报告，按需导出 HTML 或 PDF"
+  default_prompt: "使用 $revise-evidence-report，根据现有材料和修改意见整理报告，保持结构清晰、语言简洁，并按指定格式交付。"
