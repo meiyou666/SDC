@@ -143,7 +143,7 @@ sdc_setup_cloud() {
         --uid "$sdc_uid" --soc "$sdc_soc" --device-gid "$sdc_device_gid"
 
     printf '\n%s\n' '镜像已构建。请在服务器仓库的 .env 中填写个人 API 密钥。'
-    if ! docker info >/dev/null 2>&1; then
+    if [[ ${SDC_DOCKER_GROUP_CHANGED:-0} == 1 ]] || ! docker info >/dev/null 2>&1; then
         printf '%s\n' '用户组已更新：在 VS Code 执行 Remote-SSH: Kill VS Code Server on Host，再重新连接服务器。'
     fi
     printf '%s\n' '在 Remote-SSH 窗口打开服务器仓库，执行 Dev Containers: Reopen in Container，选择“SDC 云端”入口。'

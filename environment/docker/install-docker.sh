@@ -21,6 +21,7 @@ sdc_install_docker() {
     local sdc_user=${1:-${SUDO_USER:-$(id -un)}}
     local sdc_key sdc_codename sdc_arch
     local -a sdc_packages=()
+    SDC_DOCKER_GROUP_CHANGED=0
     . /etc/os-release
     if [[ $ID != ubuntu ]]; then
         printf '%s\n' '此安装脚本使用 Ubuntu 的软件源。' >&2
@@ -86,6 +87,7 @@ EOF
         fi
         if [[ " $(id -nG "$sdc_user") " != *' docker '* ]]; then
             sdc_root usermod -aG docker "$sdc_user"
+            SDC_DOCKER_GROUP_CHANGED=1
         fi
     fi
     printf '%s\n' 'Docker Engine、Compose 和 Buildx 已准备好。'
@@ -101,7 +103,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
         exit 2
     fi
     sdc_install_docker "$@"
-    if ! docker info >/dev/null 2>&1; then
+    if [[ $SDC_DOCKER_GROUP_CHANGED == 1 ]] || ! docker info >/dev/null 2>&1; then
         printf '%s\n' '用户组已更新。请重新登录后使用 Docker。'
     fi
 fi
