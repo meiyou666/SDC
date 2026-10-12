@@ -24,7 +24,7 @@ bash scripts/train.sh prepare --config configs/training/smollm2_cpu_smoke.yaml
 bash scripts/train.sh train --config configs/training/smollm2_cpu_smoke.yaml --offline
 ```
 
-`prepare` 下载语料、分词器和模型，并保存已分词的数据。此后 `train --offline` 从本地读取，不在训练过程中下载。
+`prepare` 下载语料、分词器和模型，并保存已分词的数据。下载中断后重新执行同一命令即可复用已有文件。此后 `train --offline` 从本地读取，不在训练过程中下载。
 
 公共任务可先准备数据与模型：
 

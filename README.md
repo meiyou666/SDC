@@ -48,7 +48,7 @@ Copy-Item .env.example .env
 
 进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
 
-Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像来自 Docker Hub 和 GHCR。
+常规 Python 依赖和 WSL 下的 Docker 安装包使用清华源，PyTorch CPU 使用官方源；容器基础镜像来自 Docker Hub 和 GHCR。
 
 容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
 
@@ -94,7 +94,7 @@ SDC/
 ├── src/
 │   ├── algorithms/            # ABFT 算法
 │   ├── evaluation/            # 注入、统计与计时
-│   ├── training/              # 训练流程与 GEMM 采集
+│   ├── training/              # 公共训练任务
 │   └── backends/ascend/        # 昇腾算子实现
 ├── configs/
 │   ├── training/              # 公共训练配置
