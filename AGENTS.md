@@ -7,7 +7,7 @@
 - 开始任务时先阅读 [项目研究说明](docs/project.md)，了解研究问题、代表方法与实验口径，再阅读本次任务涉及的代码和配置。
 - 统一评测与算法研究可以并行，使用共同的训练操作数、故障协议和指标定义。具体优化机制由论文复现与实验结果确定。
 - 训练任务读取 [训练说明](docs/training.md)；云端部署读取 [云服务器使用说明](docs/cloud.md)。
-- 撰写或修改研究报告前，读取团队共享的 [.agent/skills/revise-evidence-report/SKILL.md](.agent/skills/revise-evidence-report/SKILL.md)，按需加载其参考文件。报告使用简洁、清晰的学术中文。
+- 撰写或润色报告、总结和日常进展说明时，读取并遵循 [报告语言风格](.agent/skills/report-style/SKILL.md)，使用简洁、直接、专业、易懂的表达。
 
 ## 项目约定
 
@@ -26,7 +26,7 @@
 - 容器不可用时，先修复 Docker，或在 GitHub Actions 中使用项目容器执行；不得回退到宿主机环境。
 - 项目 Python 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建实验 requirements 清单或自行升级项目依赖。环境维护使用 Compose 的 `tools` 服务。
 - AI 工具的版本、插件、MCP 和 skills 不做统一限制，可自行安装、升级和配置，不加入 AI 工具的 CI 检查或测试。AI 扩展依赖使用个人目录或独立虚拟环境，不改动项目的 `/opt/venv`、依赖锁文件和训练配置。
-- 团队共享 skills 放在 `.agent/skills/`，来源与使用入口见 [.agent/README.md](.agent/README.md)。其中的工具依赖与项目实验依赖分开管理；实验实现仍放在 `src/`、`experiments/` 等项目目录。
+- 团队共享 skills 放在 `.agent/skills/`，使用说明见 [.agent/README.md](.agent/README.md)。其中的工具依赖与项目实验依赖分开管理；实验实现仍放在 `src/`、`experiments/` 等项目目录。
 - Codex 每次安装使用 latest，初始模型和审查模型为 `gpt-6-astra`。首次启动写入初始配置，后续个人设置、插件、MCP 和 skills 自行维护，不覆盖已有配置。API 地址在 `.env.example` 中预填；个人密钥放在 `.env`，不得提交或输出密钥。
 - NVIDIA 与昇腾训练镜像共用根目录 `uv.lock` 和 Dockerfile。公共 Python 库必须保持同版本，硬件差异只放在 `nvidia`、`ascend` extra 和对应 SDK 中。本地开发检查使用 `development` extra，不设置 CPU 训练任务。
 - 容器内检查：`bash scripts/check.sh`。直接使用 uv 时，按 `SDC_RUNTIME` 指定 `--extra development`、`--extra nvidia` 或 `--extra ascend`。设备检查：`python environment/verify_environment.py --accelerator`。
