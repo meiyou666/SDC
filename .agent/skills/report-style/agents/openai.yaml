@@ -1,0 +1,4 @@
+interface:
+  display_name: "报告语言风格"
+  short_description: "统一日常进展、实验总结和技术报告的语言，表达简洁、专业、易懂"
+  default_prompt: "使用 $report-style 润色这份报告，保留原有事实和结构，语言简洁、直接、专业、易懂。"

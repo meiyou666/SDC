@@ -153,7 +153,7 @@ SDC/
 ├── data/                      # 本地模型与数据，不提交
 ├── results/                   # 本地实验输出，不提交
 ├── archive/                   # 旧实验归档
-├── .agent/skills/             # 团队共享报告 skill
+├── .agent/skills/             # 报告语言风格
 ├── .github/
 │   ├── workflows/             # CI
 │   └── CODE_REVIEW.md         # 代码审查规范
