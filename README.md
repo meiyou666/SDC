@@ -12,7 +12,7 @@ cd SDC
 Copy-Item .env.example .env
 ```
 
-随后选择下面一种环境方案。两套方案均在 VS Code 中使用 Ubuntu 24.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+随后选择下面一种本机方案。两套方案均在 VS Code 中使用 Ubuntu 22.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
 在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 只保存在本机。
 
@@ -48,7 +48,7 @@ Copy-Item .env.example .env
 
 进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
 
-常规 Python 依赖和 WSL 下的 Docker 安装包使用清华源，PyTorch CPU 使用官方源；容器基础镜像来自 Docker Hub 和 GHCR。
+常规 Python 依赖和 WSL 下的 Docker 安装包使用清华源，PyTorch 使用对应硬件的官方源；容器基础镜像来自 Docker Hub 和 GHCR。
 
 容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
 
@@ -64,7 +64,7 @@ VS Code 预留 6006 和 8888 端口转发。工具清单与远程使用示例见
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
-训练入口与运行命令见[公共训练任务](docs/training.md)。默认任务为 Qwen3-0.6B 的全参数继续预训练；当前容器可先运行 SmolLM2-135M 的 CPU 短程检查。
+训练任务统一为 Qwen3-0.6B 的全参数继续预训练。服务器使用 NVIDIA GPU 或昇腾 NPU 容器，共用训练配置和软件版本。启动命令见[公共训练任务](docs/training.md)。
 
 ## 2. 项目结构
 
@@ -133,8 +133,7 @@ git switch -c name/task
 **在容器内运行测试**：
 
 ```bash
-uv run --locked pytest -q
-uv run --locked ruff check .
+bash scripts/check.sh
 ```
 
 **回到宿主机提交**：

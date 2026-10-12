@@ -4,16 +4,24 @@ version = "0.1.0"
 description = "ABFT research and evaluation workspace"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "numpy==2.4.6",
+    "numpy==1.26.4",
     "scipy==1.17.1",
     "pandas==3.0.6",
     "matplotlib==3.11.2",
     "PyYAML==6.0.3",
-    "torch==2.7.1+cpu",
     "transformers==4.57.6",
     "datasets==4.4.2",
-    "accelerate==1.12.0",
+    "pyarrow==21.0.0",
+    "setuptools==80.9.0",
+    "wheel==0.45.1",
+    "decorator==5.2.1",
+    "protobuf==6.33.0",
 ]
+
+[project.optional-dependencies]
+development = ["torch==2.7.1+cpu", "accelerate==1.12.0"]
+nvidia = ["torch==2.7.1+cu128", "accelerate==1.12.0"]
+ascend = ["torch==2.7.1+cpu", "torch-npu==2.7.1.post8", "accelerate==1.12.0"]
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10"]
@@ -21,7 +29,8 @@ dev = ["pytest==9.1.1", "ruff==0.16.10"]
 [tool.uv]
 package = false
 required-version = "==0.12.24"
-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
+conflicts = [[{ extra = "development" }, { extra = "nvidia" }, { extra = "ascend" }]]
 
 [[tool.uv.index]]
 name = "tuna"
@@ -34,4 +43,13 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+torch = [
+    { index = "pytorch-cu128", extra = "nvidia" },
+    { index = "pytorch-cpu", extra = "ascend" },
+    { index = "pytorch-cpu", extra = "development" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

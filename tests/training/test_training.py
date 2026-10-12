@@ -11,7 +11,7 @@ from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM,
 
 from training.config import Config, DataConfig, ModelConfig, TrainConfig, load_config, validate
 from training.data import CausalCollator, load_tokenizer, pack_texts, prepare_data, read_prepared
-from training.runner import train
+from training.runner import resolve_runtime_config, train
 
 
 @pytest.fixture
@@ -148,3 +148,18 @@ def test_public_configs_are_loadable():
 
     for filename in (ROOT / "configs/training").glob("*.yaml"):
         load_config(filename)
+
+
+@pytest.mark.parametrize(("runtime", "device"), [("nvidia", "cuda"), ("ascend", "npu")])
+def test_qwen_config_changes_only_device_and_output(runtime, device, monkeypatch):
+    from training.config import ROOT
+
+    shared = load_config(ROOT / "configs/training/qwen3_06b.yaml")
+    monkeypatch.setenv("SDC_RUNTIME", runtime)
+    resolved = resolve_runtime_config(shared)
+    assert resolved.model == shared.model
+    assert resolved.data == shared.data
+    assert resolved.training == replace(
+        shared.training, device=device,
+        output_dir=shared.training.output_dir.replace("{backend}", device),
+    )

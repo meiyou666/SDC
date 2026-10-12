@@ -20,8 +20,8 @@ data:
   prepared_dir: data/training/qwen3_06b_wikitext103
 
 training:
-  output_dir: results/training/qwen3_06b_wikitext103
-  device: npu
+  output_dir: results/training/qwen3_06b_wikitext103/{backend}
+  device: accelerator
   precision: bf16
   seed: 2026
   max_steps: 1000

@@ -18,7 +18,8 @@
 - 项目 Python 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建实验 requirements 清单或自行升级项目依赖。环境维护使用 Compose 的 `tools` 服务。
 - AI 工具的版本、插件、MCP 和 skills 不做统一限制，可自行安装、升级和配置，不加入 AI 工具的 CI 检查或测试。AI 扩展依赖使用个人目录或独立虚拟环境，不改动项目的 `/opt/venv`、依赖锁文件和训练配置。
 - Codex 每次安装使用 latest，初始模型和审查模型为 `gpt-6-astra`。首次启动写入初始配置，后续个人设置、插件、MCP 和 skills 自行维护，不覆盖已有配置。API 地址在 `.env.example` 中预填；个人密钥放在 `.env`，不得提交或输出密钥。
-- 容器内验证：`python environment/verify_environment.py --smoke`。测试：`uv run --locked pytest -q`。代码检查：`uv run --locked ruff check .`。
+- NVIDIA 与昇腾训练镜像共用根目录 `uv.lock` 和 Dockerfile。公共 Python 库必须保持同版本，硬件差异只放在 `nvidia`、`ascend` extra 和对应 SDK 中。本地开发检查使用 `development` extra，不设置 CPU 训练任务。
+- 容器内检查：`bash scripts/check.sh`。直接使用 uv 时，按 `SDC_RUNTIME` 指定 `--extra development`、`--extra nvidia` 或 `--extra ascend`。设备检查：`python environment/verify_environment.py --accelerator`。
 - 根据改动运行相关检查。公共环境和 CI 改动须通过 `Environment consistency`；没有执行的检查不得写成通过。
 
 ## 算法与实验

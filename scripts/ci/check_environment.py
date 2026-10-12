@@ -82,11 +82,12 @@ def parse_lock(text):
             raise PolicyError("Every uv.lock dependency needs a name and exact version.")
         name = package_name(name)
         if name in packages and packages[name] != version:
-            raise PolicyError(f"Conflicting locked versions for {name} in the shared profile.")
+            if name != "torch" or packages[name].split("+", 1)[0] != version.split("+", 1)[0]:
+                raise PolicyError(f"Conflicting locked versions for {name} in the shared profile.")
         artifacts = entry.get("wheels", []) + ([entry["sdist"]] if "sdist" in entry else [])
         if "registry" not in source or not artifacts or any(not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", item.get("hash", "")) for item in artifacts):
             raise PolicyError(f"{name}: keep registry packages with SHA256 artifact hashes in uv.lock.")
-        packages[name] = version
+        packages[name] = version.split("+", 1)[0] if name == "torch" else version
     if not packages:
         raise PolicyError("The frozen dependency lock is empty.")
     return packages
@@ -129,7 +130,7 @@ def imports_in(source, path):
 
 
 def check_cpu_container(snapshot, baseline, locked):
-    if baseline.get("profile") != "cpu-development" or baseline.get("platform") != "linux/amd64":
+    if baseline.get("profile") not in {"cpu-development", "shared-development"} or baseline.get("platform") != "linux/amd64":
         raise PolicyError("Use the shared cpu-development profile on linux/amd64.")
     image = baseline.get("base_image", "")
     if not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", image):
@@ -149,16 +150,36 @@ def check_cpu_container(snapshot, baseline, locked):
         if path not in snapshot.files:
             raise PolicyError(f"Missing shared container file: {path}.")
     source = snapshot.read(dockerfile)
+    profiles = baseline.get("training_profiles", {})
     aliases, images = set(), []
     for match in re.finditer(r"(?im)^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", source):
         reference, alias = match.groups()
-        if reference not in aliases:
+        if reference == "cann_${ASCEND_SOC}" and profiles:
+            if not {"cann_910b", "cann_a3", "cann_950"}.issubset(aliases):
+                raise PolicyError("Declare all pinned CANN SDK stages before selecting the chip family.")
+        elif reference not in aliases:
             images.append(reference)
         if alias:
             aliases.add(alias)
-    if images != [uv_image, image]:
+    expected_images = {uv_image, image}
+    if profiles:
+        if set(profiles) != {"nvidia", "ascend"}:
+            raise PolicyError("Declare both nvidia and ascend training profiles.")
+        expected_images.add(profiles["nvidia"]["sdk_image"])
+        expected_images.update(profiles["ascend"]["sdk_images"].values())
+        if any(not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", value) for value in expected_images):
+            raise PolicyError("Pin every accelerator SDK image by digest.")
+        versions = {profile["torch"].split("+", 1)[0] for profile in profiles.values()}
+        if len(versions) != 1 or versions != {locked.get("torch")}:
+            raise PolicyError("GPU and NPU must use the same upstream PyTorch version.")
+        if profiles["ascend"]["torch_npu"] != locked.get("torch-npu"):
+            raise PolicyError("The locked torch_npu version must match the Ascend profile.")
+    if set(images) != expected_images or len(images) != len(expected_images):
         raise PolicyError("Dockerfile FROM must match the baseline's immutable uv and base images.")
-    if "uv sync --locked" not in source or "--all-groups" not in source:
+    installer = source
+    if profiles:
+        installer = snapshot.read("environment/docker/install-python.sh")
+    if "uv sync --locked" not in installer or "--all-groups" not in installer:
         raise PolicyError("Install the native uv lock with uv sync --locked --all-groups.")
     if snapshot.read(".python-version").strip() != baseline["python"]:
         raise PolicyError(".python-version must match the exact baseline Python version.")
@@ -168,6 +189,13 @@ def check_cpu_container(snapshot, baseline, locked):
         raise PolicyError(f"Invalid {PROJECT}: {exc}") from exc
     if project.get("tool", {}).get("uv", {}).get("required-version") != "==" + baseline.get("uv", ""):
         raise PolicyError("pyproject.toml must pin the baseline uv version with required-version.")
+    if profiles:
+        extras = project.get("project", {}).get("optional-dependencies", {})
+        for name in ("nvidia", "ascend"):
+            if f"torch=={profiles[name]['torch']}" not in extras.get(name, []):
+                raise PolicyError(f"The {name} extra must match its pinned torch build.")
+        if f"torch-npu=={profiles['ascend']['torch_npu']}" not in extras.get("ascend", []):
+            raise PolicyError("Pin torch_npu in the ascend extra.")
     try:
         dev = json.loads(snapshot.read(devcontainer))
     except ValueError as exc:
@@ -184,6 +212,14 @@ def check_cpu_container(snapshot, baseline, locked):
         or any(dev["build"].get(key) != value for key, value in expected_build.items())
     ):
         raise PolicyError("Dev Container must build the development target from the shared Dockerfile.")
+    for profile in profiles:
+        config_path = f".devcontainer/{profile}/devcontainer.json"
+        if config_path not in snapshot.files:
+            raise PolicyError(f"Missing {config_path}.")
+        config = json.loads(snapshot.read(config_path))
+        expected = {"dockerfile": "../../environment/docker/Dockerfile", "context": "../..", "target": profile}
+        if "image" in config or "dockerComposeFile" in config or any(config.get("build", {}).get(k) != v for k, v in expected.items()):
+            raise PolicyError(f"{profile} Dev Container must build its target from the shared Dockerfile.")
 
 def check(snapshot, changed, author, owner):
     if ".env" in snapshot.files:
@@ -205,8 +241,10 @@ def check(snapshot, changed, author, owner):
         baseline = json.loads(snapshot.read(BASELINE))
     except (ValueError, UnicodeError) as exc:
         raise PolicyError(f"Invalid {BASELINE}: {exc}") from exc
-    if not isinstance(baseline, dict) or baseline.get("schema_version") != 3:
+    if not isinstance(baseline, dict) or baseline.get("schema_version") not in {3, 4}:
         raise PolicyError("Unsupported environment baseline schema.")
+    if baseline.get("schema_version") == 4 and set(baseline.get("training_profiles", {})) != {"nvidia", "ascend"}:
+        raise PolicyError("The shared baseline must declare NVIDIA and Ascend profiles.")
     state = baseline.get("state")
     code = sorted(path for path in snapshot.files if experiment_code(path))
     if state == "pending":
@@ -227,7 +265,7 @@ def check(snapshot, changed, author, owner):
     extra = sorted(
         path for path in snapshot.files
         if not path.startswith(("archive/", *INFRA))
-        and path not in {PROJECT, LOCKFILE, "compose.yaml", ".devcontainer/devcontainer.json", "environment/docker/Dockerfile"}
+        and path not in {PROJECT, LOCKFILE, "compose.yaml", ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json", "environment/docker/Dockerfile"}
         and dependency_file(path)
     )
     if extra:

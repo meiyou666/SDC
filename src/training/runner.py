@@ -1,9 +1,11 @@
 """Full-parameter training through the shared Transformers Trainer."""
 
 from datetime import datetime, timezone
+from dataclasses import replace
 import importlib.metadata
 import json
 import math
+import os
 from pathlib import Path
 import platform
 import subprocess
@@ -129,7 +131,20 @@ def validate_resume(checkpoint, config, data_hash, versions, world_size):
             raise ValueError(f"Checkpoint is missing {filename.name}.")
 
 
+def resolve_runtime_config(config):
+    device = config.training.device
+    if device == "accelerator":
+        device = {"nvidia": "cuda", "ascend": "npu"}.get(os.environ.get("SDC_RUNTIME"))
+        if device is None:
+            raise ValueError("Run the Qwen task in the nvidia or ascend container.")
+    return replace(config, training=replace(
+        config.training, device=device,
+        output_dir=config.training.output_dir.replace("{backend}", device),
+    ))
+
+
 def train(config, resume=None, offline=False, callbacks=()):
+    config = resolve_runtime_config(config)
     output = path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
     datasets, data_manifest = read_prepared(config)

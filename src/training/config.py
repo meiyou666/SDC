@@ -124,8 +124,8 @@ def validate(config):
     for key in ("max_train_documents", "max_validation_documents"):
         if getattr(d, key) is not None:
             _positive(getattr(d, key), f"data.{key}")
-    if t.device not in {"cpu", "cuda", "npu"}:
-        raise ValueError("training.device must be cpu, cuda or npu.")
+    if t.device not in {"cpu", "cuda", "npu", "accelerator"}:
+        raise ValueError("training.device must be accelerator, cuda, npu or cpu (unit tests).")
     if t.precision not in {"fp32", "bf16", "fp16"}:
         raise ValueError("training.precision must be fp32, bf16 or fp16.")
     if t.device == "cpu" and t.precision != "fp32":

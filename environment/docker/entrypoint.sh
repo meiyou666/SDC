@@ -1,5 +1,7 @@
-#!/bin/sh
+#!/usr/bin/env bash
 set -eu
+
+source /opt/sdc/activate-accelerator.sh
 
 project_root=/opt/sdc/project
 if [ -f /workspace/SDC/pyproject.toml ]; then

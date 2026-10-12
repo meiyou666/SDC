@@ -13,7 +13,7 @@ jobs:
   environment-consistency:
     name: Environment consistency
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate container configuration
-        run: docker compose config --quiet
+        run: docker compose --profile nvidia --profile ascend config --quiet
       - name: Build uv tooling container
         run: docker compose build tools
       - name: Check WSL installer syntax
@@ -44,6 +44,6 @@ jobs:
       - name: Verify installed versions and numerical tools
         run: docker compose run --rm -T --user "$(id -u):$(id -g)" dev python environment/verify_environment.py --smoke
       - name: Run tests through the project launcher
-        run: ./dev.sh uv run --locked pytest -q -p no:cacheprovider
+        run: ./dev.sh uv run --locked --extra development pytest -q -p no:cacheprovider
       - name: Check Python errors
-        run: docker compose run --rm -T --user "$(id -u):$(id -g)" dev uv run --locked ruff check --no-cache .
+        run: docker compose run --rm -T --user "$(id -u):$(id -g)" dev uv run --locked --extra development ruff check --no-cache .

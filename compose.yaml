@@ -1,5 +1,5 @@
 services:
-  dev:
+  dev: &development
     image: sdc-dev:py311
     platform: linux/amd64
     build:
@@ -23,6 +23,54 @@ services:
     stdin_open: true
     tty: true
     command: ["bash"]
+  nvidia:
+    <<: *development
+    image: sdc-nvidia:py311
+    profiles: ["nvidia"]
+    platform: ${SDC_PLATFORM:-linux/amd64}
+    build:
+      context: .
+      dockerfile: environment/docker/Dockerfile
+      target: nvidia
+    gpus: all
+    shm_size: 8gb
+    environment:
+      PYTHONPATH: /workspace/SDC/src
+      CUDA_VISIBLE_DEVICES: ${SDC_CUDA_VISIBLE_DEVICES:-0}
+  ascend:
+    <<: *development
+    image: sdc-ascend:py311
+    profiles: ["ascend"]
+    platform: ${SDC_PLATFORM:-linux/amd64}
+    build:
+      context: .
+      dockerfile: environment/docker/Dockerfile
+      target: ascend
+      args:
+        ASCEND_SOC: ${SDC_ASCEND_SOC:-910b}
+    shm_size: 8gb
+    group_add:
+      - ${SDC_ASCEND_GID:-1000}
+    devices:
+      - /dev/davinci0:/dev/davinci0
+      - /dev/davinci_manager:/dev/davinci_manager
+      - /dev/devmm_svm:/dev/devmm_svm
+      - /dev/hisi_hdc:/dev/hisi_hdc
+    environment:
+      PYTHONPATH: /workspace/SDC/src
+      ASCEND_RT_VISIBLE_DEVICES: ${SDC_ASCEND_VISIBLE_DEVICES:-0}
+    volumes:
+      - .:/workspace/SDC
+      - codex-state:/home/sdc/.codex
+      - ai-tools:/home/sdc/.local
+      - ssh-state:/home/sdc/.ssh
+      - download-cache:/home/sdc/.cache
+      - type: bind
+        source: /usr/local/Ascend/driver
+        target: /usr/local/Ascend/driver
+        read_only: true
+        bind:
+          create_host_path: false
   tools:
     image: sdc-uv-tools:py311
     profiles: ["tools"]

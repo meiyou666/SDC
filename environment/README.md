@@ -2,7 +2,7 @@
 
 | 项目 | 设置 |
 |---|---|
-| 容器 | Ubuntu 24.04，Linux amd64，即 x86-64 |
+| 共同基础系统 | Ubuntu 22.04；支持 Linux x86-64、ARM64 |
 | Python | uv 安装 3.11.17，固定在 `.python-version` |
 | uv | 0.12.24，工具镜像固定 digest |
 | Node.js、npm | 初始安装 24.21.0、11.19.0，供 AI 工具使用 |
@@ -13,8 +13,11 @@
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
-| CPU 训练依赖 | PyTorch 2.7.1+cpu、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
-| PyTorch CPU wheel 源 | [PyTorch 官方 CPU 源](https://download.pytorch.org/whl/cpu)；其余 Python 依赖使用清华源 |
+| 共同训练库 | PyTorch 2.7.1、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
+| 共同数值与数据依赖 | NumPy 1.26.4、PyArrow 21.0.0；其余依赖统一锁定在 `uv.lock` |
+| NVIDIA GPU | PyTorch 2.7.1+cu128、CUDA Toolkit 12.8.1 |
+| 昇腾 NPU | PyTorch 2.7.1+cpu、torch_npu 2.7.1.post8、CANN 9.1.0 |
+| PyTorch wheel 源 | PyTorch 官方 CPU、cu128 源；其余 Python 依赖使用清华源 |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
 | 容器基础镜像源 | Ubuntu 使用 Docker Hub；uv 使用 GHCR |
 | Node.js、npm 软件源 | npmmirror |
@@ -25,19 +28,24 @@
 
 终端启动：WSL 使用 `./dev.sh`，Windows PowerShell 使用 `.\dev.cmd`。
 
-容器通过 `uv sync --locked --all-groups` 安装锁定的依赖。
+两套训练镜像从同一个 `common` 阶段构建，使用同一系统工具、Python 和锁文件。仅 SDK 与 PyTorch 硬件构建分开：`nvidia` 和 `ascend`。本机开发与单元测试使用 `development` extra。
+
+容器通过 `uv sync --locked --all-groups --extra 配置名` 安装依赖；配置名为 `development`、`nvidia` 或 `ascend`。在对应容器中运行 uv 时使用相同的 `--extra`。训练和检查脚本会自动选择。
 
 容器内执行：
 
 ```bash
 python environment/verify_environment.py --smoke
-uv run --locked pytest -q
-uv run --locked ruff check .
+bash scripts/check.sh
 ```
 
 所有项目代码、依赖管理、测试与实验均在 Docker 中执行。宿主机用于编辑、Git 操作和启动容器。
 
-公共训练任务、数据准备和断点续训见[训练说明](../docs/training.md)。当前镜像固定 CPU 训练依赖；昇腾服务器的驱动、CANN 与 `torch_npu` 仍由维护人收到平台后统一配置。
+公共训练任务、GPU/NPU 容器启动和断点续训见[训练说明](../docs/training.md)。驱动与固件安装在宿主机；CUDA、CANN 和项目依赖随训练镜像提供。服务器型号确定后，由维护人设置设备映射和驱动。
+
+昇腾镜像按芯片选择同一版本的 CANN 算子包：`SDC_ASCEND_SOC=910b`、`a3` 或 `950`。所有 SDK 镜像 digest 记录在 `baseline.json`。PyTorch 的 `+cpu` 表示供昇腾插件使用的框架构建，计算设备由 `torch_npu` 提供。
+
+版本依据：[Ascend 配套表](https://github.com/Ascend/pytorch/blob/master/COMPATIBILITY.en.md) · [uv 的 PyTorch 多后端配置](https://docs.astral.sh/uv/guides/integration/pytorch/)。
 
 ## Codex 配置
 
