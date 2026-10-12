@@ -14,6 +14,8 @@ if [ ! -w "${HOME:-/}" ]; then
     chmod 700 "$sdc_codex_state"
     export CODEX_HOME="$sdc_codex_state"
 fi
-sh /opt/sdc/setup-codex.sh
+if ! sh /opt/sdc/setup-codex.sh; then
+    printf '%s\n' 'Codex initialization was skipped; the container will continue.' >&2
+fi
 
 exec "$@"

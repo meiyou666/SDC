@@ -16,10 +16,9 @@
 ```powershell
 git clone https://github.com/meiyou666/SDC.git
 cd SDC
-Copy-Item .env.example .env
 ```
 
-在 `.env` 中填写个人 `OPENAI_API_KEY`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展，再选择下面一种本地方式。
+VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展，再选择下面一种本地方式。首次进入容器会从 `.env.example` 创建 `.env`；使用 Codex 时再填写个人 `OPENAI_API_KEY`。
 
 #### WSL
 
@@ -94,7 +93,7 @@ Copy-Item .env.example .env
 
 切换云端硬件环境时，先执行 **Dev Containers: Reopen Folder in SSH**，在服务器终端重新运行 `setup-cloud.sh` 选择环境，再进入生成的云端入口。脚本为各环境保存独立入口。
 
-同一台主机上的容器共用仓库目录。首次使用需要构建，后续启动复用已有镜像和容器；Dockerfile 或依赖更新后，执行 **Dev Containers: Rebuild Container**。
+同一台主机上的容器共用仓库目录，默认按宿主机选择 x86-64 或 ARM64。首次使用需要构建，后续启动复用已有镜像和容器；Dockerfile 或依赖更新后，执行 **Dev Containers: Rebuild Container**。
 
 终端启动脚本 `./dev.sh`（WSL）和 `.\dev.cmd`（Windows）固定启动 **SDC 开发环境**。GPU、NPU 的命令行启动方式见[公共训练任务](docs/training.md)。
 
@@ -104,7 +103,7 @@ Copy-Item .env.example .env
 
 Ubuntu 的 Docker 安装包与常规 Python 依赖使用清华源，PyTorch 和 NVIDIA Container Toolkit 使用官方源；基础镜像来自 Docker Hub 和 GHCR。
 
-容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Python 和 Codex 插件。API 地址已预填为 `https://s2api.top/v1`，个人密钥保存在所在主机的 `.env`。工具和依赖维护见[环境说明](environment/README.md)。
+容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Python 和 Codex 插件。API 地址已预填为 `https://s2api.top/v1`，个人密钥保存在所在主机的 `.env`。登录失败或离线时容器照常启动。工具和依赖维护见[环境说明](environment/README.md)。
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
@@ -131,6 +130,8 @@ SDC/
 ├── dev.sh                     # WSL 启动脚本
 ├── pyproject.toml             # 项目依赖声明
 ├── uv.lock                    # uv 原生锁文件
+├── pytest.ini                 # 测试入口
+├── ruff.toml                  # Python 检查配置
 ├── .python-version            # Python 版本
 ├── .env.example               # 个人 API 配置模板
 ├── .env                       # 个人密钥，不提交
@@ -157,7 +158,10 @@ SDC/
 │   ├── papers/                # 论文精读记录
 │   └── reproduction/          # 复现与人工比对记录
 ├── experiments/               # 实验配置与小型摘要
-├── scripts/                   # 运行脚本
+├── scripts/
+│   ├── check.sh               # 容器内检查
+│   ├── train.sh               # 训练入口
+│   └── ci/                    # 环境策略检查
 ├── tests/                     # 测试
 ├── data/                      # 本地模型与数据，不提交
 ├── results/                   # 本地实验输出，不提交
@@ -165,6 +169,7 @@ SDC/
 ├── .agent/skills/             # 报告语言风格
 ├── .github/
 │   ├── workflows/             # CI
+│   ├── CODEOWNERS             # 公共文件维护人
 │   └── CODE_REVIEW.md         # 代码审查规范
 └── AGENTS.md                  # Agent 开发规范
 ```

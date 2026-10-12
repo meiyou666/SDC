@@ -51,7 +51,7 @@ bash scripts/check.sh
 
 首次启动从 `environment/docker/codex-default.toml` 初始化 Codex。模型和审查模型均为 `gpt-6-astra`，启用模型发现和 goals。已有个人配置不被覆盖，可自行增添插件、MCP 和 skills。
 
-根目录 `.env` 已预填服务地址，只需填写个人 `OPENAI_API_KEY`。容器启动时自动完成 API 密钥登录。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
+首次启动会从 `.env.example` 创建根目录 `.env`，保留已有文件。服务地址已预填，使用 Codex 时只需填写个人 `OPENAI_API_KEY`。容器尝试 API 密钥登录，超时或失败后继续启动，训练与测试照常使用。`.env` 不提交。
 
 容器已启动时，也可执行 `sh /opt/sdc/setup-codex.sh` 重新读取 `.env` 并完成登录，然后重新打开 Codex 面板。
 

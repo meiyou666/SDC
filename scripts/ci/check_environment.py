@@ -16,7 +16,7 @@ BASELINE = "environment/baseline.json"
 LOCKFILE = "uv.lock"
 PROJECT = "pyproject.toml"
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
-SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh"}
+SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh", "ruff.toml", "pytest.ini", "scripts/check.sh", "scripts/train.sh"}
 CODE_SUFFIXES = {
     ".py", ".pyi", ".ipynb", ".sh", ".bash", ".bat", ".ps1",
     ".c", ".cc", ".cpp", ".cu", ".cuh", ".h", ".hpp", ".f", ".f90",
@@ -130,8 +130,14 @@ def imports_in(source, path):
 
 
 def check_cpu_container(snapshot, baseline, locked):
-    if baseline.get("profile") not in {"cpu-development", "shared-development"} or baseline.get("platform") != "linux/amd64":
-        raise PolicyError("Use the shared cpu-development profile on linux/amd64.")
+    platforms = baseline.get("platforms", [baseline.get("platform")])
+    if (
+        baseline.get("profile") not in {"cpu-development", "shared-development"}
+        or not isinstance(platforms, list) or not platforms
+        or any(value not in {"linux/amd64", "linux/arm64"} for value in platforms)
+        or baseline.get("platform") not in platforms
+    ):
+        raise PolicyError("Use the shared development profile on its declared Linux architectures.")
     image = baseline.get("base_image", "")
     if not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", image):
         raise PolicyError("The base image must include an immutable @sha256 digest.")
@@ -151,6 +157,18 @@ def check_cpu_container(snapshot, baseline, locked):
             raise PolicyError(f"Missing shared container file: {path}.")
     source = snapshot.read(dockerfile)
     profiles = baseline.get("training_profiles", {})
+    runtime_profiles = {}
+    if baseline["schema_version"] == 4:
+        runtime_profiles = {"development": baseline.get("development_profile"), **profiles}
+        for name, device in (("development", "cpu"), ("nvidia", "cuda"), ("ascend", "npu")):
+            profile = runtime_profiles.get(name)
+            if not isinstance(profile, dict) or profile.get("device") != device or not isinstance(profile.get("torch"), str):
+                raise PolicyError(f"Declare the {name} profile with its device and pinned torch build.")
+        sdk_images = profiles["ascend"].get("sdk_images")
+        if not isinstance(sdk_images, dict) or set(sdk_images) != {"910b", "a3", "950"}:
+            raise PolicyError("Declare a pinned CANN SDK image for 910b, a3 and 950.")
+        if any(not isinstance(value, str) for value in sdk_images.values()) or not isinstance(profiles["nvidia"].get("sdk_image"), str):
+            raise PolicyError("Pin every accelerator SDK image by digest.")
     aliases, images = set(), []
     for match in re.finditer(r"(?im)^FROM\s+(\S+)(?:\s+AS\s+(\S+))?\s*$", source):
         reference, alias = match.groups()
@@ -169,10 +187,16 @@ def check_cpu_container(snapshot, baseline, locked):
         expected_images.update(profiles["ascend"]["sdk_images"].values())
         if any(not re.fullmatch(r"\S+@sha256:[0-9a-fA-F]{64}", value) for value in expected_images):
             raise PolicyError("Pin every accelerator SDK image by digest.")
-        versions = {profile["torch"].split("+", 1)[0] for profile in profiles.values()}
+        versions = {profile["torch"].split("+", 1)[0] for profile in runtime_profiles.values()}
         if len(versions) != 1 or versions != {locked.get("torch")}:
-            raise PolicyError("GPU and NPU must use the same upstream PyTorch version.")
-        if profiles["ascend"]["torch_npu"] != locked.get("torch-npu"):
+            raise PolicyError("Development, GPU and NPU must use the same upstream PyTorch version.")
+        torch_builds = {
+            entry["version"] for entry in tomllib.loads(snapshot.read(LOCKFILE))["package"]
+            if package_name(entry["name"]) == "torch"
+        }
+        if any(profile["torch"] not in torch_builds for profile in runtime_profiles.values()):
+            raise PolicyError("Every profile's exact torch build must be present in uv.lock.")
+        if profiles["ascend"].get("torch_npu") != locked.get("torch-npu"):
             raise PolicyError("The locked torch_npu version must match the Ascend profile.")
     if set(images) != expected_images or len(images) != len(expected_images):
         raise PolicyError("Dockerfile FROM must match the baseline's immutable uv and base images.")
@@ -191,8 +215,8 @@ def check_cpu_container(snapshot, baseline, locked):
         raise PolicyError("pyproject.toml must pin the baseline uv version with required-version.")
     if profiles:
         extras = project.get("project", {}).get("optional-dependencies", {})
-        for name in ("nvidia", "ascend"):
-            if f"torch=={profiles[name]['torch']}" not in extras.get(name, []):
+        for name, profile in runtime_profiles.items():
+            if f"torch=={profile['torch']}" not in extras.get(name, []):
                 raise PolicyError(f"The {name} extra must match its pinned torch build.")
         if f"torch-npu=={profiles['ascend']['torch_npu']}" not in extras.get("ascend", []):
             raise PolicyError("Pin torch_npu in the ascend extra.")
@@ -228,7 +252,7 @@ def check(snapshot, changed, author, owner):
     protected = [
         path for path in changed
         if not path.startswith(("archive/", ".agent/")) and (
-            path.startswith(("environment/", "configs/training/", ".devcontainer/"))
+            path.startswith(("environment/", "configs/training/", ".devcontainer/", *INFRA))
             or path in SHARED_FILES or dependency_file(path)
         )
     ]
@@ -243,8 +267,10 @@ def check(snapshot, changed, author, owner):
         raise PolicyError(f"Invalid {BASELINE}: {exc}") from exc
     if not isinstance(baseline, dict) or baseline.get("schema_version") not in {3, 4}:
         raise PolicyError("Unsupported environment baseline schema.")
-    if baseline.get("schema_version") == 4 and set(baseline.get("training_profiles", {})) != {"nvidia", "ascend"}:
-        raise PolicyError("The shared baseline must declare NVIDIA and Ascend profiles.")
+    if baseline.get("schema_version") == 4:
+        profiles = baseline.get("training_profiles")
+        if not isinstance(profiles, dict) or set(profiles) != {"nvidia", "ascend"}:
+            raise PolicyError("The shared baseline must declare NVIDIA and Ascend profiles.")
     state = baseline.get("state")
     code = sorted(path for path in snapshot.files if experiment_code(path))
     if state == "pending":
@@ -277,14 +303,8 @@ def check(snapshot, changed, author, owner):
         if package_name(distribution) not in locked:
             raise PolicyError(f"import_map entry {module} points to unlocked package {distribution}.")
 
-    local_modules = set()
-    for path in code:
-        p = PurePosixPath(path)
-        if p.suffix == ".py":
-            local_modules.add(p.stem)
-            local_modules.add(p.parts[0])
-            if p.parts[0] == "src" and len(p.parts) > 1:
-                local_modules.add(p.parts[1].removesuffix(".py"))
+    local_files = {PurePosixPath(path) for path in code if path.endswith(".py")}
+    shared_modules = modules_at(local_files, PurePosixPath(".")) | modules_at(local_files, PurePosixPath("src"))
     standard = set(sys.stdlib_module_names) | set(sys.builtin_module_names) | {"__future__"}
     missing, dynamic, count = [], [], 0
     for path in code:
@@ -293,6 +313,11 @@ def check(snapshot, changed, author, owner):
         count += 1
         imports, unresolved = imports_in(snapshot.read(path), path)
         dynamic.extend(unresolved)
+        local_modules = shared_modules
+        # Standalone scripts can import siblings; package files use package imports.
+        parent = PurePosixPath(path).parent
+        if not path.startswith("src/") and parent / "__init__.py" not in local_files:
+            local_modules = shared_modules | modules_at(local_files, parent)
         for module in sorted(imports):
             if module in standard or module in local_modules:
                 continue
@@ -302,6 +327,16 @@ def check(snapshot, changed, author, owner):
     if missing:
         raise PolicyError("Imports outside the shared dependency lock: " + "; ".join(missing))
     return {"state": "frozen", "message": "Declared environment and visible Python imports match the shared baseline.", "python_files": count, "dynamic_imports": dynamic}
+
+
+def modules_at(files, root):
+    modules = set()
+    for filename in files:
+        if filename.parent == root and filename.stem != "__init__":
+            modules.add(filename.stem)
+        elif filename.name == "__init__.py" and filename.parent.parent == root:
+            modules.add(filename.parent.name)
+    return modules
 
 
 def main():

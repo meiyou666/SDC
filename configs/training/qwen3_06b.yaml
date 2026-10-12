@@ -24,7 +24,7 @@ training:
   device: accelerator
   precision: bf16
   seed: 2026
-  max_steps: 1000
+  max_steps: 1000  # 参数更新次数；数据遍历完后继续下一轮
   batch_size: 1
   eval_batch_size: 1
   gradient_accumulation_steps: 16

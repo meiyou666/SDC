@@ -89,14 +89,62 @@ def _artifact_hashes(directory):
     }
 
 
-def prepare_data(config):
+def _artifact_state(directory):
+    state = {}
+    for filename in sorted(directory.rglob("*")):
+        if filename.is_file() and filename.name != "manifest.json":
+            stat = filename.stat()
+            state[str(filename.relative_to(directory))] = [
+                stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_dev,
+            ]
+    return state
+
+
+def _verify_artifacts(directory, manifest, force=False):
+    """Reuse a successful hash check while the manifest and file metadata match."""
+    cache_root = Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface"))
+    cache = cache_root / "sdc-verification" / (digest(str(directory.resolve())) + ".json")
+    state = _artifact_state(directory)
+    expected = {"manifest": prepared_digest(manifest), "files": state}
+    if not force:
+        try:
+            if json.loads(cache.read_text()) == expected:
+                return
+        except (OSError, ValueError):
+            pass
+    if manifest["artifacts"] != _artifact_hashes(directory):
+        raise ValueError("Prepared dataset files have changed. Prepare the data in a new directory.")
+    if _artifact_state(directory) != state:
+        raise ValueError("Prepared dataset files changed during verification. Stop writes and retry.")
+    temporary = None
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(expected, stream)
+        temporary.replace(cache)
+    except OSError:
+        # Read-only caches do not prevent using data that passed SHA256 verification.
+        pass
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def prepare_data(config, verify_data=False):
     if int(os.environ.get("WORLD_SIZE", "1")) != 1:
         raise ValueError("Prepare data once before launching distributed training.")
     output = path(config.data.prepared_dir)
     signature = data_signature(config)
     if output.exists():
-        _, manifest = read_prepared(config)
-        return manifest
+        if output.is_dir() and not any(output.iterdir()):
+            output.rmdir()
+        else:
+            _, manifest = read_prepared(config, verify_data=verify_data)
+            return manifest
     output.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
     try:
@@ -131,16 +179,23 @@ def prepare_data(config):
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def read_prepared(config):
+def read_prepared(config, verify_data=False):
     directory = path(config.data.prepared_dir)
     filename = directory / "manifest.json"
-    if not filename.is_file():
+    if not directory.exists():
         raise ValueError("Prepared data is missing. Run the prepare command first.")
-    manifest = json.loads(filename.read_text())
+    incomplete = f"Prepared directory is incomplete: {directory}. Use a new prepared_dir or remove the incomplete directory before preparing again."
+    if not filename.is_file():
+        raise ValueError(incomplete)
+    try:
+        manifest = json.loads(filename.read_text())
+    except (OSError, ValueError) as exc:
+        raise ValueError(incomplete) from exc
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("artifacts"), dict) or not manifest["artifacts"] or "signature" not in manifest:
+        raise ValueError(incomplete)
     if manifest.get("signature") != data_signature(config):
         raise ValueError("Prepared data differs from this config. Use a new prepared_dir and prepare it.")
-    if manifest.get("artifacts") != _artifact_hashes(directory):
-        raise ValueError("Prepared dataset files have changed. Prepare the data in a new directory.")
+    _verify_artifacts(directory, manifest, force=verify_data)
     dataset = load_from_disk(str(directory))
     return dataset, manifest
 

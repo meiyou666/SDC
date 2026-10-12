@@ -15,5 +15,9 @@
 /.python-version @meiyou666
 /dev.cmd @meiyou666
 /dev.sh @meiyou666
+/scripts/check.sh @meiyou666
+/scripts/train.sh @meiyou666
+/ruff.toml @meiyou666
+/pytest.ini @meiyou666
 /.vscode/extensions.json @meiyou666
 /SDC.code-workspace @meiyou666

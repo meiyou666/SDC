@@ -13,9 +13,7 @@
   },
   "runArgs": [
     "--gpus=all",
-    "--shm-size=8g",
-    "--env-file",
-    "${localWorkspaceFolder}/.env"
+    "--shm-size=8g"
   ],
   "mounts": [
     "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",
@@ -42,8 +40,8 @@
   "updateRemoteUserUID": true,
   "overrideCommand": true,
   "shutdownAction": "stopContainer",
-  "postCreateCommand": "python environment/verify_environment.py --smoke",
-  "postStartCommand": "sh /opt/sdc/setup-codex.sh",
+  "postCreateCommand": "python /opt/sdc/project/environment/verify_environment.py --project /workspace/SDC --smoke",
+  "postStartCommand": "sh /opt/sdc/setup-codex.sh || true",
   "customizations": {
     "vscode": {
       "extensions": [

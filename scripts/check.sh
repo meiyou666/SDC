@@ -6,6 +6,6 @@ if [[ ! -f /.dockerenv && ! -f /run/.containerenv ]]; then
 fi
 cd -- "$(dirname -- "$0")/.."
 source /opt/sdc/activate-accelerator.sh
-python environment/verify_environment.py --smoke
+python /opt/sdc/project/environment/verify_environment.py --project "$PWD" --smoke
 uv run --locked --extra "${SDC_RUNTIME:-development}" pytest -q -p no:cacheprovider "$@"
 uv run --locked --extra "${SDC_RUNTIME:-development}" ruff check --no-cache .

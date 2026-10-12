@@ -81,8 +81,7 @@ RUN bash /opt/sdc/install-python.sh nvidia
 USER sdc
 RUN python /opt/sdc/project/environment/verify_environment.py --smoke
 
-FROM development AS ascend
-USER root
+FROM common AS ascend
 ARG ASCEND_SOC
 COPY --from=cann_sdk /usr/local/Ascend /usr/local/Ascend
 ENV SDC_RUNTIME=ascend SDC_ASCEND_SOC=${ASCEND_SOC}
