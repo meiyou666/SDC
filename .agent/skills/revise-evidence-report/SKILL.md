@@ -1,79 +1,24 @@
 ---
 name: revise-evidence-report
-description: Audit, co-review, revise, and deliver an existing evidence-backed research, technical, analytical, project, or briefing report. Use when Codex must trace claims to supplied evidence, apply feedback consistently across a report, clarify metrics and existing figures, embed an existing figure bundle, or render a Markdown source into self-contained HTML and PDF with final visual and evidence QA.
+description: 根据论文、实验结果和批注撰写或润色研究报告，整理引用、指标与图表说明，并按需导出 HTML 或 PDF。
 ---
 
-# Revise Evidence Report
+# 研究报告写作
 
-Turn an existing evidence-backed report into a clear, traceable, reviewable delivery. Start with the smallest usable input, preserve accepted content, and increase assurance in proportion to claim and delivery risk.
+将现有材料整理成论据准确、结构清晰、语言简洁的报告。
 
-## Establish the working set
+## 修改与写作
 
-Read [references/boundaries-and-inputs.md](references/boundaries-and-inputs.md). A report source plus its cited or supplied evidence is enough to begin. Accept evidence manifests, decision logs, style instructions, and figure bundles when available.
+- 先读用户指定的内容、批注及相关论文或数据。全文修改时通读全文；局部修改时检查上下文和关联图表。
+- 遵循用户指定的结构、模板和修改范围；同一意见涉及的术语、数字、图注与结论同步修改。
+- 每段围绕一个问题，先说明观点或结果，再给出依据。使用简洁的学术中文，省去套话、重复解释和处理过程说明。
+- 描述论文时抓住主要贡献，区分核心机制与辅助机制。结论对应实际引用的原文或数据，区分已有结果、推断与研究计划。
+- 指标首次出现时说明含义、单位和统计分母；比较结果时交代影响结论的实验条件。润色保持原数据和计算口径。
+- 复用已有图表，说明读图方式与主要观察，保持正文、图注和数据一致。
+- 缺少关键依据时，单独说明缺失内容，并继续完成有依据的部分。
 
-Record material gaps as findings and continue with a labeled draft when a responsible revision remains possible. Pause only when missing evidence would make a central conclusion misleading, a user decision materially changes the result, or additional access or authority is required.
+## 交付
 
-## Audit before revising
+交付前检查引用、数值、图文和格式是否一致。按用户要求返回正文或修改文件；未指定格式时提供 Markdown 正文，并简述主要改动。
 
-Read [references/evidence-audit-and-coreview.md](references/evidence-audit-and-coreview.md).
-
-1. Read the complete report and the evidence actually used by it.
-2. Identify the report purpose, audience, central claims, and each section's job.
-3. Map factual, numerical, statistical, and mechanism claims to direct evidence, reproducible derivation, or an explicit unresolved state.
-4. Check denominators, exclusions, missing and non-finite values, uncertainty, measurement conditions, and source boundaries.
-5. Present a compact, priority-ordered issue list and a section-level revision proposal when user decisions are useful.
-
-Maintain stable issue IDs only when the review needs more than one round. Mark disputed content `UNDER_REVIEW`; keep supported revisions moving.
-
-## Revise the whole report
-
-Read [references/writing-and-explanation.md](references/writing-and-explanation.md).
-
-- Convert accepted feedback into a report-wide rule and search titles, prose, tables, captions, conclusions, contents, and references for every affected instance.
-- Lead sections with the finding, judgment, or action they support.
-- Keep facts, derivations, interpretation, limitations, and proposals distinguishable.
-- Place source tags and qualification near the claim they constrain.
-- Explain every unfamiliar metric by meaning, computation, unit or range, direction, use, and limitation.
-- Keep the editable source as the single source of report prose.
-
-Treat writing preferences as task inputs or report-local decisions. Keep bundled guidance stable.
-
-## Integrate existing figures
-
-When the report contains figures, read [references/figure-integration.md](references/figure-integration.md). Consume existing publication-ready assets and their manifest or equivalent provenance. Verify asset identity, caption, source mapping, denominator, alt text, and final embedded readability.
-
-Explain each substantive figure near its first use: how to read it, what is visibly supported, and what that observation means within its evidence limits. Return data, specification, or rendering defects to the figure producer as concrete findings; keep figure generation outside this skill.
-
-## Render and validate delivery
-
-Read [references/delivery-and-qa.md](references/delivery-and-qa.md) before creating HTML or PDF. Use `scripts/render_report.py` for the standard path:
-
-```text
-Markdown -> self-contained HTML -> PDF
-```
-
-Pass the Pandoc executable, actual PDF engine (or an explicitly described wrapper), source,
-outputs, and any resource paths explicitly. Use `assets/report.css` unless the task supplies a
-report stylesheet. Use `--title` for page metadata only and keep one visible title in Markdown.
-Pass known font files with `--font-file`; still verify effective fonts in the current PDF.
-
-After every accepted source change, regenerate derived formats and perform four checks:
-
-1. HTML visual and accessibility QA.
-2. HTML claim, number, figure, and source consistency QA.
-3. PDF page-level visual QA.
-4. PDF claim, number, figure, and source consistency QA.
-
-Deliver the revised source, requested derived formats, render manifest, QA result, and material unresolved decisions. Describe each artifact by its current verified state.
-
-## Resources
-
-- [references/boundaries-and-inputs.md](references/boundaries-and-inputs.md): scope, input tiers, output states, and pause criteria.
-- [references/evidence-audit-and-coreview.md](references/evidence-audit-and-coreview.md): evidence map, issue triage, and collaborative review.
-- [references/writing-and-explanation.md](references/writing-and-explanation.md): stable report-writing and metric-explanation guidance.
-- [references/figure-integration.md](references/figure-integration.md): figure-bundle intake, explanation, accessibility, and embedding checks.
-- [references/delivery-and-qa.md](references/delivery-and-qa.md): rendering command, manifests, and final HTML/PDF QA.
-- `assets/report.css`: generic paged-report stylesheet.
-- `assets/fit-latex-tables.lua`: hashed width-and-wrap fallback for Pandoc LaTeX PDF engines.
-- `scripts/render_report.py`: explicit Pandoc Markdown-to-HTML-to-PDF renderer.
-- `scripts/self_test.py`: offline renderer interface tests.
+需要 HTML 或 PDF 时，再读 [导出说明](references/export.md)。其他任务只需本文件。
