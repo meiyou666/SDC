@@ -165,6 +165,29 @@ sdc_install_docker "$(id -un)"
     assert "UNEXPECTED_SUDO" not in result.stdout
 
 
+def test_adding_docker_group_marks_session_for_reconnection():
+    result = shell('''
+docker() { [[ $1 != info ]]; }
+dockerd() { return 0; }
+sdc_root() { printf 'ROOT'; printf ' <%s>' "$@"; printf '\\n'; }
+sdc_install_docker sdc
+[[ $SDC_DOCKER_GROUP_CHANGED == 1 ]]
+''', script=ROOT / "environment/docker/install-docker.sh")
+    assert result.returncode == 0, result.stderr
+    assert "<usermod> <-aG> <docker> <sdc>" in result.stdout
+
+
+def test_reconnection_is_printed_when_install_was_elevated():
+    result = shell('''
+sdc_install_docker() { SDC_DOCKER_GROUP_CHANGED=1; }
+sdc_docker() { return 0; }
+docker() { return 0; }
+sdc_setup_cloud dev
+''')
+    assert result.returncode == 0, result.stderr
+    assert "Kill VS Code Server on Host" in result.stdout
+
+
 def test_fresh_install_configures_tsinghua_source_and_required_packages():
     result = shell('''
 installed=0
