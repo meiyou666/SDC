@@ -194,6 +194,7 @@ installed=0
 repository_file=$(mktemp)
 trap 'rm -f "$repository_file"' EXIT
 command() { if [[ $1 == -v && ( $2 == docker || $2 == dockerd ) ]]; then return 1; fi; builtin command "$@"; }
+dpkg-query() { return 1; }
 docker() { [[ $installed == 1 ]]; }
 curl() { while (($#)); do if [[ $1 == -o ]]; then printf key > "$2"; return; fi; shift; done; }
 sdc_root() {
@@ -216,14 +217,29 @@ cat "$repository_file"
 
 def test_failed_key_download_stops_before_writing_repository():
     result = shell('''
-command() { return 1; }
+command() { if [[ $1 == -v && ( $2 == docker || $2 == dockerd ) ]]; then return 1; fi; builtin command "$@"; }
+dpkg-query() { return 1; }
 docker() { return 1; }
-curl() { return 7; }
+curl() { echo CURL_REQUESTED; return 7; }
 sdc_root() { if [[ $1 == tee ]]; then echo UNEXPECTED_REPOSITORY; fi; }
 sdc_install_docker root
 ''', script=ROOT / "environment/docker/install-docker.sh")
     assert result.returncode == 1
+    assert "CURL_REQUESTED" in result.stdout
     assert "UNEXPECTED_REPOSITORY" not in result.stdout
+
+
+def test_conflicting_runtime_is_reported_before_any_installation():
+    result = shell('''
+command() { if [[ $1 == -v && ( $2 == docker || $2 == dockerd ) ]]; then return 1; fi; builtin command "$@"; }
+dpkg-query() { if [[ ${!#} == containerd ]]; then printf installed; else return 1; fi; }
+sdc_root() { echo UNEXPECTED_CHANGE; return 99; }
+sdc_install_docker root
+''', script=ROOT / "environment/docker/install-docker.sh")
+    assert result.returncode == 1
+    assert "apt-get remove containerd" in result.stderr
+    assert "重新运行初始化脚本" in result.stderr
+    assert "UNEXPECTED_CHANGE" not in result.stdout
 
 
 def test_toolkit_is_configured_before_restarting_empty_docker():
