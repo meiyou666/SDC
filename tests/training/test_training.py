@@ -1,7 +1,6 @@
 from dataclasses import replace
 import json
 import math
-import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,7 +14,8 @@ from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM,
 
 from training.config import Config, DataConfig, ModelConfig, TrainConfig, load_config, validate
 from training.data import CausalCollator, load_tokenizer, pack_texts, prepare_data, read_prepared
-from training.runner import JsonMetrics, NonFiniteLossError, resolve_runtime_config, train, write_json
+from training.metrics import JsonMetrics, NonFiniteLossError, write_json
+from training.runner import resolve_runtime_config, train
 
 
 @pytest.fixture
@@ -83,17 +83,7 @@ def test_prepared_data_is_reusable_and_detects_source_changes(config):
         assert len(datasets[split]) == manifest["statistics"][split]["blocks"] > 0
     with open(config.data.train_file, "a") as handle:
         handle.write('\n{"text": "extra data"}\n')
-    with pytest.raises(ValueError, match="differs"):
-        read_prepared(config)
-
-
-def test_prepared_artifact_changes_are_detected(config):
-    prepare_data(config)
-    from pathlib import Path
-
-    filename = Path(config.data.prepared_dir) / "train" / "state.json"
-    filename.write_text(filename.read_text() + "\n")
-    with pytest.raises(ValueError, match="files have changed"):
+    with pytest.raises(ValueError, match="与当前配置不一致"):
         read_prepared(config)
 
 
@@ -111,58 +101,34 @@ def test_incomplete_prepared_directory_has_actionable_error(config, content):
     residual.write_bytes(b"unfinished")
     if content is not None:
         (directory / "manifest.json").write_text(content)
-    with pytest.raises(ValueError, match="directory is incomplete"):
+    with pytest.raises(ValueError, match="不完整"):
         prepare_data(config)
     assert residual.read_bytes() == b"unfinished"
 
 
 def test_unprepared_and_incomplete_data_are_distinct(config):
-    with pytest.raises(ValueError, match="Run the prepare command first"):
+    with pytest.raises(ValueError, match="请先执行 prepare"):
         read_prepared(config)
     Path(config.data.prepared_dir).mkdir()
-    with pytest.raises(ValueError, match="directory is incomplete"):
+    with pytest.raises(ValueError, match="不完整"):
         read_prepared(config)
-
-
-def test_prepared_hashes_are_cached_and_can_be_forced(config):
-    from training import data
-
-    prepare_data(config)
-    with patch.object(data, "_artifact_hashes", wraps=data._artifact_hashes) as hash_files:
-        read_prepared(config)
-        read_prepared(config)
-        assert hash_files.call_count == 1
-        read_prepared(config, verify_data=True)
-        assert hash_files.call_count == 2
-        prepare_data(config, verify_data=True)
-        assert hash_files.call_count == 3
 
 
 @pytest.mark.parametrize("change", ["modify", "add", "delete"])
-def test_cached_verification_detects_file_changes(config, change):
+def test_prepared_file_changes_are_detected(config, change):
+    """Every read re-hashes the snapshot, so edits cannot slip into training."""
     prepare_data(config)
     read_prepared(config)
     filename = Path(config.data.prepared_dir) / "train/state.json"
     if change == "modify":
-        old = filename.stat()
         value = filename.read_bytes()
         filename.write_bytes(b" " + value[1:])
-        os.utime(filename, ns=(old.st_atime_ns, old.st_mtime_ns))
     elif change == "add":
         (filename.parent / "unexpected.arrow").write_bytes(b"extra")
     else:
         filename.unlink()
-    with pytest.raises(ValueError, match="files have changed"):
+    with pytest.raises(ValueError, match="文件发生变化"):
         read_prepared(config)
-
-
-def test_corrupt_verification_cache_is_rebuilt(config):
-    prepare_data(config)
-    read_prepared(config)
-    cache = next((Path(os.environ["HF_HOME"]) / "sdc-verification").glob("*.json"))
-    cache.write_text("{")
-    read_prepared(config)
-    assert json.loads(cache.read_text())["files"]
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -211,7 +177,7 @@ def test_divergent_training_writes_failure_result(config):
         return value * float("nan")
 
     with patch.object(Trainer, "compute_loss", divergent_loss):
-        with pytest.raises(NonFiniteLossError, match="Non-finite loss"):
+        with pytest.raises(NonFiniteLossError, match="loss 非有限值"):
             train(config, offline=True)
     result = json.loads((Path(config.training.output_dir) / "result.json").read_text())
     assert result["status"] == "failed"
@@ -251,9 +217,9 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path):
     record = json.loads((tmp_path / "resumed" / "run.json").read_text())
     assert record["training_budget"] == {"unit": "optimizer_updates", "max_steps": 3, "repeat_dataset": True}
     assert resumed_metrics["epoch"] == resumed.state.epoch
-    with pytest.raises(ValueError, match="not empty"):
+    with pytest.raises(ValueError, match="非空"):
         train(config, offline=True)
-    with pytest.raises(ValueError, match="already reached"):
+    with pytest.raises(ValueError, match="已经达到"):
         train(config, resume="latest", offline=True)
 
 
@@ -266,11 +232,11 @@ def test_resume_rejects_changed_optimizer_settings(config):
 
 
 def test_config_rejects_shared_splits_and_invalid_precision(config):
-    with pytest.raises(ValueError, match="separate"):
+    with pytest.raises(ValueError, match="必须不同"):
         validate(replace(config, data=replace(config.data, validation_file=config.data.train_file)))
     with pytest.raises(ValueError, match="fp32"):
         validate(replace(config, training=replace(config.training, precision="fp16")))
-    with pytest.raises(ValueError, match="integer"):
+    with pytest.raises(ValueError, match="整数"):
         validate(replace(config, training=replace(config.training, gradient_accumulation_steps=0)))
 
 

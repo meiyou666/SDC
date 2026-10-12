@@ -1,6 +1,6 @@
 # Qwen3 公共训练任务
 
-统一采用 Qwen3-0.6B，在真实 WikiText-103 文本上进行全参数继续预训练。任务包含 next-token loss、前向计算、反向传播、AdamW 更新和独立验证。模型、数据版本与训练参数固定在 `configs/training/qwen3_06b.yaml`。
+统一采用 Qwen3-0.6B，在真实 WikiText-103 文本上进行全参数继续预训练，单卡运行。任务包含 next-token loss、前向计算、反向传播、AdamW 更新和独立验证。模型、数据版本与训练参数固定在 `configs/training/qwen3_06b.yaml`。模块职责与操作数采集接入点见[训练模块说明](../src/training/README.md)。
 
 ## 两套训练环境
 
@@ -35,7 +35,7 @@ export SDC_ASCEND_GID=$(stat -c '%g' /dev/davinci0)
 docker compose --profile ascend run --build --rm --user "$(id -u):$(id -g)" ascend bash
 ```
 
-默认使用第 0 张卡。NVIDIA 多卡在启动前设置 `SDC_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`。昇腾设备清单在 `compose.yaml` 的 `devices` 中维护，驱动目录只读挂载；多卡时扩展设备清单，并设置 `SDC_ASCEND_VISIBLE_DEVICES`。
+**实验按单卡运行**，默认使用第 0 张卡。换卡时设置 `SDC_CUDA_VISIBLE_DEVICES` 或 `SDC_ASCEND_VISIBLE_DEVICES`。昇腾设备清单在 `compose.yaml` 的 `devices` 中维护，驱动目录只读挂载。
 
 使用 VS Code 时，按[云端开发说明](cloud.md)运行初始化脚本，再选择生成的 **SDC 云端（NVIDIA）** 或 **SDC 云端（Ascend）**。进入训练容器后，继续执行下方命令。
 
@@ -51,7 +51,7 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
 
 `prepare` 下载固定版本的模型、分词器与语料，并保存分词结果。下载中断后可执行同一命令继续。训练从本地缓存读取。
 
-空的 `prepared_dir` 会重新准备；目录已有残留文件但缺少完整清单时，会提示更换目录或清理残留。首次读取校验 SHA256，后续在清单、文件大小和时间等信息未变时复用校验结果。需要重算全部哈希时，在 `prepare` 或 `train` 命令末尾添加 `--verify-data`。
+空的 `prepared_dir` 会重新准备；目录已有残留文件但缺少完整清单时，会提示更换目录或清理残留。每次读取都按清单重新校验全部数据文件的 SHA256，改动过的快照不会被训练使用。
 
 中断后恢复：
 
@@ -59,12 +59,7 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
 bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline --resume latest
 ```
 
-检查点包含模型、优化器、学习率调度器、随机状态及训练位置。新实验使用新的 `output_dir`。多卡容器配置好后，通过 `torchrun` 启动；进程数与开放的设备数一致：
-
-```bash
-uv run --locked --extra "$SDC_RUNTIME" torchrun --standalone --nproc_per_node=8 \
-  --module training train --config configs/training/qwen3_06b.yaml --offline
-```
+检查点包含模型、优化器、学习率调度器、随机状态及训练位置。新实验使用新的 `output_dir`。续训要求配置、数据、依赖版本和 `uv.lock` 哈希都与原运行一致，否则拒绝启动。
 
 ## 后台训练
 
@@ -80,6 +75,12 @@ docker logs -f sdc-qwen3-nvidia
 ```
 
 准备与训练都通过 Compose 执行，以共用模型缓存。`Ctrl+C` 退出日志查看，训练继续。昇腾将 profile 和服务名改为 `ascend`，并使用独立容器名。继续已有训练时，在训练命令末尾添加 `--resume latest`。
+
+容器名固定，重跑前先清掉上一次的容器：
+
+```bash
+docker rm sdc-qwen3-nvidia
+```
 
 ## 公共设置与输出
 

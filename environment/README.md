@@ -73,7 +73,7 @@ AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检�
 
 系统软件包使用清华 Ubuntu 源。项目 Python 依赖仍由 `uv.lock` 管理。个人命令行工具可通过 `uv tool install 包名` 或 `npm install -g 包名` 安装到独立目录。
 
-共享内存设为 2 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
+开发容器共享内存 2 GB，训练容器 8 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
 
 ## 命令行连接与文件传输
 
