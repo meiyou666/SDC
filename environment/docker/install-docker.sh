@@ -19,8 +19,8 @@ sdc_docker() {
 
 sdc_install_docker() {
     local sdc_user=${1:-${SUDO_USER:-$(id -un)}}
-    local sdc_key sdc_codename sdc_arch
-    local -a sdc_packages=()
+    local sdc_key sdc_codename sdc_arch sdc_package sdc_status
+    local -a sdc_packages=() sdc_conflicts=()
     SDC_DOCKER_GROUP_CHANGED=0
     . /etc/os-release
     if [[ $ID != ubuntu ]]; then
@@ -32,6 +32,19 @@ sdc_install_docker() {
     sdc_arch=$(dpkg --print-architecture)
 
     if ! command -v docker >/dev/null || ! command -v dockerd >/dev/null; then
+        for sdc_package in docker.io docker-compose docker-compose-v2 docker-doc podman-docker containerd runc; do
+            sdc_status=$(dpkg-query -W -f='${db:Status-Status}' "$sdc_package" 2>/dev/null || true)
+            [[ $sdc_status != installed ]] || sdc_conflicts+=("$sdc_package")
+        done
+        if ((${#sdc_conflicts[@]})); then
+            printf '检测到与 Docker CE 冲突的软件包：%s\n' "${sdc_conflicts[*]}" >&2
+            printf '%s\n' '请先由管理员处理这些包承载的服务，再移除冲突包：' >&2
+            if [[ $(id -u) != 0 ]]; then printf 'sudo ' >&2; fi
+            printf 'apt-get remove' >&2
+            printf ' %q' "${sdc_conflicts[@]}" >&2
+            printf '\n%s\n' '处理完成后，重新运行初始化脚本。' >&2
+            return 1
+        fi
         sdc_packages+=(docker-ce docker-ce-cli containerd.io)
     fi
     if ! docker compose version >/dev/null 2>&1; then
