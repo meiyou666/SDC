@@ -116,21 +116,24 @@ SDC/
 
 ## 3. 协作流程
 
-仓库拥有者可直接提交 `main`；其他成员按以下流程开发和合并。
+所有成员在个人分支开发，通过 PR 合并到 `main`。仓库拥有者使用 `meiyou666/dev`，其他成员使用自己的分支。
 
 以下命令在**宿主机的仓库目录**执行。
 
 通过 VS Code、GitHub Desktop 或 Git 命令行提交。HTTPS 使用凭据管理器或个人访问令牌认证；使用 [SSH](https://docs.github.com/zh/authentication/connecting-to-github-with-ssh) 时，将远端设为 `git@github.com:meiyou666/SDC.git`。
 
-**开始任务**：将 `name/task` 换成自己的分支名。
+**开始任务**：切换到自己的分支并同步 `main`。以下以拥有者的分支为例：
 
 ```bash
-git switch main
+git fetch origin
+git switch meiyou666/dev
 git pull --ff-only
-git switch -c name/task
+git merge origin/main
 ```
 
-**在容器内运行测试**：
+首次创建个人分支时，使用 `git switch -c name/task origin/main`，将 `name/task` 换成自己的分支名。
+
+**代码改动在容器内检查**：
 
 ```bash
 bash scripts/check.sh
