@@ -1,5 +1,14 @@
 # Agent 开发规范
 
+## 项目背景与任务入口
+
+本项目研究**面向低精度矩阵乘法的算法级容错评测与优化**，主线是统一评测、低精度 ABFT 算法优化和昇腾 NPU 算子融合。重点分析主计算误差如何进入校验残差、影响故障检出，并结合 FP8、FP4 的数据表示改进校验与判定，在真实训练中评价检测、恢复和开销。
+
+- 开始任务时先阅读 [项目研究说明](docs/project.md)，了解研究目标、代表方法、实验口径与交付内容，再阅读本次任务涉及的代码和配置。
+- 统一评测与算法研究可以并行，使用共同的训练操作数、故障协议和指标定义。具体优化机制由论文复现与实验结果确定。
+- 训练任务读取 [训练说明](docs/training.md)；云端部署读取 [云服务器使用说明](docs/cloud.md)。
+- 撰写或修改研究报告前，读取团队共享的 [.agent/skills/revise-evidence-report/SKILL.md](.agent/skills/revise-evidence-report/SKILL.md)，按需加载其参考文件。报告使用简洁、清晰的学术中文。
+
 ## 项目约定
 
 - 本仓库用于 ABFT 算法复现、统一评测和昇腾算子实现。
@@ -13,10 +22,11 @@
 - **项目代码、依赖解析与安装、测试、实验、绘图和基准测量必须在项目 Docker 容器中执行。禁止使用 Agent 所在的本地 Python、pip、uv、Conda 或其他本地虚拟环境代跑。**
 - Agent 已在 Dev Container 内时，直接运行容器中的命令；在容器外时，通过 Docker 调用项目容器。
 - 宿主机可运行 AI 工具、编辑器、Git/GitHub 和 Docker；项目代码与实验仍在项目容器中执行。
-- 文档只保留 WSL 和 Windows 两套本机方案。两套均通过 VS Code Dev Container 开发，WSL 使用 `./dev.sh`，Windows 使用 `dev.cmd`。
+- 环境文档提供 WSL、Windows 和云服务器三种入口。本机两套方案均通过 VS Code Dev Container 开发，WSL 使用 `./dev.sh`，Windows 使用 `dev.cmd`；云端通过 Remote-SSH 进入服务器上的项目容器。
 - 容器不可用时，先修复 Docker，或在 GitHub Actions 中使用项目容器执行；不得回退到宿主机环境。
 - 项目 Python 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建实验 requirements 清单或自行升级项目依赖。环境维护使用 Compose 的 `tools` 服务。
 - AI 工具的版本、插件、MCP 和 skills 不做统一限制，可自行安装、升级和配置，不加入 AI 工具的 CI 检查或测试。AI 扩展依赖使用个人目录或独立虚拟环境，不改动项目的 `/opt/venv`、依赖锁文件和训练配置。
+- 团队共享 skills 放在 `.agent/skills/`，来源与使用入口见 [.agent/README.md](.agent/README.md)。其中的工具依赖与项目实验依赖分开管理；实验实现仍放在 `src/`、`experiments/` 等项目目录。
 - Codex 每次安装使用 latest，初始模型和审查模型为 `gpt-6-astra`。首次启动写入初始配置，后续个人设置、插件、MCP 和 skills 自行维护，不覆盖已有配置。API 地址在 `.env.example` 中预填；个人密钥放在 `.env`，不得提交或输出密钥。
 - NVIDIA 与昇腾训练镜像共用根目录 `uv.lock` 和 Dockerfile。公共 Python 库必须保持同版本，硬件差异只放在 `nvidia`、`ascend` extra 和对应 SDK 中。本地开发检查使用 `development` extra，不设置 CPU 训练任务。
 - 容器内检查：`bash scripts/check.sh`。直接使用 uv 时，按 `SDC_RUNTIME` 指定 `--extra development`、`--extra nvidia` 或 `--extra ascend`。设备检查：`python environment/verify_environment.py --accelerator`。

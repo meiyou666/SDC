@@ -1,0 +1,4 @@
+interface:
+  display_name: "Revise Evidence Report"
+  short_description: "Audit and deliver an existing evidence-backed report"
+  default_prompt: "Use $revise-evidence-report to audit this report against its evidence, co-review the revisions, and deliver verified Markdown, HTML, and PDF artifacts."

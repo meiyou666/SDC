@@ -26,6 +26,9 @@ ascend = ["torch==2.7.1+cpu", "torch-npu==2.7.1.post8", "accelerate==1.12.0"]
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10"]
 
+[tool.ruff]
+extend-exclude = [".agent"]
+
 [tool.uv]
 package = false
 required-version = "==0.12.24"

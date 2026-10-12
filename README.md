@@ -4,7 +4,7 @@
 
 ### 第一步：克隆仓库
 
-在 PowerShell 中执行以下命令。未安装 Git 时，先安装 [Git for Windows](https://git-scm.com/downloads/win)。
+本机开发在 PowerShell 中执行以下命令。未安装 Git 时，先安装 [Git for Windows](https://git-scm.com/downloads/win)。云端开发直接按[方案三](#方案三云服务器)在服务器克隆。
 
 ```powershell
 git clone https://github.com/meiyou666/SDC.git
@@ -12,9 +12,9 @@ cd SDC
 Copy-Item .env.example .env
 ```
 
-随后选择下面一种本机方案。两套方案均在 VS Code 中使用 Ubuntu 22.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+随后选择 WSL、Windows 或云服务器方案，均在 VS Code 中使用 Ubuntu 22.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
 
-在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 只保存在本机。
+在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 保存在当前开发主机，不提交 Git。
 
 ### 方案一：WSL
 
@@ -45,6 +45,22 @@ Copy-Item .env.example .env
    - **Resources → File sharing**：添加仓库目录。
 
 4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**，按下方说明选择容器。
+
+### 方案三：云服务器
+
+1. VS Code 安装 **Remote-SSH** 扩展，执行 **Remote-SSH: Connect to Host**，连接租用的 Ubuntu 服务器。本机只需 VS Code 和 SSH，Docker 安装在服务器上。
+2. 在服务器终端克隆仓库，并创建服务器上的 `.env`：
+
+   ```bash
+   git clone https://github.com/meiyou666/SDC.git
+   cd SDC
+   cp .env.example .env
+   ```
+
+3. 服务器尚未安装 Docker 时，执行 `bash environment/docker/install-wsl-docker.sh`。该脚本同样用于 Ubuntu 服务器，使用清华源安装 Docker Engine 和 Compose；完成后重新连接 SSH。
+4. 配置服务器的 GPU / NPU 驱动与容器设备访问，步骤见[云服务器部署](docs/cloud.md)。在 Remote-SSH 窗口打开服务器上的仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA** 或 **SDC Ascend**；普通开发选择 **SDC**。
+
+代码、Python 和计算设备均在云端，本机 VS Code 负责编辑和交互。PyTorch 的 `device` 使用该服务器上的设备编号；[远程设备说明与镜像复用](docs/cloud.md#远程-device-与镜像复用)见部署文档。
 
 ### 选择和切换容器
 
@@ -125,6 +141,9 @@ SDC/
 │   ├── training/              # 公共训练配置
 │   └── evaluation/            # 评测配置
 ├── docs/
+│   ├── project.md             # 项目目标、研究主线与实验口径
+│   ├── cloud.md               # 云服务器部署与镜像复用
+│   ├── training.md            # 公共训练任务
 │   ├── images/                # 文档截图
 │   ├── papers/                # 论文精读记录
 │   └── reproduction/          # 复现与人工比对记录
@@ -134,6 +153,7 @@ SDC/
 ├── data/                      # 本地模型与数据，不提交
 ├── results/                   # 本地实验输出，不提交
 ├── archive/                   # 旧实验归档
+├── .agent/skills/             # 团队共享报告 skill
 ├── .github/
 │   ├── workflows/             # CI
 │   └── CODE_REVIEW.md         # 代码审查规范

@@ -24,7 +24,7 @@
 
 ## 启动与执行
 
-按[项目 README](../README.md)选择 WSL 或 Windows 方案，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。
+按[项目 README](../README.md)选择 WSL、Windows 或云服务器方案，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。云端通过 Remote-SSH 打开服务器仓库，部署步骤见[云服务器说明](../docs/cloud.md)。
 
 终端启动：WSL 使用 `./dev.sh`，Windows PowerShell 使用 `.\dev.cmd`。
 

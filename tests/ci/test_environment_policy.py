@@ -168,6 +168,22 @@ class EnvironmentPolicyTests(unittest.TestCase):
     def test_archived_imports_and_dependency_files_are_ignored(self):
         self.run_check(snapshot(extra={"archive/old.py": "invalid python", "archive/Dockerfile": "FROM old"}))
 
+    def test_shared_skills_use_a_separate_tool_environment(self):
+        files = {
+            ".agent/skills/report/report_tools.py": "import report_only_dependency",
+            ".agent/skills/report/requirements.txt": "report_only_dependency",
+        }
+        result = self.run_check(snapshot(extra=files), changed=files)
+        self.assertEqual(result["python_files"], 0)
+
+    def test_experiments_cannot_import_unlocked_skill_dependencies(self):
+        files = {
+            ".agent/skills/report/report_tools.py": "import report_only_dependency",
+            "src/experiment.py": "import report_tools",
+        }
+        with self.assertRaisesRegex(policy.PolicyError, "Imports outside"):
+            self.run_check(snapshot(extra=files))
+
     def test_syntax_error_does_not_silently_skip_imports(self):
         with self.assertRaisesRegex(policy.PolicyError, "Cannot parse"):
             self.run_check(snapshot(extra={"src/main.py": "import ("}))
