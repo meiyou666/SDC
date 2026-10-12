@@ -38,7 +38,7 @@ docker compose --profile ascend run --build --rm --user "$(id -u):$(id -g)" asce
 
 默认使用第 0 张卡。NVIDIA 多卡在启动前设置 `SDC_CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7`。昇腾设备清单在 `compose.yaml` 的 `devices` 中维护，驱动目录只读挂载；多卡时扩展设备清单，并设置 `SDC_ASCEND_VISIBLE_DEVICES`。
 
-使用 VS Code 时，通过 Remote-SSH 打开服务器仓库，选择 `.devcontainer/nvidia` 或 `.devcontainer/ascend` 配置。本机代码开发继续使用默认 Dev Container。
+使用 VS Code 时，按[云端开发说明](cloud.md)运行初始化脚本，再选择生成的 **SDC 云端（NVIDIA）** 或 **SDC 云端（Ascend）**。进入训练容器后，继续执行下方命令。
 
 ## 准备与训练
 
@@ -64,6 +64,21 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline -
 uv run --locked --extra "$SDC_RUNTIME" torchrun --standalone --nproc_per_node=8 \
   --module training train --config configs/training/qwen3_06b.yaml --offline
 ```
+
+## 后台训练
+
+长时间训练可在独立后台容器中运行，关闭 VS Code 后继续执行。以下命令在**服务器宿主机的仓库目录**执行。先按“启动容器”设置平台与设备变量，下面以 NVIDIA 为例：
+
+```bash
+docker compose --profile nvidia run --build --rm --user "$(id -u):$(id -g)" nvidia \
+  bash scripts/train.sh prepare --config configs/training/qwen3_06b.yaml
+docker compose --profile nvidia run -d --name sdc-qwen3-nvidia \
+  --user "$(id -u):$(id -g)" nvidia \
+  bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
+docker logs -f sdc-qwen3-nvidia
+```
+
+准备与训练都通过 Compose 执行，以共用模型缓存。`Ctrl+C` 退出日志查看，训练继续。昇腾将 profile 和服务名改为 `ascend`，并使用独立容器名。继续已有训练时，在训练命令末尾添加 `--resume latest`。
 
 ## 公共设置与输出
 

@@ -1,102 +1,93 @@
-# 云服务器开发与实验
+# 云端开发
 
-使用 **本机 VS Code → Remote-SSH → 服务器 Docker → 项目容器**。代码、Python、数据和 GPU / NPU 均在服务器上。本机只需 VS Code 与 SSH 客户端。
+本机 VS Code 通过 SSH 连接云服务器，再进入服务器上的 Docker 容器。Docker、Python、模型与数据均位于服务器。
 
-## 准备服务器
+## 1. 在本机 VS Code 连接服务器
 
-选择可运行 Docker 的 Ubuntu 服务器。通过 VS Code 的 **Remote-SSH: Connect to Host** 连接后，在服务器终端执行：
+安装 **Remote-SSH**、**Dev Containers** 和 **Container Tools** 扩展。
+
+1. 按 `Ctrl+Shift+P`，执行 **Remote-SSH: Add New SSH Host...**。
+2. 输入云平台提供的连接命令，例如 `ssh 用户名@服务器地址 -p 22`，保存到 SSH 配置。
+3. 执行 **Remote-SSH: Connect to Host...**，选择刚添加的服务器，按提示输入密码或使用 SSH 密钥。
+4. 左下角显示 `SSH: 服务器` 后，通过 **终端 → 新建终端** 打开远端终端。
+
+**接下来的安装命令都在这个远端终端执行。** 本机使用 VS Code 和 SSH，服务器使用 Ubuntu。GPU / NPU 驱动由云平台或维护人配置。
+
+## 2. 在服务器克隆仓库
 
 ```bash
 git clone https://github.com/meiyou666/SDC.git
 cd SDC
-cp .env.example .env
 ```
 
-在服务器的 `.env` 中填写个人 API 密钥。Docker Engine 与 Compose 已安装时，执行 `docker info` 和 `docker compose version` 检查连接；首次安装时复用仓库的 Ubuntu 安装脚本：
+若提示未安装 Git，先执行 `sudo apt-get update` 和 `sudo apt-get install -y git`；root 用户省略 `sudo`。
+
+## 3. 安装 Docker 并构建环境
 
 ```bash
-bash environment/docker/install-wsl-docker.sh
+bash environment/docker/setup-cloud.sh
 ```
 
-该脚本使用清华源。安装后断开并重新连接 SSH，使 Docker 用户组生效。
+按提示选择：
 
-## 配置计算设备
+| 选择 | 构建内容 | VS Code 中的云端入口 |
+| --- | --- | --- |
+| 1：普通开发 | 公共开发环境 | SDC 云端（普通开发） |
+| 2：NVIDIA | CUDA 与 GPU 训练环境 | SDC 云端（NVIDIA） |
+| 3：昇腾 | CANN 与 NPU 训练环境 | SDC 云端（Ascend） |
 
-### NVIDIA GPU
+脚本依次完成：
 
-服务器驱动由云平台或维护人配置，先运行 `nvidia-smi`。Docker 通过 NVIDIA Container Toolkit 使用显卡；尚未安装 Toolkit 时，在服务器执行：
+1. 安装或复用 Docker Engine、Compose 和 Buildx。Docker 安装包使用清华源。
+2. 根据硬件配置容器访问。NVIDIA 配置 Container Toolkit；昇腾读取第 0 张卡的设备组，并设置芯片与驱动挂载。
+3. 使用项目 Dockerfile 构建所选镜像。
+4. 在 `.devcontainer/cloud-*/devcontainer.json` 保存服务器专用入口，自动创建 `.env`。
+
+也可直接指定环境：
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl gnupg
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey |
-  sudo gpg --dearmor --yes -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list |
-  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' |
-  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-sudo apt-get update
-sudo apt-get install -y nvidia-container-toolkit
-sudo nvidia-ctk runtime configure --runtime=docker
-sudo systemctl restart docker
+bash environment/docker/setup-cloud.sh dev
+bash environment/docker/setup-cloud.sh nvidia
+bash environment/docker/setup-cloud.sh ascend --soc 910b
 ```
 
-首次配置在启动实验前完成。之后选择 **SDC NVIDIA**，CUDA 与 Python 依赖由项目镜像安装。
+昇腾 A2 的 `--soc` 为 `910b`，A3 为 `a3`，950 为 `950`。脚本根据服务器自动选择 x86-64 或 ARM64；已有 `.env` 的内容会保留。重新运行同一命令可继续构建。
 
-### 昇腾 NPU
+## 4. 在 VS Code 进入远端容器
 
-服务器驱动和固件由云平台或维护人配置，先运行 `npu-smi info`。选择 **SDC Ascend**，CANN 与 `torch_npu` 由项目镜像安装。
+1. 如果脚本提示用户组已更新，执行 **Remote-SSH: Kill VS Code Server on Host**，选择这台服务器。随后重新连接，使 Docker 用户组生效。
+2. 在 **SSH 窗口**中选择 **文件 → 打开文件夹**，打开刚克隆的服务器 `SDC` 目录。
+3. 打开服务器上的 `.env`，填写自己的 `OPENAI_API_KEY`。
+4. 按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**。
+5. 选择脚本生成的 **SDC 云端（…）** 入口。VS Code 复用构建缓存，启动容器并安装 Python、Codex 等扩展。
 
-维护人按服务器型号统一设置 [.devcontainer/ascend/devcontainer.json](../.devcontainer/ascend/devcontainer.json) 的芯片参数、设备映射和设备组，并同步 [compose.yaml](../compose.yaml)。现有配置映射第 0 张 NPU 与管理设备，并挂载 `/usr/local/Ascend/driver`。命令行的芯片与多卡设置见[训练说明](training.md#启动容器)。
+左下角变为容器名称后，新建终端：
 
-## 打开容器与运行
+```bash
+pwd
+command -v python
+python environment/verify_environment.py --smoke
+```
 
-在 Remote-SSH 窗口打开服务器上的 `SDC` 目录，按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**。按用途选择 SDC、SDC NVIDIA 或 SDC Ascend；切换方式与本机相同。
+目录应为 `/workspace/SDC`，Python 应为 `/opt/venv/bin/python`。此后编辑、调试和运行都使用服务器上的容器环境，代码保存在服务器仓库。
 
-在训练容器终端执行：
+GPU / NPU 容器再执行设备检查：
 
 ```bash
 python environment/verify_environment.py --accelerator
-bash scripts/train.sh prepare --config configs/training/qwen3_06b.yaml
-bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
 ```
 
-模型与预处理数据保存在服务器仓库的 `data/`，检查点与结果在 `results/`。本机和云端是两份工作副本，代码通过个人分支同步。
+训练入口见[公共训练任务](training.md#准备与训练)。
 
-长时间训练可改用独立后台容器，关闭 VS Code 后仍继续运行。在**服务器宿主机的仓库目录**通过 Compose 准备模型并启动训练，使两步共用下载缓存。以下为 NVIDIA 入口：
+## 5. 后续打开、切换和更新
 
-```bash
-docker compose --profile nvidia run --build --rm --user "$(id -u):$(id -g)" nvidia \
-  bash scripts/train.sh prepare --config configs/training/qwen3_06b.yaml
-docker compose --profile nvidia run -d --name sdc-qwen3-nvidia \
-  --user "$(id -u):$(id -g)" nvidia \
-  bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
-docker logs -f sdc-qwen3-nvidia
-```
+- **再次开发**：通过 Remote-SSH 打开服务器仓库，再进入对应云端容器；恢复之前的容器窗口也可继续使用。
+- **选择其他环境**：执行 **Dev Containers: Reopen Folder in SSH**，在服务器终端重跑初始化脚本，选择另一环境；再执行 **Reopen in Container**。各环境的云端入口分别保存。
+- **切换已构建容器**：在容器窗口执行 **Dev Containers: Switch Container**，选择对应云端入口。
+- **更新项目环境**：同步仓库后运行初始化脚本，再执行 **Dev Containers: Rebuild Container**。
 
-`Ctrl+C` 退出日志查看，训练继续运行。昇腾将命令中的 profile 与服务名 `nvidia` 替换为 `ascend`，并使用独立容器名。每次新任务使用不同的容器名和输出目录；断点续训使用[训练说明](training.md#准备与训练)中的 `--resume latest`。
+服务器专用入口只记录架构、芯片和设备参数，沿用项目 Dockerfile 与锁文件。它保存在所在服务器，不提交 Git。
 
-## 远程 device 与镜像复用
+长时间训练的后台运行与断点续训见[训练说明](training.md#后台训练)。
 
-标准 `torch.device` 接受设备类型与编号，例如 `cuda:0`；加载 `torch_npu` 后使用 `npu:0`。它表示当前进程可访问的设备，不接收远程服务器地址。PyTorch RPC 可以向远程进程发送计算任务，但服务器仍需要运行框架、驱动与工作进程，也需要相应的程序组织。
-
-本项目采用 Remote-SSH 与服务器容器。训练代码在服务器内使用本地设备编号，实验环境沿用同一 Dockerfile 和锁文件。
-
-要减少重复构建，可构建一次镜像再传到服务器。两端使用相同的仓库提交与 CPU 架构。以下以 NVIDIA 镜像为例，在构建机器的仓库目录执行：
-
-```bash
-docker compose --profile nvidia build nvidia
-docker image save -o ../sdc-nvidia.tar sdc-nvidia:py311
-scp -P 22 ../sdc-nvidia.tar 用户名@服务器地址:~/
-```
-
-在服务器载入镜像后，使用已有镜像启动：
-
-```bash
-docker image load -i ~/sdc-nvidia.tar
-cd ~/SDC
-docker compose --profile nvidia run --rm --user "$(id -u):$(id -g)" nvidia bash
-```
-
-服务器仍需 Docker 与设备驱动，Python 依赖和 SDK 随镜像复用。`docker save` 保存镜像；仓库、数据和个人 `.env` 分别在服务器准备。上述复用入口是 Compose；VS Code 的三个配置仍按各自 Dockerfile 目标构建。
-
-资料：[VS Code 远程容器](https://code.visualstudio.com/remote/advancedcontainers/develop-remote-host) · [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) · [PyTorch 2.7.1 device 定义](https://github.com/pytorch/pytorch/blob/v2.7.1/docs/source/tensor_attributes.rst#torchdevice) · [PyTorch RPC](https://github.com/pytorch/pytorch/blob/v2.7.1/docs/source/rpc.rst)
+资料：[VS Code 远程容器](https://code.visualstudio.com/remote/advancedcontainers/develop-remote-host) · [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
