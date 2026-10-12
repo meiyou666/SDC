@@ -1,0 +1,35 @@
+name: smollm2_135m_cpu_smoke
+
+model:
+  name_or_path: HuggingFaceTB/SmolLM2-135M
+  revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+  attention: eager
+  gradient_checkpointing: false
+
+data:
+  source: huggingface
+  name: Salesforce/wikitext
+  subset: wikitext-2-raw-v1
+  revision: b08601e04326c79dfdd32d625aee71d232d685c3
+  block_size: 64
+  max_train_documents: 32
+  max_validation_documents: 8
+  prepared_dir: data/training/smollm2_cpu_smoke
+
+training:
+  output_dir: results/training/smollm2_cpu_smoke
+  device: cpu
+  precision: fp32
+  seed: 2026
+  max_steps: 2
+  batch_size: 1
+  eval_batch_size: 1
+  gradient_accumulation_steps: 2
+  learning_rate: 0.00002
+  warmup_steps: 0
+  logging_steps: 1
+  eval_steps: 2
+  save_steps: 2
+  save_total_limit: 1
+  cpu_threads: 4
+  full_determinism: true

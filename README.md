@@ -64,6 +64,8 @@ VS Code 预留 6006 和 8888 端口转发。工具清单与远程使用示例见
 
 配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
 
+训练入口与运行命令见[公共训练任务](docs/training.md)。默认任务为 Qwen3-0.6B 的全参数继续预训练；当前容器可先运行 SmolLM2-135M 的 CPU 短程检查。
+
 ## 2. 项目结构
 
 ```text

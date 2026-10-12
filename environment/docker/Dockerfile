@@ -71,7 +71,7 @@ RUN apt-get update \
     && chown -R sdc:sdc /home/sdc/.cache
 WORKDIR /opt/sdc/project
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --locked --all-groups --no-build \
+RUN UV_HTTP_TIMEOUT=120 UV_CONCURRENT_DOWNLOADS=4 uv sync --locked --all-groups --no-build \
     && touch /opt/venv/.lock \
     && chmod a+rw /opt/venv/.lock
 COPY environment/baseline.json environment/verify_environment.py ./environment/

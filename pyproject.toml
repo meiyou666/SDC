@@ -9,6 +9,10 @@ dependencies = [
     "pandas==3.0.6",
     "matplotlib==3.11.2",
     "PyYAML==6.0.3",
+    "torch==2.7.1+cpu",
+    "transformers==4.57.6",
+    "datasets==4.4.2",
+    "accelerate==1.12.0",
 ]
 
 [dependency-groups]
@@ -23,3 +27,11 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 name = "tuna"
 url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple"
 default = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }

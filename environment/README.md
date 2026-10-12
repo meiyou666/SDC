@@ -13,6 +13,8 @@
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
+| CPU 训练依赖 | PyTorch 2.7.1+cpu、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
+| PyTorch CPU wheel 源 | [PyTorch 官方 CPU 源](https://download.pytorch.org/whl/cpu)；其余 Python 依赖使用清华源 |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
 | 容器基础镜像源 | Ubuntu 使用 Docker Hub；uv 使用 GHCR |
 | Node.js、npm 软件源 | npmmirror |
@@ -34,6 +36,8 @@ uv run --locked ruff check .
 ```
 
 所有项目代码、依赖管理、测试与实验均在 Docker 中执行。宿主机用于编辑、Git 操作和启动容器。
+
+公共训练任务、数据准备和断点续训见[训练说明](../docs/training.md)。当前镜像固定 CPU 训练依赖；昇腾服务器的驱动、CANN 与 `torch_npu` 仍由维护人收到平台后统一配置。
 
 ## Codex 配置
 
