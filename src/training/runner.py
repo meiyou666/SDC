@@ -37,7 +37,12 @@ import uuid
 from accelerate.utils import is_npu_available
 import torch
 from transformers import (
-    AutoConfig, AutoModelForCausalLM, PreTrainedModel, Trainer, TrainerCallback, TrainingArguments,
+    AutoConfig,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    Trainer,
+    TrainerCallback,
+    TrainingArguments,
 )
 from transformers.trainer_utils import enable_full_determinism, get_last_checkpoint, set_seed
 
