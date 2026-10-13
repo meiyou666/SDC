@@ -120,7 +120,7 @@ Ubuntu 的 Docker 安装包与常规 Python 依赖使用清华源，PyTorch 和 
 
 训练任务统一为 Qwen3-0.6B 的全参数继续预训练。服务器使用 NVIDIA GPU 或昇腾 NPU 容器，共用训练配置和软件版本。启动命令见[公共训练任务](docs/training.md)。
 
-统一 GEMM 的构建、算法接入、逐 bit 评测和 Qwen 调用见[公共 GEMM 工作台](docs/gemm.md)。
+CUTLASS GEMM 的构建与 Qwen 调用见[CUTLASS Qwen 基础训练](docs/gemm.md)。
 
 ## 2. 项目结构
 
@@ -158,13 +158,12 @@ SDC/
 │   └── cloud-*/                 # 脚本生成的云端入口，不提交
 ├── src/
 │   ├── algorithms/            # ABFT 算法
-│   ├── gemm/                  # 统一 GEMM、线性层、注入评测
+│   ├── cutlass_gemm/          # CUTLASS BF16 GEMM 与 Qwen 训练适配
 │   ├── evaluation/            # 注入、统计与计时
 │   ├── training/              # 公共训练任务
-│   └── backends/              # NVIDIA、昇腾与单元测试参考后端
+│   └── backends/              # 设备后端预留目录
 ├── configs/
 │   ├── training/              # 公共训练配置
-│   ├── gemm/                  # 公共 GEMM 接入配置
 │   └── evaluation/            # 评测配置
 ├── docs/
 │   ├── project.md             # 项目目标、研究主线与实验口径

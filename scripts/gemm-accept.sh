@@ -6,5 +6,5 @@ if [[ ! -f /.dockerenv && ! -f /run/.containerenv ]]; then
 fi
 cd -- "$(dirname -- "$0")/.."
 python environment/verify_environment.py --accelerator
-python -c 'import torch; from backends.nvidia.runtime import require_device; require_device(torch.device("cuda"))'
-python -m pytest -q tests/gemm
+python -c 'import torch; from cutlass_gemm.backend import require_device; require_device(torch.device("cuda"))'
+python -m pytest -q tests/cutlass_gemm
