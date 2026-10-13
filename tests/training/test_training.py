@@ -214,7 +214,7 @@ class StopAtOne(TrainerCallback):
         return control
 
 
-@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("wrapped", [False, True, "gemm"])
 @pytest.mark.parametrize("tied", [False, True])
 def test_real_forward_backward_update_and_exact_resume(config, tmp_path, wrapped, tied):
     if tied:
@@ -228,6 +228,11 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path, wrapped
         "model_transform": wrap_gate_proj, "transform_id": "counting-linear:v1",
         "transform_params": {"projection_size": 8},
     } if wrapped else {}
+    if wrapped == "gemm":
+        from gemm.linear import install
+
+        transform = {"model_transform": install, "transform_id": "sdc-gemm:test",
+                     "transform_params": {"backend": "reference", "profile": "nvfp4"}}
     full, full_metrics = train(config, offline=True, **transform)
     assert full_metrics["global_step"] == 3
     assert math.isfinite(full_metrics["validation_loss"])

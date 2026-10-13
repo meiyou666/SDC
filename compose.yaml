@@ -35,6 +35,15 @@ services:
     environment:
       PYTHONPATH: /workspace/SDC/src
       CUDA_VISIBLE_DEVICES: ${SDC_CUDA_VISIBLE_DEVICES:-0}
+  nvidia-build:
+    <<: *development
+    image: sdc-nvidia:py311
+    profiles: ["nvidia-build"]
+    build:
+      context: .
+      dockerfile: environment/docker/Dockerfile
+      target: nvidia
+    shm_size: 8gb
   ascend:
     <<: *development
     image: sdc-ascend:py311

@@ -1,0 +1,8 @@
+backend: nvidia
+profile: bf16
+algorithm: classic
+atol: 0.001
+rtol: 0.001
+recovery: recompute
+seed: 2026
+targets: [gate_proj, up_proj, down_proj]
