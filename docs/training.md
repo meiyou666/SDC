@@ -86,7 +86,7 @@ docker rm sdc-qwen3-nvidia
 
 - 模型与语料固定到 Hugging Face commit；全参数训练，使用 eager attention，关闭 TF32。
 - 训练集和验证集分别分词，每条文本后添加 EOS。文本连续拼接为固定长度序列，EOS 参与损失计算。
-- `max_steps` 表示参数更新次数。当前任务按固定步数训练，数据遍历完后继续下一轮。有效批量 = 每卡批量 × 梯度累积次数 × 进程数；序列数见 `run.json`，实际遍历进度见日志和 `result.json` 的 `epoch`。
+- `max_steps` 表示参数更新次数。当前任务按固定步数训练，数据遍历完后继续下一轮。有效批量 = 每卡批量 × 梯度累积次数；序列数见数据快照清单，实际遍历进度见日志和 `result.json` 的 `epoch`。
 - 日志记录 loss、梯度范数、学习率、验证 loss 和 perplexity。吞吐来自整个训练循环；GEMM 设备耗时由算子评测单独测量。
 - loss 出现 NaN 或 Inf 时明确报错并停止，`result.json` 记录失败原因和训练步数。非有限指标写为 `null`，原值类型保存在 `nonfinite_metrics`。
 - 两个平台共用数据、随机种子、精度和训练设置。结果分别保存到 `results/training/qwen3_06b_wikitext103/cuda` 与 `npu`。
@@ -97,7 +97,7 @@ configs/training/qwen3_06b.yaml  公共任务配置
 data/training/                固定的 token 数据
 results/training/<任务>/<设备>/
   config.resolved.json         实际配置
-  run.json                    软件版本、数据标识与进程数
+  run.json                    配置与数据标识、锁文件哈希、commit、设备
   metrics.jsonl               逐步指标
   result.json                 最终训练与验证结果
   checkpoint-<step>/          续训检查点

@@ -75,7 +75,7 @@ class TrainConfig:
     """
 
     output_dir: str
-    device: str = "npu"
+    device: str = "accelerator"
     precision: str = "bf16"
     seed: int = 2026
     max_steps: int = 1000

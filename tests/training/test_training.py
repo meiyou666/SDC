@@ -189,6 +189,23 @@ def test_divergent_training_writes_failure_result(config):
     assert result["global_step"] == 1
 
 
+def test_interrupted_training_writes_failure_result(config):
+    from transformers import Trainer
+
+    prepare_data(config)
+
+    def failing_loss(self, *args, **kwargs):
+        raise RuntimeError("CUDA out of memory")
+
+    with patch.object(Trainer, "compute_loss", failing_loss):
+        with pytest.raises(RuntimeError, match="out of memory"):
+            train(config, offline=True)
+    result = json.loads((Path(config.training.output_dir) / "result.json").read_text())
+    assert result["status"] == "failed"
+    assert result["reason"] == "RuntimeError"
+    assert result["message"] == "CUDA out of memory"
+
+
 class StopAtOne(TrainerCallback):
     def on_step_end(self, args, state, control, **kwargs):
         if state.global_step == 1:
@@ -229,7 +246,8 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path, wrapped
             assert torch.equal(value, resumed.optimizer.state_dict()["state"][key][name])
     assert (tmp_path / "resumed" / "result.json").is_file()
     record = json.loads((tmp_path / "resumed" / "run.json").read_text())
-    assert record["training_budget"] == {"unit": "optimizer_updates", "max_steps": 3, "repeat_dataset": True}
+    assert record["resume_from"] == str(tmp_path / "resumed" / "checkpoint-1")
+    assert "train_loss" not in resumed_metrics
     assert resumed_metrics["epoch"] == resumed.state.epoch
     with pytest.raises(ValueError, match="非空"):
         train(config, offline=True, **transform)
@@ -417,5 +435,5 @@ def test_qwen_config_changes_only_device_and_output(runtime, device, monkeypatch
     assert resolved.data == shared.data
     assert resolved.training == replace(
         shared.training, device=device,
-        output_dir=shared.training.output_dir.replace("{backend}", device),
+        output_dir=shared.training.output_dir.replace("{device}", device),
     )

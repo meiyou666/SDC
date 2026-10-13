@@ -8,17 +8,12 @@ non-finite metrics, such as a clipped gradient norm, are recorded and training
 continues.
 """
 
-import importlib.metadata
 import json
 import math
 from pathlib import Path
 from typing import Any
 
 from transformers import TrainerCallback
-
-
-#: Packages recorded in ``run.json`` to identify the software of a run.
-TRACKED_PACKAGES = ("torch", "transformers", "datasets", "accelerate", "tokenizers", "torch-npu")
 
 
 def json_record(value: Any) -> Any:
@@ -66,17 +61,6 @@ def write_json(filename: str | Path, value: Any) -> None:
     temporary = filename.with_suffix(filename.suffix + ".tmp")
     temporary.write_text(json.dumps(json_record(value), ensure_ascii=False, indent=2, allow_nan=False) + "\n")
     temporary.replace(filename)
-
-
-def package_versions() -> dict[str, str]:
-    """Installed versions of the packages that affect training results."""
-    versions = {}
-    for name in TRACKED_PACKAGES:
-        try:
-            versions[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            continue
-    return versions
 
 
 class JsonMetrics(TrainerCallback):
