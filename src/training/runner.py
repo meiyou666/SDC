@@ -15,11 +15,13 @@ autocast, trains for ``max_steps`` optimizer updates, evaluates, and writes
 ``checkpoint-<step>/``
     model, optimizer, scheduler and RNG state for ``--resume``
 
+``model_transform`` receives the loaded model before the Trainer is built and
+returns the model to train; it is where protected GEMM layers are installed.
 ``callbacks`` takes ``TrainerCallback`` instances, which reach the live model
 and step counter.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
@@ -33,7 +35,9 @@ import uuid
 
 from accelerate.utils import is_npu_available
 import torch
-from transformers import AutoConfig, AutoModelForCausalLM, Trainer, TrainerCallback, TrainingArguments
+from transformers import (
+    AutoConfig, AutoModelForCausalLM, PreTrainedModel, Trainer, TrainerCallback, TrainingArguments,
+)
 from transformers.trainer_utils import get_last_checkpoint
 
 from .config import ROOT, Config, file_digest, model_source, resolve_path, run_signature
@@ -211,6 +215,7 @@ def train(
     resume: str | None = None,
     offline: bool = False,
     callbacks: Sequence[TrainerCallback] = (),
+    model_transform: Callable[[PreTrainedModel], PreTrainedModel] | None = None,
 ) -> tuple[Trainer, dict[str, Any]]:
     """Run one training job and return the Trainer and its final metrics."""
     config = resolve_runtime_config(config)
@@ -235,8 +240,11 @@ def train(
     if args.world_size > 1:
         torch.distributed.barrier()
     tokenizer = load_tokenizer(config, offline)
+    model = _load_model(config, offline)
+    if model_transform is not None:
+        model = model_transform(model)
     trainer = Trainer(
-        model=_load_model(config, offline), args=args, processing_class=tokenizer,
+        model=model, args=args, processing_class=tokenizer,
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
         data_collator=CausalCollator(), callbacks=[JsonMetrics(output, session), *callbacks],
     )

@@ -1,6 +1,6 @@
 # Qwen3 公共训练任务
 
-统一采用 Qwen3-0.6B，在真实 WikiText-103 文本上进行全参数继续预训练，单卡运行。任务包含 next-token loss、前向计算、反向传播、AdamW 更新和独立验证。模型、数据版本与训练参数固定在 `configs/training/qwen3_06b.yaml`。模块职责与操作数采集接入点见[训练模块说明](../src/training/README.md)。
+统一采用 Qwen3-0.6B，在真实 WikiText-103 文本上进行全参数继续预训练，单卡运行。任务包含 next-token loss、前向计算、反向传播、AdamW 更新和独立验证。模型、数据版本与训练参数固定在 `configs/training/qwen3_06b.yaml`。模块职责与评测接入点见[训练模块说明](../src/training/README.md)。
 
 ## 两套训练环境
 
