@@ -2,15 +2,18 @@ from dataclasses import replace
 import json
 import math
 from pathlib import Path
+import random
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 import torch
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM, TrainerCallback
+from transformers.modeling_utils import load_state_dict
 
 from training.config import Config, DataConfig, ModelConfig, TrainConfig, load_config, validate
 from training.data import CausalCollator, load_tokenizer, pack_texts, prepare_data, read_prepared
@@ -194,17 +197,28 @@ class StopAtOne(TrainerCallback):
         return control
 
 
-def test_real_forward_backward_update_and_exact_resume(config, tmp_path):
+@pytest.mark.parametrize("wrapped", [False, True])
+@pytest.mark.parametrize("tied", [False, True])
+def test_real_forward_backward_update_and_exact_resume(config, tmp_path, wrapped, tied):
+    if tied:
+        model = Qwen3ForCausalLM.from_pretrained(config.model.name_or_path)
+        model.config.tie_word_embeddings = True
+        model.tie_weights()
+        model.save_pretrained(config.model.name_or_path)
     prepare_data(config)
     original = Qwen3ForCausalLM.from_pretrained(config.model.name_or_path)
-    full, full_metrics = train(config, offline=True)
+    transform = {
+        "model_transform": wrap_gate_proj, "transform_id": "counting-linear:v1",
+        "transform_params": {"projection_size": 8},
+    } if wrapped else {}
+    full, full_metrics = train(config, offline=True, **transform)
     assert full_metrics["global_step"] == 3
     assert math.isfinite(full_metrics["validation_loss"])
-    assert any(not torch.equal(original.state_dict()[name], value) for name, value in full.model.state_dict().items())
+    assert not torch.equal(original.model.layers[0].mlp.up_proj.weight, full.model.model.layers[0].mlp.up_proj.weight)
     resumed_config = replace(config, training=replace(config.training, output_dir=str(tmp_path / "resumed")))
-    partial, _ = train(resumed_config, offline=True, callbacks=[StopAtOne()])
+    partial, _ = train(resumed_config, offline=True, callbacks=[StopAtOne()], **transform)
     assert partial.state.global_step == 1
-    resumed, resumed_metrics = train(resumed_config, resume="latest", offline=True)
+    resumed, resumed_metrics = train(resumed_config, resume="latest", offline=True, **transform)
     assert resumed_metrics["global_step"] == 3
     assert resumed_metrics["validation_loss"] == full_metrics["validation_loss"]
     for name, value in full.model.state_dict().items():
@@ -218,9 +232,9 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path):
     assert record["training_budget"] == {"unit": "optimizer_updates", "max_steps": 3, "repeat_dataset": True}
     assert resumed_metrics["epoch"] == resumed.state.epoch
     with pytest.raises(ValueError, match="非空"):
-        train(config, offline=True)
+        train(config, offline=True, **transform)
     with pytest.raises(ValueError, match="已经达到"):
-        train(config, resume="latest", offline=True)
+        train(config, resume="latest", offline=True, **transform)
 
 
 class CountingLinear(torch.nn.Module):
@@ -234,6 +248,13 @@ class CountingLinear(torch.nn.Module):
         return self.linear(x)
 
 
+def wrap_gate_proj(model, projection_size=8):
+    for layer in model.model.layers:
+        layer.mlp.gate_proj = CountingLinear(layer.mlp.gate_proj)
+        layer.mlp.gate_proj.register_buffer("projection", torch.randn(projection_size))
+    return model
+
+
 def test_model_transform_is_the_trained_model(config):
     prepare_data(config)
     original = Qwen3ForCausalLM.from_pretrained(config.model.name_or_path)
@@ -245,11 +266,120 @@ def test_model_transform_is_the_trained_model(config):
             wrapped.append(layer.mlp.gate_proj)
         return model
 
-    trainer, metrics = train(config, offline=True, model_transform=wrap_gate_proj)
+    trainer, metrics = train(config, offline=True, model_transform=wrap_gate_proj, transform_id="counting-linear:v1")
     assert metrics["global_step"] == 3
     assert trainer.model.model.layers[0].mlp.gate_proj is wrapped[0]
     assert wrapped[0].calls > 0
     assert not torch.equal(original.model.layers[0].mlp.gate_proj.weight, wrapped[0].linear.weight)
+    record = json.loads((Path(config.training.output_dir) / "run.json").read_text())
+    assert record["model_transform"] == {"id": "counting-linear:v1", "parameters": {}}
+
+
+@pytest.fixture
+def transformed_run(config):
+    prepare_data(config)
+    train(config, offline=True, callbacks=[StopAtOne()], model_transform=wrap_gate_proj,
+          transform_id="counting-linear:v1", transform_params={"projection_size": 8})
+    return config
+
+
+@pytest.mark.parametrize("change", ["omitted", "id", "parameters"])
+def test_resume_rejects_changed_transform_before_touching_run(transformed_run, change):
+    config = transformed_run
+    filename = Path(config.training.output_dir) / "run.json"
+    original = filename.read_bytes()
+    assert json.loads(original)["model_transform"] == {
+        "id": "counting-linear:v1", "parameters": {"projection_size": 8},
+    }
+    kwargs = {} if change == "omitted" else {
+        "model_transform": wrap_gate_proj,
+        "transform_id": "counting-linear:v2" if change == "id" else "counting-linear:v1",
+        "transform_params": {"projection_size": 16 if change == "parameters" else 8},
+    }
+    with pytest.raises(ValueError, match="续训设置不一致：model_transform"):
+        train(config, resume="latest", offline=True, **kwargs)
+    assert filename.read_bytes() == original
+
+
+def test_resume_rejects_transform_added_to_plain_run(config):
+    prepare_data(config)
+    train(config, offline=True, callbacks=[StopAtOne()])
+    with pytest.raises(ValueError, match="续训设置不一致：model_transform"):
+        train(config, resume="latest", offline=True, model_transform=wrap_gate_proj,
+              transform_id="counting-linear:v1")
+
+
+def test_resume_rejects_missing_transform_record(transformed_run):
+    filename = Path(transformed_run.training.output_dir) / "run.json"
+    record = json.loads(filename.read_text())
+    record.pop("model_transform")
+    filename.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="缺少 model_transform"):
+        train(transformed_run, resume="latest", offline=True)
+
+
+def test_resume_rejects_weight_keys_even_when_transform_id_matches(transformed_run):
+    filename = Path(transformed_run.training.output_dir) / "run.json"
+    original = filename.read_bytes()
+    with pytest.raises(ValueError, match="检查点权重与当前模型不一致"):
+        train(transformed_run, resume="latest", offline=True,
+              model_transform=lambda model, **kwargs: model,
+              transform_id="counting-linear:v1", transform_params={"projection_size": 8})
+    assert filename.read_bytes() == original
+
+
+@pytest.mark.parametrize("change", ["missing", "unexpected"])
+def test_resume_stops_on_corrupt_checkpoint_keys(transformed_run, change):
+    output = Path(transformed_run.training.output_dir)
+    original = (output / "run.json").read_bytes()
+    checkpoint = output / "checkpoint-1"
+    weights = load_state_dict(str(checkpoint / "model.safetensors"))
+    if change == "missing":
+        weights.pop("model.layers.0.mlp.gate_proj.linear.weight")
+    else:
+        weights["unexpected.weight"] = torch.ones(1)
+    torch.save(weights, checkpoint / "pytorch_model.bin")
+    (checkpoint / "model.safetensors").unlink()
+    with pytest.raises(ValueError, match="检查点权重与当前模型不一致"):
+        train(transformed_run, resume="latest", offline=True, model_transform=wrap_gate_proj,
+              transform_id="counting-linear:v1", transform_params={"projection_size": 8})
+    assert (output / "run.json").read_bytes() == original
+
+
+@pytest.mark.parametrize("kwargs, message", [
+    ({"model_transform": wrap_gate_proj}, "transform_id"),
+    ({"transform_id": "wrapper:v1"}, "model_transform"),
+    ({"model_transform": wrap_gate_proj, "transform_id": "wrapper:v1",
+      "transform_params": {"threshold": float("nan")}}, "JSON"),
+])
+def test_transform_settings_fail_before_loading_data(config, kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        train(config, offline=True, **kwargs)
+    assert not Path(config.training.output_dir).exists()
+
+
+@pytest.mark.parametrize("full_determinism", [False, True])
+def test_transform_initialization_uses_training_seed(config, tmp_path, full_determinism):
+    prepare_data(config)
+    draws = []
+    weights = []
+
+    def randomized(model):
+        draws.append((random.random(), float(np.random.random()), torch.randn(8).tolist()))
+        return wrap_gate_proj(model)
+
+    for index, ambient_seed in enumerate((101, 202)):
+        task = replace(config, training=replace(
+            config.training, output_dir=str(tmp_path / f"seed-{index}"), full_determinism=full_determinism,
+        ))
+        random.seed(ambient_seed)
+        np.random.seed(ambient_seed)
+        torch.manual_seed(ambient_seed)
+        trainer, _ = train(task, offline=True, callbacks=[StopAtOne()],
+                           model_transform=randomized, transform_id="randomized:v1")
+        weights.append({name: tensor.clone() for name, tensor in trainer.model.state_dict().items()})
+    assert draws[0] == draws[1]
+    assert all(torch.equal(weights[0][name], tensor) for name, tensor in weights[1].items())
 
 
 def test_resume_rejects_changed_optimizer_settings(config):

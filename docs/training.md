@@ -59,7 +59,7 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline
 bash scripts/train.sh train --config configs/training/qwen3_06b.yaml --offline --resume latest
 ```
 
-检查点包含模型、优化器、学习率调度器、随机状态及训练位置。新实验使用新的 `output_dir`。续训要求配置、数据、依赖版本和 `uv.lock` 哈希都与原运行一致，否则拒绝启动。
+检查点包含模型、优化器、学习率调度器、随机状态及训练位置。新实验使用新的 `output_dir`。续训要求配置、数据、依赖版本、`uv.lock` 哈希及模型变换标识和参数都与原运行一致。使用受保护层的实验通过原评测入口续训，接口见[训练模块说明](../src/training/README.md#接入评测)。
 
 ## 后台训练
 

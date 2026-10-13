@@ -15,8 +15,9 @@ autocast, trains for ``max_steps`` optimizer updates, evaluates, and writes
 ``checkpoint-<step>/``
     model, optimizer, scheduler and RNG state for ``--resume``
 
-``model_transform`` receives the loaded model before the Trainer is built and
-returns the model to train; it is where protected GEMM layers are installed.
+``model_transform`` receives the loaded model and ``transform_params`` before
+the Trainer is built. Its versioned ``transform_id`` and parameters are saved
+and checked on resume; it is where protected GEMM layers are installed.
 ``callbacks`` takes ``TrainerCallback`` instances, which reach the live model
 and step counter.
 """
@@ -38,7 +39,7 @@ import torch
 from transformers import (
     AutoConfig, AutoModelForCausalLM, PreTrainedModel, Trainer, TrainerCallback, TrainingArguments,
 )
-from transformers.trainer_utils import get_last_checkpoint
+from transformers.trainer_utils import enable_full_determinism, get_last_checkpoint, set_seed
 
 from .config import ROOT, Config, file_digest, model_source, resolve_path, run_signature
 from .data import CausalCollator, load_tokenizer, prepared_digest, read_prepared
@@ -52,6 +53,66 @@ RUNTIME_DEVICES = {"nvidia": "cuda", "ascend": "npu"}
 
 #: Files a checkpoint must contain before it is accepted for ``--resume``.
 CHECKPOINT_FILES = ("optimizer.pt", "scheduler.pt")
+
+
+def transform_record(
+    transform: Callable[..., PreTrainedModel] | None,
+    transform_id: str | None,
+    parameters: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Freeze the transform identity and the JSON parameters passed to it."""
+    if transform is None:
+        if transform_id is not None or parameters is not None:
+            raise ValueError("设置变换标识或参数时，必须同时提供 model_transform。")
+        return None
+    if not callable(transform) or not isinstance(transform_id, str) or not transform_id.strip():
+        raise ValueError("model_transform 必须可调用，并提供非空的 transform_id。")
+    if parameters is None:
+        parameters = {}
+    if not isinstance(parameters, dict) or any(not isinstance(key, str) for key in parameters):
+        raise ValueError("transform_params 必须是字符串键组成的参数字典。")
+    try:
+        parameters = json.loads(json.dumps(parameters, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("transform_params 必须能保存为 JSON，且不能包含非有限值。") from exc
+    return {"id": transform_id, "parameters": parameters}
+
+
+class ResumeTrainer(Trainer):
+    """Stop on incomplete weight loading, allowing aliases of restored tensors."""
+
+    def _issue_warnings_after_load(self, load_result):
+        missing = set(load_result.missing_keys)
+        # Safetensors saves tied tensors once. An omitted alias is valid only
+        # when another name for the very same parameter/buffer was restored.
+        state_keys = set(self.model.state_dict())
+        aliases: dict[int, set[str]] = {}
+        for name, tensor in (
+            *self.model.named_parameters(remove_duplicate=False),
+            *self.model.named_buffers(remove_duplicate=False),
+        ):
+            if name in state_keys:
+                aliases.setdefault(id(tensor), set()).add(name)
+        for names in aliases.values():
+            if names - missing:
+                missing.difference_update(names)
+        if missing or load_result.unexpected_keys:
+            raise ValueError(
+                "检查点权重与当前模型不一致："
+                f"缺失 {sorted(missing)}；多余 {sorted(load_result.unexpected_keys)}。"
+            )
+
+
+class RunRecord(TrainerCallback):
+    """Write run settings after checkpoint loading has succeeded."""
+
+    def __init__(self, output: Path, config: Config, record: dict[str, Any]):
+        self.output, self.config, self.record = output, config, record
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        if state.is_world_process_zero:
+            write_json(self.output / "run.json", self.record)
+            write_json(self.output / "config.resolved.json", self.config.to_dict())
 
 
 def require_device(device: str) -> None:
@@ -130,6 +191,7 @@ def resolve_checkpoint(output: Path, resume: str | None) -> str | None:
 
 def validate_resume(
     checkpoint: str, config: Config, data_hash: str, versions: dict[str, str], world_size: int,
+    transform: dict[str, Any] | None,
 ) -> None:
     """Refuse to resume into different settings, data or software."""
     directory = Path(checkpoint)
@@ -137,10 +199,13 @@ def validate_resume(
     if not filename.is_file():
         raise ValueError("续训需要原始运行目录中的 run.json。")
     previous = json.loads(filename.read_text())
+    if "model_transform" not in previous:
+        raise ValueError("续训记录缺少 model_transform 信息，请使用新目录重新开始训练。")
     current = {
         "config_signature": run_signature(config), "data_digest": data_hash,
         "packages": versions, "world_size": world_size,
         "lock_sha256": file_digest(ROOT / "uv.lock"),
+        "model_transform": transform,
     }
     for key, value in current.items():
         if previous.get(key) != value:
@@ -169,18 +234,20 @@ def _git_commit() -> str | None:
 def _run_record(
     config: Config, args: TrainingArguments, datasets: Any, data_hash: str,
     versions: dict[str, str], checkpoint: str | None,
+    transform: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Assemble the run.json provenance record."""
     device = getattr(torch, args.device.type, None)
     device_name = device.get_device_name(args.device) if hasattr(device, "get_device_name") else platform.machine()
     t = config.training
     return {
-        "schema_version": 1, "task": "full_parameter_causal_language_modeling",
+        "schema_version": 2, "task": "full_parameter_causal_language_modeling",
         "config_signature": run_signature(config), "data_digest": data_hash,
         "packages": versions, "world_size": args.world_size,
         "lock_sha256": file_digest(ROOT / "uv.lock"), "git_commit": _git_commit(),
         "python": platform.python_version(), "device": str(args.device), "device_name": device_name,
         "master_weights": "float32", "autocast": t.precision,
+        "model_transform": transform,
         "effective_batch_size": t.batch_size * t.gradient_accumulation_steps * args.world_size,
         "block_size": config.data.block_size,
         "train_sequences": len(datasets["train"]), "validation_sequences": len(datasets["validation"]),
@@ -215,9 +282,13 @@ def train(
     resume: str | None = None,
     offline: bool = False,
     callbacks: Sequence[TrainerCallback] = (),
-    model_transform: Callable[[PreTrainedModel], PreTrainedModel] | None = None,
+    model_transform: Callable[..., PreTrainedModel] | None = None,
+    *,
+    transform_id: str | None = None,
+    transform_params: dict[str, Any] | None = None,
 ) -> tuple[Trainer, dict[str, Any]]:
     """Run one training job and return the Trainer and its final metrics."""
+    transform = transform_record(model_transform, transform_id, transform_params)
     config = resolve_runtime_config(config)
     output = resolve_path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
@@ -226,27 +297,30 @@ def train(
     args = training_arguments(config)
     data_hash = prepared_digest(data_manifest)
     if checkpoint:
-        validate_resume(checkpoint, config, data_hash, versions, args.world_size)
+        validate_resume(checkpoint, config, data_hash, versions, args.world_size, transform)
     # Every rank completes the output checks before rank 0 creates shared files.
     if args.world_size > 1:
         torch.distributed.barrier()
     session = uuid.uuid4().hex
     if args.process_index == 0:
         output.mkdir(parents=True, exist_ok=True)
-        write_json(output / "run.json", _run_record(
-            config, args, datasets, data_hash, versions, checkpoint,
-        ))
-        write_json(output / "config.resolved.json", config.to_dict())
     if args.world_size > 1:
         torch.distributed.barrier()
+    if config.training.full_determinism:
+        enable_full_determinism(config.training.seed)
+    else:
+        set_seed(config.training.seed)
     tokenizer = load_tokenizer(config, offline)
     model = _load_model(config, offline)
     if model_transform is not None:
-        model = model_transform(model)
-    trainer = Trainer(
+        # Pass a copy so a transform cannot mutate the saved parameter record.
+        model = model_transform(model, **json.loads(json.dumps(transform["parameters"])))
+    record = _run_record(config, args, datasets, data_hash, versions, checkpoint, transform)
+    trainer = ResumeTrainer(
         model=model, args=args, processing_class=tokenizer,
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
-        data_collator=CausalCollator(), callbacks=[JsonMetrics(output, session), *callbacks],
+        data_collator=CausalCollator(),
+        callbacks=[RunRecord(output, config, record), JsonMetrics(output, session), *callbacks],
     )
     try:
         result = trainer.train(resume_from_checkpoint=checkpoint)
