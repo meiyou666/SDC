@@ -1,6 +1,6 @@
 # 训练模块
 
-Qwen3-0.6B 在 WikiText-103 上的全参数继续预训练，单卡运行。训练精度为 BF16 混合精度、FP32 主权重；FP8、FP4 量化在评测侧进行。
+Qwen3-0.6B 在 WikiText-103 上的全参数继续预训练，单卡运行。FP32 主权重、BF16 混合精度；FP8、FP4 GEMM 由评测模块替换线性层后接入。
 
 ## 文件职责
 
@@ -40,9 +40,14 @@ bash scripts/train.sh train   --config configs/training/qwen3_06b.yaml --offline
 
 非有限值写成 `null`，原值记在 `nonfinite_metrics`。loss 非有限值报错停止，其他指标非有限时继续训练。
 
-## 采集操作数
+## 接入评测
 
-`train(config, callbacks=[...])` 接受 `TrainerCallback`，用于在训练过程中导出指定层的 GEMM 操作数。
+```python
+train(config, model_transform=install, callbacks=[...])
+```
+
+- `model_transform`：模型加载后、Trainer 创建前调用，返回要训练的模型。受保护的线性层在这里替换进去。
+- `callbacks`：`TrainerCallback` 列表，可读到当前模型和 step，用于记录评测事件。
 
 ## 无加速卡时的检查
 

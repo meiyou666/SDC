@@ -223,6 +223,35 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path):
         train(config, resume="latest", offline=True)
 
 
+class CountingLinear(torch.nn.Module):
+    def __init__(self, linear):
+        super().__init__()
+        self.linear = linear
+        self.calls = 0
+
+    def forward(self, x):
+        self.calls += 1
+        return self.linear(x)
+
+
+def test_model_transform_is_the_trained_model(config):
+    prepare_data(config)
+    original = Qwen3ForCausalLM.from_pretrained(config.model.name_or_path)
+    wrapped = []
+
+    def wrap_gate_proj(model):
+        for layer in model.model.layers:
+            layer.mlp.gate_proj = CountingLinear(layer.mlp.gate_proj)
+            wrapped.append(layer.mlp.gate_proj)
+        return model
+
+    trainer, metrics = train(config, offline=True, model_transform=wrap_gate_proj)
+    assert metrics["global_step"] == 3
+    assert trainer.model.model.layers[0].mlp.gate_proj is wrapped[0]
+    assert wrapped[0].calls > 0
+    assert not torch.equal(original.model.layers[0].mlp.gate_proj.weight, wrapped[0].linear.weight)
+
+
 def test_resume_rejects_changed_optimizer_settings(config):
     prepare_data(config)
     train(config, offline=True, callbacks=[StopAtOne()])
