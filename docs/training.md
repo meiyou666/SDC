@@ -41,7 +41,7 @@ docker compose --profile ascend run --build --rm --user "$(id -u):$(id -g)" asce
 
 ## 准备与训练
 
-接入自定义 GEMM 时使用[公共 GEMM 工作台](gemm.md)中的 `python -m gemm.train` 入口；数据准备与下面的命令相同。
+接入 CUTLASS 时使用[CUTLASS Qwen 基础训练](gemm.md)中的 `python -m cutlass_gemm.train` 入口；数据准备与下面的命令相同。
 
 以下命令在对应训练容器内执行，两种平台完全相同：
 
