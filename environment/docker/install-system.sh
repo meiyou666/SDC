@@ -5,6 +5,7 @@ case "$(dpkg --print-architecture)" in
     arm64) sdc_apt_mirror=http://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports ;;
     *) exit 1 ;;
 esac
+sdc_apt_mirror=${SDC_APT_MIRROR:-$sdc_apt_mirror}
 cat > /etc/apt/sources.list <<EOF
 deb ${sdc_apt_mirror} jammy main restricted universe multiverse
 deb ${sdc_apt_mirror} jammy-updates main restricted universe multiverse
@@ -12,7 +13,7 @@ deb ${sdc_apt_mirror} jammy-security main restricted universe multiverse
 EOF
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git xz-utils libstdc++6
-sed -i 's|http://mirrors.tuna|https://mirrors.tuna|g' /etc/apt/sources.list
+sed -i 's|http://|https://|g' /etc/apt/sources.list
 if [[ ${1:?} == full ]]; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         openssh-client rsync git-lfs build-essential cmake ninja-build pkg-config \

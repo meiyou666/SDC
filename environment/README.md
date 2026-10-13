@@ -114,4 +114,8 @@ WSL 运行维护命令时，在 `tools` 前添加 `--user "$(id -u):$(id -g)"`�
 
 GitHub Actions 在项目容器中运行锁文件检查、测试和 Ruff。
 
+CI 缓存 `tooling` 和 `development` 的 Docker 构建层，直接复用已构建的容器执行检查。同一 PR 更新后，自动取消旧任务。首次构建需要下载依赖，后续运行复用缓存。
+
+GitHub runner 使用 Ubuntu 官方 APT 源，并通过 `SDC_INSTALL_AI_TOOLS=false` 跳过 Node.js 和 Codex 安装。系统库、Python 与锁定的项目依赖保持一致；本地构建仍默认使用清华源并安装 AI 工具。
+
 维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。切换依赖源时可填写 `index-url`，并同步修改 `pyproject.toml` 中的源地址。

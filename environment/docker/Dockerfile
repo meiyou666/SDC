@@ -7,6 +7,7 @@ FROM ascendai/cann:9.1.0-950-ubuntu22.04-py3.11-devel@sha256:c8c8b5a800b583ffdf5
 FROM cann_${ASCEND_SOC} AS cann_sdk
 FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401 AS tooling
 
+ARG SDC_APT_MIRROR
 COPY --from=uv /uv /uvx /usr/local/bin/
 ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_PYTHON_BIN_DIR=/usr/local/bin
 COPY environment/docker/install-system.sh /opt/sdc/install-system.sh
@@ -42,10 +43,16 @@ ENV VIRTUAL_ENV=/opt/venv \
     PATH=/home/sdc/.local/bin:$PATH
 USER root
 RUN bash /opt/sdc/install-system.sh full
+ARG SDC_INSTALL_AI_TOOLS=true
 COPY environment/docker/install-node.sh /opt/sdc/install-node.sh
-RUN bash /opt/sdc/install-node.sh \
-    && npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@latest \
-    && npm cache clean --force \
+RUN install -d -o sdc -g sdc /home/sdc/.local \
+    && if [ "$SDC_INSTALL_AI_TOOLS" = true ]; then \
+         bash /opt/sdc/install-node.sh \
+         && npm install --global --ignore-scripts --no-audit --no-fund @openai/codex@latest \
+         && npm cache clean --force; \
+       elif [ "$SDC_INSTALL_AI_TOOLS" != false ]; then \
+         echo 'SDC_INSTALL_AI_TOOLS must be true or false' >&2; exit 1; \
+       fi \
     && chown -R sdc:sdc /home/sdc/.local \
     && install -d -m 0700 -o sdc -g sdc /home/sdc/.codex /home/sdc/.ssh \
     && install -d -o sdc -g sdc /home/sdc/.cache
