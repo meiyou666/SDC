@@ -1,4 +1,5 @@
 target-version = "py311"
+line-length = 100
 extend-exclude = ["archive", "data", "results", ".agent"]
 
 [lint]
@@ -6,5 +7,6 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 [lint.isort]
 force-sort-within-sections = true
+lines-after-imports = 2
 known-first-party = ["training"]
 known-local-folder = ["test_environment_policy"]
