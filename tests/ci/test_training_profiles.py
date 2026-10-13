@@ -84,7 +84,10 @@ def test_schema4_rejects_incomplete_cann_image_set(training_snapshot):
 def test_schema4_requires_common_torch_version(training_snapshot, profile):
     def alter(baseline):
         selected = baseline["development_profile"] if profile == "development" else baseline["training_profiles"][profile]
-        selected["torch"] = "2.9.0+cpu"
+        # Raise the major version so this profile differs whatever is pinned.
+        version, _, local = selected["torch"].partition("+")
+        major, rest = version.split(".", 1)
+        selected["torch"] = f"{int(major) + 1}.{rest}" + (f"+{local}" if local else "")
     change_baseline(training_snapshot, alter)
     with pytest.raises(policy.PolicyError, match="same upstream"):
         check_snapshot(training_snapshot)
