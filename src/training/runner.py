@@ -7,7 +7,7 @@ autocast, trains for ``max_steps`` optimizer updates, evaluates, and writes
 ``config.resolved.json``
     the configuration actually used, after device resolution
 ``run.json``
-    software versions, data digest, device and training budget
+    config signature, data digest, ``uv.lock`` hash, commit and device
 ``metrics.jsonl``
     one JSON object per Trainer log line
 ``result.json``
@@ -43,16 +43,14 @@ from transformers.trainer_utils import enable_full_determinism, get_last_checkpo
 
 from .config import ROOT, Config, file_digest, model_source, resolve_path, run_signature
 from .data import CausalCollator, load_tokenizer, prepared_digest, read_prepared
-from .metrics import (
-    JsonMetrics, NonFiniteLossError, check_finite_loss, package_versions, write_json,
-)
+from .metrics import JsonMetrics, NonFiniteLossError, check_finite_loss, write_json
 
 
 #: ``device: accelerator`` resolves through the container's SDC_RUNTIME.
 RUNTIME_DEVICES = {"nvidia": "cuda", "ascend": "npu"}
 
 #: Files a checkpoint must contain before it is accepted for ``--resume``.
-CHECKPOINT_FILES = ("optimizer.pt", "scheduler.pt")
+CHECKPOINT_FILES = ("trainer_state.json", "optimizer.pt", "scheduler.pt", "rng_state.pth")
 
 
 def transform_record(
@@ -124,15 +122,18 @@ def require_device(device: str) -> None:
 
 
 def resolve_runtime_config(config: Config) -> Config:
-    """Resolve ``device: accelerator`` and ``{backend}`` from the container."""
+    """Resolve ``device: accelerator`` and ``{device}`` from the container."""
     device = config.training.device
     if device == "accelerator":
-        device = RUNTIME_DEVICES.get(os.environ.get("SDC_RUNTIME", ""))
+        runtime = os.environ.get("SDC_RUNTIME", "")
+        device = RUNTIME_DEVICES.get(runtime)
         if device is None:
-            raise ValueError("Qwen 训练任务请在 nvidia 或 ascend 容器中运行。")
+            raise ValueError(
+                f"Qwen 训练任务请在 nvidia 或 ascend 容器中运行，当前 SDC_RUNTIME={runtime!r}。"
+            )
     return replace(config, training=replace(
         config.training, device=device,
-        output_dir=config.training.output_dir.replace("{backend}", device),
+        output_dir=config.training.output_dir.replace("{device}", device),
     ))
 
 
@@ -167,8 +168,10 @@ def training_arguments(config: Config) -> TrainingArguments:
     )
     if args.device.type != t.device:
         raise ValueError(f"配置要求 {t.device}，但 Trainer 选择了 {args.device.type}。")
-    if args.world_size == 1 and args.n_gpu > 1:
-        raise ValueError("实验按单卡运行：请只开放一张设备（多卡需用 torchrun 启动）。")
+    if args.world_size > 1:
+        raise ValueError("实验按单卡运行：请不要用 torchrun 或多进程启动。")
+    if args.n_gpu > 1:
+        raise ValueError("实验按单卡运行：请只向容器开放一张设备。")
     return args
 
 
@@ -176,22 +179,27 @@ def resolve_checkpoint(output: Path, resume: str | None) -> str | None:
     """Pick the checkpoint to resume from, or verify the output dir is unused."""
     if resume is None:
         if output.exists() and any(output.iterdir()):
-            raise ValueError("output_dir 非空：请换一个目录，或使用 --resume latest。")
+            raise ValueError(
+                f"output_dir 非空：{output}。续训请加 --resume latest；"
+                "上次训练没有留下检查点时，删除该目录或换一个 output_dir 重新开始。"
+            )
         return None
-    checkpoint = get_last_checkpoint(str(output)) if resume == "latest" and output.is_dir() else None
-    if resume != "latest":
+    if resume == "latest":
+        checkpoint = get_last_checkpoint(str(output)) if output.is_dir() else None
+        if checkpoint is None:
+            raise ValueError(
+                f"{output} 里没有检查点：删除该目录或换一个 output_dir 重新开始训练。"
+            )
+    else:
         checkpoint = str(resolve_path(resume))
-    if not checkpoint or not (Path(checkpoint) / "trainer_state.json").is_file():
-        raise ValueError("没有找到完整的 Trainer 检查点。")
     for name in CHECKPOINT_FILES:
         if not (Path(checkpoint) / name).is_file():
-            raise ValueError(f"检查点缺少 {name}。")
+            raise ValueError(f"{checkpoint} 不是完整的检查点：缺少 {name}。")
     return checkpoint
 
 
 def validate_resume(
-    checkpoint: str, config: Config, data_hash: str, versions: dict[str, str], world_size: int,
-    transform: dict[str, Any] | None,
+    checkpoint: str, config: Config, data_hash: str, transform: dict[str, Any] | None,
 ) -> None:
     """Refuse to resume into different settings, data or software."""
     directory = Path(checkpoint)
@@ -203,9 +211,7 @@ def validate_resume(
         raise ValueError("续训记录缺少 model_transform 信息，请使用新目录重新开始训练。")
     current = {
         "config_signature": run_signature(config), "data_digest": data_hash,
-        "packages": versions, "world_size": world_size,
-        "lock_sha256": file_digest(ROOT / "uv.lock"),
-        "model_transform": transform,
+        "lock_sha256": file_digest(ROOT / "uv.lock"), "model_transform": transform,
     }
     for key, value in current.items():
         if previous.get(key) != value:
@@ -213,11 +219,6 @@ def validate_resume(
     state = json.loads((directory / "trainer_state.json").read_text())
     if state["global_step"] >= config.training.max_steps:
         raise ValueError("这个检查点已经达到 max_steps。")
-    ranks = range(world_size) if world_size > 1 else [None]
-    for rank in ranks:
-        filename = directory / ("rng_state.pth" if rank is None else f"rng_state_{rank}.pth")
-        if not filename.is_file():
-            raise ValueError(f"检查点缺少 {filename.name}。")
 
 
 def _git_commit() -> str | None:
@@ -232,30 +233,21 @@ def _git_commit() -> str | None:
 
 
 def _run_record(
-    config: Config, args: TrainingArguments, datasets: Any, data_hash: str,
-    versions: dict[str, str], checkpoint: str | None,
+    config: Config, args: TrainingArguments, data_hash: str, checkpoint: str | None,
     transform: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Assemble the run.json provenance record."""
+    """Assemble the run.json provenance record.
+
+    The settings themselves are in ``config.resolved.json``; this file records
+    what the run cannot restate, so a resume can refuse a changed setup.
+    """
     device = getattr(torch, args.device.type, None)
     device_name = device.get_device_name(args.device) if hasattr(device, "get_device_name") else platform.machine()
-    t = config.training
     return {
-        "schema_version": 2, "task": "full_parameter_causal_language_modeling",
         "config_signature": run_signature(config), "data_digest": data_hash,
-        "packages": versions, "world_size": args.world_size,
         "lock_sha256": file_digest(ROOT / "uv.lock"), "git_commit": _git_commit(),
-        "python": platform.python_version(), "device": str(args.device), "device_name": device_name,
-        "master_weights": "float32", "autocast": t.precision,
-        "model_transform": transform,
-        "effective_batch_size": t.batch_size * t.gradient_accumulation_steps * args.world_size,
-        "block_size": config.data.block_size,
-        "train_sequences": len(datasets["train"]), "validation_sequences": len(datasets["validation"]),
-        "training_budget": {
-            "unit": "optimizer_updates", "max_steps": t.max_steps, "repeat_dataset": True,
-        },
+        "device_name": device_name, "model_transform": transform,
         "started_at": datetime.now(timezone.utc).isoformat(), "resume_from": checkpoint,
-        "timing": "Trainer wall-clock metrics include the training loop; they are not GEMM kernel timings.",
     }
 
 
@@ -270,7 +262,7 @@ def _load_model(config: Config, offline: bool):
         raise ValueError(f"block_size 超过模型上下文长度 {limit}。")
     model = AutoModelForCausalLM.from_pretrained(
         source, revision=config.model.revision, config=model_config,
-        torch_dtype=torch.float32, attn_implementation=config.model.attention,
+        dtype=torch.float32, attn_implementation=config.model.attention,
         trust_remote_code=False, local_files_only=offline,
     )
     model.config.use_cache = False
@@ -293,19 +285,12 @@ def train(
     output = resolve_path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
     datasets, data_manifest = read_prepared(config)
-    versions = package_versions()
     args = training_arguments(config)
     data_hash = prepared_digest(data_manifest)
     if checkpoint:
-        validate_resume(checkpoint, config, data_hash, versions, args.world_size, transform)
-    # Every rank completes the output checks before rank 0 creates shared files.
-    if args.world_size > 1:
-        torch.distributed.barrier()
+        validate_resume(checkpoint, config, data_hash, transform)
     session = uuid.uuid4().hex
-    if args.process_index == 0:
-        output.mkdir(parents=True, exist_ok=True)
-    if args.world_size > 1:
-        torch.distributed.barrier()
+    output.mkdir(parents=True, exist_ok=True)
     if config.training.full_determinism:
         enable_full_determinism(config.training.seed)
     else:
@@ -315,7 +300,7 @@ def train(
     if model_transform is not None:
         # Pass a copy so a transform cannot mutate the saved parameter record.
         model = model_transform(model, **json.loads(json.dumps(transform["parameters"])))
-    record = _run_record(config, args, datasets, data_hash, versions, checkpoint, transform)
+    record = _run_record(config, args, data_hash, checkpoint, transform)
     trainer = ResumeTrainer(
         model=model, args=args, processing_class=tokenizer,
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
@@ -327,12 +312,19 @@ def train(
         evaluation = trainer.evaluate(metric_key_prefix="validation")
         check_finite_loss({**result.metrics, **evaluation})
     except NonFiniteLossError as exc:
-        if args.process_index == 0:
-            write_json(output / "result.json", {
-                "status": "failed", "reason": "nonfinite_loss", "message": str(exc),
-                "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
-                **exc.metrics,
-            })
+        write_json(output / "result.json", {
+            "status": "failed", "reason": "nonfinite_loss", "message": str(exc),
+            "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
+            **exc.metrics,
+        })
+        raise
+    except (Exception, KeyboardInterrupt) as exc:
+        # Out of memory and interrupts leave a result.json too, so a stopped
+        # run is distinguishable from one that never started.
+        write_json(output / "result.json", {
+            "status": "failed", "reason": type(exc).__name__, "message": str(exc),
+            "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
+        })
         raise
     loss = evaluation["validation_loss"]
     metrics = {
@@ -340,7 +332,10 @@ def train(
         "global_step": trainer.state.global_step, "epoch": trainer.state.epoch,
         "validation_perplexity": math.exp(loss) if math.isfinite(loss) and loss < 700 else None,
     }
-    if args.process_index == 0:
-        write_json(output / "result.json", metrics)
-        trainer.save_state()
+    if checkpoint:
+        # Trainer averages this call's loss over the total step count, which
+        # includes the steps before the resume, so the value would be too low.
+        metrics.pop("train_loss", None)
+    write_json(output / "result.json", metrics)
+    trainer.save_state()
     return trainer, metrics

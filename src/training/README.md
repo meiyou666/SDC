@@ -33,7 +33,7 @@ bash scripts/train.sh train   --config configs/training/qwen3_06b.yaml --offline
 | 文件 | 内容 |
 |---|---|
 | `config.resolved.json` | 设备解析后的实际配置 |
-| `run.json` | 软件版本、`uv.lock` 哈希、git commit、设备、数据摘要、训练预算、模型变换标识与参数 |
+| `run.json` | 配置签名、数据摘要、`uv.lock` 哈希、git commit、设备名、模型变换标识与参数、起始时间与续训来源 |
 | `metrics.jsonl` | 每条 Trainer 日志一行 JSON |
 | `result.json` | 最终训练与验证指标；失败时记录 `status: failed` 和原因 |
 | `checkpoint-<step>/` | 模型、优化器、调度器、随机状态 |
