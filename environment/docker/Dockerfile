@@ -80,7 +80,11 @@ RUN python /opt/sdc/project/environment/verify_environment.py --smoke
 
 FROM common AS nvidia
 COPY --from=cuda_sdk /usr/local/cuda-12.8 /usr/local/cuda-12.8
+COPY environment/gemm.json /opt/sdc/gemm.json
+COPY environment/docker/install-cutlass.sh /opt/sdc/install-cutlass.sh
+RUN bash /opt/sdc/install-cutlass.sh
 ENV SDC_RUNTIME=nvidia CUDA_HOME=/usr/local/cuda-12.8 \
+    CUTLASS_PATH=/opt/cutlass TORCH_EXTENSIONS_DIR=/home/sdc/.cache/torch_extensions \
     PATH=/usr/local/cuda-12.8/bin:$PATH \
     LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility

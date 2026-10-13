@@ -2,6 +2,8 @@
 /.devcontainer/** text eol=lf
 /.github/** text eol=lf
 /scripts/** text eol=lf
+/src/** text eol=lf
+/tests/gemm/** text eol=lf
 /tests/ci/** text eol=lf
 /compose.yaml text eol=lf
 /AGENTS.md text eol=lf
