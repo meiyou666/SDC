@@ -13,10 +13,10 @@
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
-| 共同训练库 | PyTorch 2.7.1、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
+| 共同训练库 | PyTorch 2.9.0、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
 | 共同数值与数据依赖 | NumPy 1.26.4、PyArrow 21.0.0；其余依赖统一锁定在 `uv.lock` |
-| NVIDIA GPU | PyTorch 2.7.1+cu128、CUDA Toolkit 12.8.1 |
-| 昇腾 NPU | PyTorch 2.7.1+cpu、torch_npu 2.7.1.post8、CANN 9.1.0 |
+| NVIDIA GPU | PyTorch 2.9.0+cu128、CUDA Toolkit 12.8.1 |
+| 昇腾 NPU | PyTorch 2.9.0+cpu、torch_npu 2.9.0.post8、CANN 9.1.0 |
 | PyTorch wheel 源 | PyTorch 官方 CPU、cu128 源；其余 Python 依赖使用清华源 |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
 | 容器基础镜像源 | Ubuntu 使用 Docker Hub；uv 使用 GHCR |
