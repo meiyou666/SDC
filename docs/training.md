@@ -8,8 +8,8 @@
 |---|---|---|
 | Compose 服务 | `nvidia` | `ascend` |
 | Ubuntu、Python | 22.04、3.11.17 | 22.04、3.11.17 |
-| PyTorch 主版本 | 2.7.1 | 2.7.1 |
-| 硬件组件 | CUDA 12.8.1、cu128 构建 | CANN 9.1.0、torch_npu 2.7.1.post8 |
+| PyTorch 主版本 | 2.9.0 | 2.9.0 |
+| 硬件组件 | CUDA 12.8.1、cu128 构建 | CANN 9.1.0、torch_npu 2.9.0.post8 |
 | Transformers、Datasets、Accelerate | 4.57.6、4.4.2、1.12.0 | 4.57.6、4.4.2、1.12.0 |
 | 训练精度 | BF16 混合精度，FP32 主权重 | BF16 混合精度，FP32 主权重 |
 

@@ -19,9 +19,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-development = ["torch==2.7.1+cpu", "accelerate==1.12.0"]
-nvidia = ["torch==2.7.1+cu128", "accelerate==1.12.0"]
-ascend = ["torch==2.7.1+cpu", "torch-npu==2.7.1.post8", "accelerate==1.12.0"]
+development = ["torch==2.9.0+cpu", "accelerate==1.12.0"]
+nvidia = ["torch==2.9.0+cu128", "accelerate==1.12.0"]
+ascend = ["torch==2.9.0+cpu", "torch-npu==2.9.0.post8", "accelerate==1.12.0"]
 
 [dependency-groups]
 dev = ["pytest==9.1.1", "ruff==0.16.10", "packaging==26.3", "tokenizers==0.22.2"]

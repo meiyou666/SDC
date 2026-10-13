@@ -17,19 +17,19 @@
   },
   "development_profile": {
     "device": "cpu",
-    "torch": "2.7.1+cpu"
+    "torch": "2.9.0+cpu"
   },
   "training_profiles": {
     "nvidia": {
       "device": "cuda",
-      "torch": "2.7.1+cu128",
+      "torch": "2.9.0+cu128",
       "cuda": "12.8.1",
       "sdk_image": "nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97"
     },
     "ascend": {
       "device": "npu",
-      "torch": "2.7.1+cpu",
-      "torch_npu": "2.7.1.post8",
+      "torch": "2.9.0+cpu",
+      "torch_npu": "2.9.0.post8",
       "cann": "9.1.0",
       "sdk_images": {
         "910b": "ascendai/cann:9.1.0-910b-ubuntu22.04-py3.11-devel@sha256:7f0dc8f9525b6c21dd554cb95184de94d4bf9531699cc0bee6150fefe5466a16",
