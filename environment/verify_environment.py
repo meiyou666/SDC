@@ -75,6 +75,8 @@ def check_torch_version(baseline, runtime):
     expected = profile["torch"]
     if importlib.metadata.version("torch") != expected:
         raise ValueError(f"The {runtime} profile requires torch {expected}.")
+    if runtime == "nvidia" and importlib.metadata.version("nvidia-cudnn-cu12") != profile["cudnn"]:
+        raise ValueError(f"The nvidia profile requires cuDNN {profile['cudnn']}.")
 
 
 def smoke_test():

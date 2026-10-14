@@ -18,7 +18,7 @@ SDC 可能使矩阵乘法产生错误结果，而训练仍继续执行。ABFT �
 
 ## 代表方法
 
-当前代码先建立[官方 CUTLASS 与 Qwen 的 BF16 基础训练](gemm.md)，保持官方 GEMM 默认实现。随后接入成熟框架的 FP8、FP4 训练组件，再逐项加入 ABFT 校验、故障注入与恢复。
+当前代码保留[官方 CUTLASS 与 Qwen 的 BF16 基础训练](gemm.md)，并通过 [Transformer Engine 接入 FP8、FP4 训练](training.md#fp8-与-fp4-训练)。低精度组件提供训练参考，后续在 CUTLASS 上逐项加入相应 GEMM、ABFT 校验、故障注入与恢复。
 
 | 方法 | 比较的核心机制 |
 | --- | --- |
