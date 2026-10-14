@@ -15,6 +15,8 @@ import tomllib
 BASELINE = "environment/baseline.json"
 LOCKFILE = "uv.lock"
 PROJECT = "pyproject.toml"
+TE_COMMIT = "fb98b935d6054a2fc68137951051695de3acaee3"
+TE_GIT_SOURCE = f"https://github.com/NVIDIA/TransformerEngine.git?rev={TE_COMMIT}#{TE_COMMIT}"
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
 SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh", "ruff.toml", "pytest.ini", "scripts/check.sh", "scripts/train.sh"}
 CODE_SUFFIXES = {
@@ -85,7 +87,8 @@ def parse_lock(text):
             if name != "torch" or packages[name].split("+", 1)[0] != version.split("+", 1)[0]:
                 raise PolicyError(f"Conflicting locked versions for {name} in the shared profile.")
         artifacts = entry.get("wheels", []) + ([entry["sdist"]] if "sdist" in entry else [])
-        if "registry" not in source or not artifacts or any(not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", item.get("hash", "")) for item in artifacts):
+        official_te = name == "transformer-engine" and version == "2.21.0.dev0" and source == {"git": TE_GIT_SOURCE}
+        if not official_te and (set(source) != {"registry"} or not artifacts or any(not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", item.get("hash", "")) for item in artifacts)):
             raise PolicyError(f"{name}: keep registry packages with SHA256 artifact hashes in uv.lock.")
         packages[name] = version.split("+", 1)[0] if name == "torch" else version
     if not packages:
@@ -220,6 +223,13 @@ def check_cpu_container(snapshot, baseline, locked):
                 raise PolicyError(f"The {name} extra must match its pinned torch build.")
         if f"torch-npu=={profiles['ascend']['torch_npu']}" not in extras.get("ascend", []):
             raise PolicyError("Pin torch_npu in the ascend extra.")
+        cudnn = "nvidia-cudnn-cu12==9.12.0.46"
+        if (project.get("tool", {}).get("uv", {}).get("override-dependencies") != [cudnn]
+                or profiles["nvidia"].get("cudnn") != "9.12.0.46"
+                or locked.get("nvidia-cudnn-cu12") != "9.12.0.46"
+                or cudnn not in extras.get("nvidia", [])
+                or any(item.startswith("nvidia-cudnn-cu12") for profile in ("development", "ascend") for item in extras.get(profile, []))):
+            raise PolicyError("Only the pinned NVIDIA cuDNN 9.12.0.46 override is permitted.")
     try:
         dev = json.loads(snapshot.read(devcontainer))
     except ValueError as exc:
