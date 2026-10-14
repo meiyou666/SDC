@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <limits>
+#include <type_traits>
 
 #include "cutlass/gemm/device/gemm.h"
 #include "cutlass/gemm/device/default_gemm_configuration.h"
@@ -31,13 +32,18 @@ bool row_major(const at::Tensor& tensor, const char* name) {
 
 template <typename Element, typename OperatorClass, typename LayoutA, typename LayoutB>
 at::Tensor launch(const at::Tensor& a, const at::Tensor& b, bool a_row, bool b_row) {
-  // Official CUTLASS v4.2.1 APIs:
-  // include/cutlass/gemm/device/gemm.h and default_gemm_configuration.h.
-  // Omitting all parameters after ArchTag deliberately preserves the official
-  // DefaultGemmConfiguration tile, instruction, mainloop and epilogue defaults.
+  // The default SM80 BF16 tile requires 144 KiB of shared memory; SM120
+  // allows 99 KiB per CTA. Use the official SM80 BF16 unit-test tile (96 KiB),
+  // keeping the default warp, instruction, three-stage mainloop and epilogue.
+  using DefaultConfig = cutlass::gemm::device::DefaultGemmConfiguration<
+      OperatorClass, cutlass::arch::Sm80, Element, Element, Element, float>;
+  using ThreadblockShape = std::conditional_t<
+      std::is_same_v<Element, cutlass::bfloat16_t>,
+      cutlass::gemm::GemmShape<128, 128, 64>,
+      typename DefaultConfig::ThreadblockShape>;
   using Gemm = cutlass::gemm::device::Gemm<
       Element, LayoutA, Element, LayoutB, Element, RowMajor,
-      float, OperatorClass, cutlass::arch::Sm80>;
+      float, OperatorClass, cutlass::arch::Sm80, ThreadblockShape>;
 
   const int m = static_cast<int>(a.size(0));
   const int n = static_cast<int>(b.size(1));

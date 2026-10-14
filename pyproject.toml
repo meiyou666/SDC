@@ -20,17 +20,35 @@ dependencies = [
 
 [project.optional-dependencies]
 development = ["torch==2.9.0+cpu", "accelerate==1.12.0"]
-nvidia = ["torch==2.9.0+cu128", "accelerate==1.12.0"]
+nvidia = ["torch==2.9.0+cu128", "accelerate==1.12.0", "transformer-engine==2.21.0.dev0",
+    "pybind11==3.0.1", "nvidia-cudnn-frontend==1.29.0", "nvdlfw-inspect==0.2.2",
+    "nvidia-cudnn-cu12==9.12.0.46",
+]
 ascend = ["torch==2.9.0+cpu", "torch-npu==2.9.0.post8", "accelerate==1.12.0"]
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.16.10", "packaging==26.3", "tokenizers==0.22.2"]
+dev = ["pytest==9.1.1", "ruff==0.16.10", "packaging==26.3", "tokenizers==0.22.2", "safetensors==0.8.0"]
 
 [tool.uv]
 package = false
 required-version = "==0.12.24"
 environments = ["sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')"]
 conflicts = [[{ extra = "development" }, { extra = "nvidia" }, { extra = "ascend" }]]
+# The official SM120 NVFP4 source requires cuDNN >= 9.12; torch 2.9 pins 9.10.
+override-dependencies = ["nvidia-cudnn-cu12==9.12.0.46"]
+
+[tool.uv.extra-build-variables]
+transformer-engine = { NVTE_FRAMEWORK = "pytorch", NVTE_NO_LOCAL_VERSION = "1", NVTE_CUDA_ARCHS = "120", NVTE_WITH_NCCL_EP = "0" }
+
+[tool.uv.extra-build-dependencies]
+transformer-engine = [{ requirement = "torch", match-runtime = true }, { requirement = "nvidia-cudnn-cu12", match-runtime = true }]
+
+[[tool.uv.dependency-metadata]]
+# Official setup.py metadata with NVTE_FRAMEWORK=pytorch at the pinned commit.
+# This lets CPU/NPU lock checks run without importing CUDA build dependencies.
+name = "transformer-engine"
+version = "2.21.0.dev0"
+requires-dist = ["torch>=2.1", "einops", "onnxscript", "onnx", "packaging", "pydantic", "importlib-metadata>=1.0", "nvdlfw-inspect", "nvidia-cudnn-frontend>=1.29.0"]
 
 [[tool.uv.index]]
 name = "tuna"
@@ -48,6 +66,7 @@ url = "https://download.pytorch.org/whl/cu128"
 explicit = true
 
 [tool.uv.sources]
+transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "fb98b935d6054a2fc68137951051695de3acaee3" }
 torch = [
     { index = "pytorch-cu128", extra = "nvidia" },
     { index = "pytorch-cpu", extra = "ascend" },

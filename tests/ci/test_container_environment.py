@@ -145,6 +145,15 @@ class RuntimeEnvironmentTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("files used to build this image", result.stderr)
 
+    def test_nvidia_cudnn_version_matches_baseline(self):
+        baseline = {"schema_version": 4, "training_profiles": {"nvidia": {"torch": "2.9.0+cu128", "cudnn": "9.12.0.46"}}}
+        versions = {"torch": "2.9.0+cu128", "nvidia-cudnn-cu12": "9.12.0.46"}
+        with mock.patch.object(runtime.importlib.metadata, "version", side_effect=versions.__getitem__):
+            runtime.check_torch_version(baseline, "nvidia")
+            versions["nvidia-cudnn-cu12"] = "9.10.2.21"
+            with self.assertRaisesRegex(ValueError, "cuDNN 9.12.0.46"):
+                runtime.check_torch_version(baseline, "nvidia")
+
     def test_optional_startup_failure_still_executes_container_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
