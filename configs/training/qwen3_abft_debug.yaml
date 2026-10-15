@@ -1,0 +1,70 @@
+# 调试真实 Qwen 训练，复用公共配置准备的模型与数据。
+name: qwen3_06b_abft_debug
+
+model:
+  name_or_path: Qwen/Qwen3-0.6B
+  revision: c1899de289a04d12100db370d81485cdf75e47ca
+  attention: eager
+  gradient_checkpointing: false  # 先看清前向与反向，再开启重计算。
+  gradient_checkpointing_use_reentrant: false
+
+data:
+  source: huggingface
+  name: Salesforce/wikitext
+  subset: wikitext-103-raw-v1
+  revision: b08601e04326c79dfdd32d625aee71d232d685c3
+  train_split: train
+  validation_split: validation
+  text_field: text
+  block_size: 512
+  max_train_documents: 50000
+  max_validation_documents: 2000
+  prepared_dir: data/training/qwen3_06b_wikitext103
+
+gemm:
+  backend: cutlass
+  precision: bf16
+  scaling: none
+  global_scale: amax
+  # 示例阈值仅用于调试；正式比较需按精度与训练操作数独立校准。
+  abft:
+    method: classic
+    atol: 0.0001
+    rtol: 0.0001
+    recovery: none
+    on_error: report
+    reference_block_k: 256
+    diagnostics: false
+  fault:
+    location: none
+    row: 0
+    col: 0
+    bit: 0
+    call_index: 1
+    layer: null
+    role: null
+  report_max_records: 4
+  report_path: null  # 指定 JSONL 路径时逐调用同步并写盘；计时实验关闭。
+
+training:
+  output_dir: results/training/qwen3_abft_debug_01/{device}  # 再次启动时改为新的目录。
+  device: accelerator
+  precision: bf16
+  offline: true
+  resume: null
+  optimizer: adamw_torch
+  lr_scheduler_type: cosine
+  tf32: false
+  save_strategy: "no"
+  eval_strategy: "no"  # 不插入中途验证；训练结束后仍运行最终验证。
+  seed: 2026
+  max_steps: 2
+  batch_size: 1
+  eval_batch_size: 1
+  gradient_accumulation_steps: 1
+  dataloader_num_workers: 0
+  learning_rate: 0.00002
+  weight_decay: 0.1
+  warmup_steps: 0
+  logging_steps: 1
+  progress_bar: true

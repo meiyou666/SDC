@@ -310,6 +310,13 @@ def train(
             "precision": config.gemm.precision, "scaling": config.gemm.scaling,
             "global_scale": config.gemm.global_scale,
         }
+        if config.gemm.abft.method != "none" or config.gemm.fault.location != "none":
+            values = config.to_dict()["gemm"]
+            transform_params.update(
+                abft_config=values["abft"], fault_config=values["fault"],
+                report_max_records=config.gemm.report_max_records,
+                report_path=str(resolve_path(config.gemm.report_path)) if config.gemm.report_path else None,
+            )
     transform = transform_record(model_transform, transform_id, transform_params)
     output = resolve_path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
