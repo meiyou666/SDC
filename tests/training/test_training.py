@@ -650,3 +650,48 @@ def test_qwen_config_changes_only_device_and_output(runtime, device, monkeypatch
         shared.training, device=device,
         output_dir=shared.training.output_dir.replace("{device}", device),
     )
+
+
+def test_abft_fault_config_and_signatures(config):
+    from abft.config import AbftConfig, FaultConfig
+
+    base = replace(config, gemm=GemmConfig("cutlass", "fp32"),
+                   training=replace(config.training, device="cuda"))
+    protected = validate(replace(base, gemm=replace(base.gemm,
+                         abft={"method": "classic", "on_error": "report"},
+                         fault={"location": "accumulator", "role": "wgrad"},
+                         report_max_records=4)))
+    assert isinstance(protected.gemm.abft, AbftConfig)
+    assert isinstance(protected.gemm.fault, FaultConfig)
+    assert run_signature(validate(base)) != run_signature(protected)
+    assert protected.to_dict()["gemm"]["fault"]["role"] == "wgrad"
+    with pytest.raises(ValueError, match="resume"):
+        validate(replace(protected, training=replace(protected.training, resume="latest")))
+    with pytest.raises(ValueError):
+        validate(replace(base, gemm=replace(base.gemm, report_max_records=-1)))
+    with pytest.raises(ValueError):
+        validate(replace(base, gemm=replace(base.gemm, abft={"typo": True})))
+
+
+def test_runner_passes_protection_configuration(config, monkeypatch, tmp_path):
+    from cutlass_gemm import backend
+    import training.runner as runner
+
+    task = replace(config, gemm=GemmConfig("cutlass", "fp32", abft={"method": "classic"},
+                   fault={"location": "accumulator", "bit": 20}, report_max_records=3,
+                   report_path=str(tmp_path / "report.jsonl")),
+                   training=replace(config.training, device="cuda"))
+    captured = []
+    monkeypatch.setattr(backend, "build_key", lambda: "test-build")
+
+    def capture(transform, identifier, parameters):
+        captured.append(parameters)
+        raise RuntimeError("captured before loading data")
+
+    monkeypatch.setattr(runner, "transform_record", capture)
+    with pytest.raises(RuntimeError, match="captured"):
+        train(task)
+    assert captured[0]["abft_config"]["method"] == "classic"
+    assert captured[0]["fault_config"]["bit"] == 20
+    assert captured[0]["report_max_records"] == 3
+    assert captured[0]["report_path"] == str(tmp_path / "report.jsonl")

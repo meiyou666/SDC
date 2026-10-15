@@ -74,7 +74,7 @@ training:
 bash scripts/train.sh train --config experiments/my_training.yaml
 ```
 
-`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft` 当前设为 `none`。更换精度、缩放或其他实验参数时，设置新的输出目录。
+`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft: none` 关闭保护；启用 `classic`、配置故障和恢复见 [GEMM 教程](gemm.md#启用-abft)。更换精度、缩放或其他实验参数时，设置新的输出目录。
 
 `gemm.backend: torch` 保留原生参考和 NPU 兼容路径，支持 FP32、BF16 和 FP16；CPU 仅用于 FP32 单元测试。昇腾训练将公共配置的 backend 改为 `torch`。
 
@@ -100,6 +100,8 @@ bash scripts/train.sh train --config experiments/my_training.yaml
 FP8 或 NVFP4 调试按前文修改 YAML，并在 `backend.py` 的 `alpha = ...` 行查看 `qa`、`qb` 的码值与尺度。`torch.ops.sdc_cutlass.*` 调入 C++/CUDA；Python 调试器用于跟踪其调用前后的张量。查看 CUDA 内核内部需要 CUDA 调试器。
 
 两步训练结束后仍执行最终验证，此时会再次前向而不反向。重新开始调试前，把 `training.output_dir` 改为新目录，例如 `qwen3_debug_02/{device}`；保留已有输出。调试配置不保存检查点，不使用 `resume: latest`。
+
+调试校验时选择 [qwen3_abft_debug.yaml](../configs/training/qwen3_abft_debug.yaml)，在 `abft/engine.py` 的 `execute()` 与 `abft/methods.py` 的 `prepare()`、`verify()` 设置断点，依次查看参考校验、原生投影和报告。配置中的 `diagnostics: true` 保留完整残差与阈值，详细字段见 [GEMM 教程](gemm.md#启用-abft)。
 
 同一份配置也可从终端运行：
 
@@ -188,5 +190,7 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml
 ```
 
 也可将配置中的 `latest` 替换为具体的 `checkpoint-<step>` 路径。后台续训使用同一配置。
+
+开启 `gemm.fault` 注入时不支持续训，因为实际 GEMM 调用计数尚未写入检查点。此类实验设置新输出目录并使用 `resume: null`。
 
 续训要求配置、数据、`uv.lock` 哈希及模型变换标识和参数一致。恢复位置是最近保存的检查点；尚未保存的步骤需要重跑。没有完整检查点时，设置新输出目录重新开始。已达到 `max_steps` 的检查点不能继续，修改训练配置后也应开启新实验。

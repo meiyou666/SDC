@@ -10,6 +10,7 @@
 | 云端初始化 | [setup-cloud.sh](../environment/docker/setup-cloud.sh)、[configure-cloud.py](../environment/docker/configure-cloud.py) |
 | 训练与数据 | [训练配置](../configs/training/qwen3_06b.yaml)、[src/training](../src/training/)、[训练测试](../tests/training/) |
 | CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[src/cutlass_gemm](../src/cutlass_gemm/)、[算子测试](../tests/cutlass_gemm/) |
+| ABFT 与故障注入 | [调试配置](../configs/training/qwen3_abft_debug.yaml)、[src/abft](../src/abft/)、[使用与扩展方法](../docs/gemm.md#启用-abft) |
 | CI 与代码审查 | [工作流](../.github/workflows/)、[环境检查](../scripts/ci/)、[检查测试](../tests/ci/)、[审查规范](../.github/CODE_REVIEW.md) |
 
 ## 环境与依赖维护
@@ -90,7 +91,22 @@ train(
 
 四种 GEMM 均使用 FP32 累加。FP32 外围精度为 FP32，其余外围精度为 BF16；主权重保持 FP32，参数梯度返回原参数 dtype。BF16 使用官方 SM80 单测的 `128×128×64` 分块和默认三阶段配置，共享内存为 96 KiB。FP8 保留官方单测的 FP32 列主序输出，前向再转为 BF16，反向返回对应输入和参数的 dtype。NVFP4 使用 example 79a 的 BF16 输出配置。
 
-`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 当前仅支持 `none`。具体字段见 [config.py](../src/training/config.py)。
+`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 选择 `none`、`classic` 或已注册的方法。具体字段见 [config.py](../src/training/config.py) 与 [ABFT 配置](../src/abft/config.py)。
+
+### ABFT 调用关系
+
+线性层通过 `abft.engine.execute()` 依次完成输入准备、参考校验、故障注入、原生 GEMM、校验判定和可选重算。关闭保护与注入时直接调用原有 GEMM。`classic` 使用全 1 与递增行权重，两路 FP32 列投影从 epilogue 中乘 alpha 后、输出转换前的值生成。参考校验按 K 分块解码真实码值与尺度，再使用现有 FP32 CUTLASS GEMM 计算。
+
+| 文件 | 职责 |
+| --- | --- |
+| [config.py](../src/abft/config.py) | 方法、阈值、恢复与注入配置 |
+| [operands.py](../src/abft/operands.py) | 准备操作数、分块解码、码值注入与原生调用 |
+| [methods.py](../src/abft/methods.py) | 方法注册、`prepare/propagate/verify/recover` 接口和 `classic` 示例 |
+| [engine.py](../src/abft/engine.py) | 调用编排、一次干净重算与复检、设备报告和显式序列化 |
+| [abft_legacy.cu](../src/cutlass_gemm/abft_legacy.cu)、[abft_legacy_kernel.h](../src/cutlass_gemm/abft_legacy_kernel.h) | FP32/BF16 epilogue visitor 与分块投影 |
+| [abft_fp8.cu](../src/cutlass_gemm/abft_fp8.cu)、[abft_nvfp4.cu](../src/cutlass_gemm/abft_nvfp4.cu)、[abft_sm120.cuh](../src/cutlass_gemm/abft_sm120.cuh) | FP8/NVFP4 epilogue 注入与两路 reduction |
+
+原生路径保留官方 mainloop，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。每次受保护 GEMM 调用均执行方法工厂，当前未接入插件历史状态的检查点保存。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
 
 ### 量化准备
 
@@ -110,6 +126,8 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 | 通用量化公式与相关对照（79b 输出尺度为 UE8M0） | [gett.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/tools/util/include/cutlass/util/reference/host/gett.hpp)、[example 79b](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/79_blackwell_geforce_gemm/79b_blackwell_geforce_nvfp4_nvfp4_gemm.cu) |
 | E4M3、E2M1 转换与 FP4 打包 | [cute.testing.convert](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/cute/testing.py)、[cute_tensor_like](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/torch.py) |
 | SF 物理布局 | [sm100_blockscaled_layout.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/detail/sm100_blockscaled_layout.hpp) |
+| FP32/BF16 ABFT visitor 接口与 kernel 连接 | [example 35 gemm_softmax](https://github.com/NVIDIA/cutlass/tree/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/35_gemm_softmax)、[epilogue_with_visitor.h](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/epilogue/threadblock/epilogue_with_visitor.h) |
+| FP8/NVFP4 ABFT 两路列投影使用的 `Sm90RowReduction` | [sm90_visitor_store_tma_warpspecialized.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/epilogue/fusion/sm90_visitor_store_tma_warpspecialized.hpp)、[callbacks](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/epilogue/fusion/sm90_callbacks_tma_warpspecialized.hpp) |
 
 `_extension_key()` 按 C++/CUDA 源码与编译设置缓存扩展；`build_key()` 还包含 Python 适配源码，用于训练的模型变换标识，GEMM 配置另存为变换参数。修改实现或实验参数后，使用新输出目录。GPU 检查入口为 [gemm-accept.sh](../scripts/gemm-accept.sh)，操作步骤见 [GEMM 教程](../docs/gemm.md)。
 
@@ -144,3 +162,5 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 2026-10-15 用户已释放旧服务器，旧 SSH 连接不可用。上述历史验证日志保留在本地 `results/`；旧服务器镜像与 1000 步训练完整检查点的路径仅作为历史记录。
 
 后续硬件运行记录设备、提交版本、执行命令和结果，保存在实验输出目录。教程只维护操作步骤。
+
+2026-10-15 在本地 `meiyou666/feature-abft-gemm` 分支加入 ABFT epilogue 投影与训练连接。项目 NVIDIA 容器完成全部无保护与融合源文件的 SM120a 编译、链接和扩展加载；扩展标识为 `6162930f1741c598`。`bash scripts/check.sh` 通过 261 项测试及 55 项子测试，Ruff 通过。105 项 GPU 用例跳过，其中 87 项为新增 ABFT 原生与端到端用例。当前容器没有目标 GPU，尚未执行融合内核的 SM120 数值测试或受保护 Qwen 训练。日志保存在 `results/validation/abft-local/`。

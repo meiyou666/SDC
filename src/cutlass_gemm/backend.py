@@ -23,9 +23,12 @@ def build_key():
     digest = hashlib.sha256(json.dumps(settings(), sort_keys=True).encode())
     digest.update(f"{torch.__version__}:{torch._C._GLIBCXX_USE_CXX11_ABI}".encode())
     for path in sorted(SOURCE.iterdir()):
-        if path.suffix in {".cpp", ".cu", ".py"}:
+        if path.suffix in {".cpp", ".cu", ".h", ".cuh", ".py"}:
             digest.update(path.name.encode())
             digest.update(path.read_bytes())
+    for path in sorted((SOURCE.parent / "abft").rglob("*.py")):
+        digest.update(path.relative_to(SOURCE.parent).as_posix().encode())
+        digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
 
@@ -57,7 +60,10 @@ def load_extension():
     arch = config["cuda_arch"]
     return load(
         name=f"sdc_cutlass_{_extension_key()}",
-        sources=[str(SOURCE / name) for name in ("bindings.cpp", "gemm.cu", "fp8.cu", "nvfp4.cu")],
+        sources=[str(SOURCE / name) for name in (
+            "bindings.cpp", "gemm.cu", "fp8.cu", "nvfp4.cu",
+            "abft_legacy.cu", "abft_fp8.cu", "abft_nvfp4.cu",
+        )],
         extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include")],
         extra_cflags=["-O2", f"-std={config['cxx_standard']}"],
         extra_cuda_cflags=["-O2", f"-std={config['cxx_standard']}",

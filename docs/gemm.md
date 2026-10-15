@@ -57,3 +57,62 @@ bash scripts/train.sh train --config experiments/my_training.yaml
 统一入口替换 Qwen 中的 `nn.Linear`，包括 attention 投影、MLP 和 `lm_head`。前向、输入梯度和权重梯度均调用所选精度的 CUTLASS GEMM，主权重保留 FP32。注意力内部矩阵乘法、softmax 和归一化沿用原模型。
 
 日志、检查点、后台运行和续训见[训练教程](training.md)。续训在 YAML 中设置 `training.resume: latest`，再运行相同命令。CUTLASS 源码、构建设置或实验参数变化后，设置新的 `training.output_dir` 开始实验。
+
+## 启用 ABFT
+
+从 [qwen3_abft_debug.yaml](../configs/training/qwen3_abft_debug.yaml) 开始。它运行两步 BF16 训练，启用 `classic` 两路加权校验。准备好公共数据后执行：
+
+```bash
+bash scripts/train.sh train --config configs/training/qwen3_abft_debug.yaml
+```
+
+复制到个人实验配置后，可修改以下字段；精度与缩放组合沿用[训练教程](training.md#选择-gemm-精度)。
+
+```yaml
+gemm:
+  backend: cutlass
+  precision: bf16
+  scaling: none
+  global_scale: amax
+  abft:
+    method: classic
+    atol: 0.0001
+    rtol: 0.0001
+    recovery: none
+    on_error: report
+    reference_block_k: 256
+    diagnostics: false
+  fault:
+    location: none
+    row: 0
+    col: 0
+    bit: 0
+    call_index: 1
+    layer: null
+    role: null
+  report_max_records: 4
+  report_path: null
+```
+
+- `abft: none` 关闭校验，`fault.location: none` 关闭注入；两者关闭时走原来的官方 GEMM。
+- `classic` 使用全 1 和递增行权重，生成两路列校验。阈值为 `atol + rtol × magnitude`，其中 `magnitude` 是绝对值操作数的加权乘积。示例阈值用于调试，实验前按精度与操作数校准。`reference_block_k` 控制参考校验的 K 分块，取正的 16 倍数。
+- `on_error: report` 返回报警报告；`raise` 在未恢复时抛出 `AbftError`。`recovery: recompute` 在报警后用保留的干净码值与尺度重算一次，并使用相同校验复检；复检通过才替换输出。
+- `fault.location` 可选 `a`、`b` 或 `accumulator`。前两者翻转准备好的输入码值，`row/col` 使用逻辑矩阵坐标，`bit` 使用对应格式的位编号。`accumulator` 翻转 epilogue 中乘 alpha 后、输出转换前的 FP32 值，位编号为 0—31。此位置位于 MMA 计算之后。
+- `call_index` 从 1 开始，按全模型实际 GEMM 调用计数；`layer` 和 `role` 可进一步限定该次调用。`role` 为 `forward`、`dgrad` 或 `wgrad`。梯度重计算和验证也会增加计数。开启注入时使用 `resume: null`。
+
+报告包含检测、非有限值、候选定位、注入命中、恢复及复检结果。`fault_hit` 表示注入动作执行，`location` 是单输出元素错误假设下的候选坐标。`report_max_records` 保留最近若干报告；`diagnostics: true` 额外保留完整残差和阈值张量。设置 `report_path` 后逐调用写 JSONL。设备张量报告本身不触发主机同步；`raise`、`recompute` 的主机判定以及 `to_record()`、JSONL 写入会同步，测量开销时按实验目的配置。
+
+## 添加校验方法
+
+当前提供 `classic` 示例。新增方法在 [src/abft/methods.py](../src/abft/methods.py) 继承 `AbftMethod`，实现下列接口，并用 `register_method("方法名", 方法工厂)` 注册。自定义模块须在训练开始前导入，随后在 YAML 的 `abft.method` 中选择该名称。
+
+| 接口 | 实现内容 |
+| --- | --- |
+| `prepare(operands, config, mm=None)` | 注入前从干净操作数生成参考校验，返回含 `weights` 的状态；当前原生接口接受形状为 `(2, M)` 的 FP32 行权重 |
+| `propagate(partials, state)` | 合并原生 epilogue 返回的分块列投影 |
+| `verify(observed, output, state, config)` | 返回设备张量字典，包含 `detected`、`nonfinite`、`located`、`location` 等判定 |
+| `recover(operands, state)` | 返回重算输出、投影和注入命中标记；默认复用干净的已准备操作数 |
+
+工厂在每次受保护 GEMM 调用时执行。需要历史状态的方法自行管理实例生命周期；当前训练检查点不保存插件状态。V-ABFT、GVFA、Strided ABFT 和 AEGIS 的机制需分别实现与验证。
+
+原生融合位于输出 epilogue：两路权重对乘 alpha 后、输出 cast 前的 FP32 值做列投影。FP32/BF16 通过官方 example 35 的 visitor 接口接入，FP8/NVFP4 通过 `Sm90RowReduction` 接入。各路径保留官方 mainloop。参考校验生成、分块投影合并和判定由 Python 层组织；修改权重数量或原生投影布局时，同时修改 CUDA 接口。文件及固定源码链接见[技术参考](../.agent/reference.md#官方源码对应)。

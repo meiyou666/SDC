@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+from abft.config import AbftConfig, FaultConfig, parse_abft_config, parse_fault_config
+
 
 #: Repository root, used to resolve the relative paths written in the config.
 ROOT = Path(__file__).resolve().parents[2]
@@ -112,8 +114,11 @@ class GemmConfig:
     backend: str = "torch"
     precision: str | None = None
     scaling: str = "none"
-    abft: str = "none"
+    abft: AbftConfig | str | dict = AbftConfig()
     global_scale: str | float = "amax"
+    fault: FaultConfig | str | dict = FaultConfig()
+    report_max_records: int = 0
+    report_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -208,8 +213,17 @@ def validate(config: Config) -> Config:
         scales["fp16"] = "none"
     if g.precision not in scales or g.scaling != scales[g.precision]:
         raise ValueError("gemm.precision/scaling 必须是 fp32/none、bf16/none、fp8/tensorwise 或 nvfp4/block16。")
-    if g.abft != "none":
-        raise ValueError("gemm.abft 当前仅支持 none。")
+    abft = parse_abft_config(g.abft)
+    fault = parse_fault_config(g.fault)
+    if fault.location != "none" and t.resume is not None:
+        raise ValueError("故障注入调用计数尚未写入检查点，gemm.fault 不支持 resume。")
+    if g.backend != "cutlass" and (abft.method != "none" or fault.location != "none"):
+        raise ValueError("ABFT 与故障注入要求 gemm.backend: cutlass。")
+    _positive(g.report_max_records, "gemm.report_max_records", 0)
+    if g.report_path is not None and (not isinstance(g.report_path, str) or not g.report_path.strip()):
+        raise ValueError("gemm.report_path 必须是非空路径或 null。")
+    g = replace(g, abft=abft, fault=fault)
+    config = replace(config, gemm=g)
     if g.global_scale != "amax" and (
         isinstance(g.global_scale, bool) or not isinstance(g.global_scale, (int, float))
         or not math.isfinite(g.global_scale) or g.global_scale <= 0
