@@ -13,6 +13,7 @@ class AbftConfig:
     on_error: str = "raise"
     reference_block_k: int = 256
     diagnostics: bool = False
+    timing: bool = False
 
     def __post_init__(self):
         if not isinstance(self.method, str) or not self.method:
@@ -26,6 +27,8 @@ class AbftConfig:
             raise ValueError("reference_block_k must be a positive multiple of 16")
         if type(self.diagnostics) is not bool:
             raise ValueError("diagnostics must be boolean")
+        if type(self.timing) is not bool:
+            raise ValueError("timing must be boolean")
 
 
 @dataclass(frozen=True)

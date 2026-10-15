@@ -7,4 +7,9 @@ def execute(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
-__all__ = ["AbftConfig", "FaultConfig", "parse_abft_config", "parse_fault_config", "execute"]
+def execute_prepared(*args, **kwargs):
+    from .engine import execute_prepared as implementation
+    return implementation(*args, **kwargs)
+
+
+__all__ = ["AbftConfig", "FaultConfig", "parse_abft_config", "parse_fault_config", "execute", "execute_prepared"]

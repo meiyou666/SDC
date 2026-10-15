@@ -116,3 +116,17 @@ gemm:
 工厂在每次受保护 GEMM 调用时执行。需要历史状态的方法自行管理实例生命周期；当前训练检查点不保存插件状态。V-ABFT、GVFA、Strided ABFT 和 AEGIS 的机制需分别实现与验证。
 
 原生融合位于输出 epilogue：两路权重对乘 alpha 后、输出 cast 前的 FP32 值做列投影。FP32/BF16 通过官方 example 35 的 visitor 接口接入，FP8/NVFP4 通过 `Sm90RowReduction` 接入。各路径保留官方 mainloop。参考校验生成、分块投影合并和判定由 Python 层组织；修改权重数量或原生投影布局时，同时修改 CUDA 接口。文件及固定源码链接见[技术参考](../.agent/reference.md#官方源码对应)。
+
+## 测量 GEMM 保护开销
+
+在 NVIDIA 容器中运行：
+
+```bash
+python -m abft.benchmark --config configs/gemm/abft_benchmark.yaml
+```
+
+配置指定精度、矩阵形状 `[M,N,K]`、输入种子、阈值、预热和测量次数。两条路径使用同一份已准备好的码值、scale 与布局，量化和布局转换在计时之前完成。保护路径从参考校验开始计时，到输出与设备端判定完成结束；参考解码和校验传播仍计入保护开销。
+
+输出 JSON 包含无保护与保护时延、配对比例、逐位输出一致性和正常调用报警结果。测量顺序交替，报告在计时外读取。`profile_repeats` 可单独测各阶段时间；它不计入主测量样本。正常重复调用使用同一输入，报警比例用于检查当前配置，不替代独立正常样本上的阈值校准。
+
+自行编写实验时，先调用 `PreparedGemm.prepare()`，再将同一对象交给 `raw_native()` 和 `abft.execute_prepared()`。`execute()` 继续作为训练入口，负责准备一次输入并调用后者。`abft.timing` 默认关闭，只在需要阶段计时时开启。
