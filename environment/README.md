@@ -147,7 +147,7 @@ python environment/verify_environment.py --accelerator
 | 容器 | 用途 | 所需硬件 |
 | --- | --- | --- |
 | **SDC** | 日常开发、调试和单元测试 | 普通开发机，不用于训练 |
-| **SDC NVIDIA** | NVIDIA 训练与实验，含 CUDA、CUTLASS 和 Transformer Engine | NVIDIA GPU 与可用驱动 |
+| **SDC NVIDIA** | NVIDIA 训练与实验，含 CUDA、CUTLASS 和 CUTLASS DSL | NVIDIA GPU 与可用驱动 |
 | **SDC Ascend** | 昇腾训练与实验，含 CANN | 昇腾 NPU 与可用驱动、固件 |
 
 本地日常开发选择 **SDC**；云端选择初始化脚本生成的入口。

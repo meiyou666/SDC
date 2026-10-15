@@ -6,9 +6,10 @@ everything that determines the optimisation trajectory; resuming requires it to
 be identical.
 """
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any
@@ -40,6 +41,7 @@ class ModelConfig:
     revision: str | None = None
     attention: str = "eager"
     gradient_checkpointing: bool = True
+    gradient_checkpointing_use_reentrant: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,25 @@ class TrainConfig:
     dataloader_num_workers: int = 0
     cpu_threads: int = 4
     full_determinism: bool = False
+    offline: bool = False
+    resume: str | None = None
+    optimizer: str = "adamw_torch"
+    lr_scheduler_type: str = "cosine"
+    tf32: bool = False
+    save_strategy: str = "steps"
+    eval_strategy: str = "steps"
+    progress_bar: bool = True
+
+
+@dataclass(frozen=True)
+class GemmConfig:
+    """Linear GEMM implementation and numeric format."""
+
+    backend: str = "torch"
+    precision: str | None = None
+    scaling: str = "none"
+    abft: str = "none"
+    global_scale: str | float = "amax"
 
 
 @dataclass(frozen=True)
@@ -103,6 +124,7 @@ class Config:
     model: ModelConfig
     data: DataConfig
     training: TrainConfig
+    gemm: GemmConfig = GemmConfig()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -172,6 +194,44 @@ def validate(config: Config) -> Config:
         raise ValueError(f"training.precision 必须是 {' 或 '.join(sorted(PRECISIONS))}。")
     if t.device == "cpu" and t.precision != "fp32":
         raise ValueError("CPU 检查请使用 fp32。")
+    g = config.gemm
+    if g.backend not in {"torch", "cutlass"}:
+        raise ValueError("gemm.backend 必须是 cutlass 或 torch（原生参考）。")
+    if g.backend == "torch":
+        if g.precision is None:
+            g = replace(g, precision=t.precision)
+            config = replace(config, gemm=g)
+        elif g.precision != t.precision:
+            raise ValueError("torch 参考要求 gemm.precision 与 training.precision 一致。")
+    scales = {"fp32": "none", "bf16": "none", "fp8": "tensorwise", "nvfp4": "block16"}
+    if g.backend == "torch":
+        scales["fp16"] = "none"
+    if g.precision not in scales or g.scaling != scales[g.precision]:
+        raise ValueError("gemm.precision/scaling 必须是 fp32/none、bf16/none、fp8/tensorwise 或 nvfp4/block16。")
+    if g.abft != "none":
+        raise ValueError("gemm.abft 当前仅支持 none。")
+    if g.global_scale != "amax" and (
+        isinstance(g.global_scale, bool) or not isinstance(g.global_scale, (int, float))
+        or not math.isfinite(g.global_scale) or g.global_scale <= 0
+    ):
+        raise ValueError("gemm.global_scale 必须是 amax 或有限正数。")
+    if g.backend == "torch" and g.precision in {"fp8", "nvfp4"}:
+        raise ValueError("低精度研究 GEMM 必须使用 gemm.backend: cutlass。")
+    if g.backend == "cutlass":
+        if t.device not in {"cuda", "accelerator"}:
+            raise ValueError("CUTLASS GEMM 需要 CUDA 设备。")
+        outer_precision = "fp32" if g.precision == "fp32" else "bf16"
+        if t.precision != outer_precision:
+            raise ValueError(f"当前 GEMM 要求 training.precision: {outer_precision}。")
+    if t.resume is not None and (not isinstance(t.resume, str) or not t.resume.strip()):
+        raise ValueError("training.resume 必须是 null、latest 或检查点路径。")
+    for key in ("optimizer", "lr_scheduler_type"):
+        value = getattr(t, key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"training.{key} 必须是非空字符串。")
+    for key in ("save_strategy", "eval_strategy"):
+        if getattr(t, key) not in {"steps", "no"}:
+            raise ValueError(f"training.{key} 必须是 steps 或 no。")
     for key in _POSITIVE_TRAINING:
         _positive(getattr(t, key), f"training.{key}")
     for key in _NONNEGATIVE_TRAINING:
@@ -181,7 +241,11 @@ def validate(config: Config) -> Config:
     if not 0 < t.learning_rate or not 0 < t.max_grad_norm or not 0 <= t.weight_decay:
         raise ValueError("learning_rate、max_grad_norm 必须为正，weight_decay 必须非负。")
     for name, value in (("model.gradient_checkpointing", m.gradient_checkpointing),
-                        ("training.full_determinism", t.full_determinism)):
+                        ("model.gradient_checkpointing_use_reentrant", m.gradient_checkpointing_use_reentrant),
+                        ("training.full_determinism", t.full_determinism),
+                        ("training.tf32", t.tf32),
+                        ("training.progress_bar", t.progress_bar),
+                        ("training.offline", t.offline)):
         if not isinstance(value, bool):
             raise ValueError(f"{name} 必须是 YAML 布尔值。")
     for name, value in (("prepared_dir", d.prepared_dir), ("output_dir", t.output_dir)):
@@ -196,11 +260,13 @@ def validate(config: Config) -> Config:
 def load_config(filename: str | Path) -> Config:
     """Read and validate a training YAML file."""
     raw = yaml.safe_load(Path(filename).read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or set(raw) != {"name", "model", "data", "training"}:
-        raise ValueError("配置必须包含 name、model、data 和 training 四个部分。")
+    required = {"name", "model", "data", "training"}
+    if not isinstance(raw, dict) or not required <= set(raw) or set(raw) - required - {"gemm"}:
+        raise ValueError("配置必须包含 name、model、data 和 training，可添加 gemm 部分。")
     sections: dict[str, Any] = {}
-    for key, cls in (("model", ModelConfig), ("data", DataConfig), ("training", TrainConfig)):
-        values = raw[key]
+    for key, cls in (("model", ModelConfig), ("data", DataConfig), ("training", TrainConfig),
+                     ("gemm", GemmConfig)):
+        values = raw.get(key, {})
         if not isinstance(values, dict):
             raise ValueError(f"{key} 必须是映射。")
         unknown = set(values) - {f.name for f in fields(cls)}
@@ -239,11 +305,14 @@ def data_signature(config: Config) -> str:
 def run_signature(config: Config) -> str:
     """Digest of everything that determines the optimisation trajectory.
 
-    Output locations and the task name are excluded; every other setting is
-    included, so resuming into a changed configuration is refused.
+    Output locations, task name and operational offline/resume/display settings are
+    excluded; changes to experiment settings are refused on resume.
     """
     values = config.to_dict()
     values["training"].pop("output_dir")
+    values["training"].pop("offline")
+    values["training"].pop("resume")
+    values["training"].pop("progress_bar")
     values["data"].pop("prepared_dir")
     values.pop("name")
     return digest(values)

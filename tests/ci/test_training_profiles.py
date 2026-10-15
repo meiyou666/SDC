@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture
 def training_snapshot():
     files = [
-        policy.BASELINE, policy.PROJECT, policy.LOCKFILE, ".python-version", "compose.yaml", ".dockerignore",
+        policy.BASELINE, policy.PROJECT, policy.LOCKFILE, ".python-version", "compose.yaml", ".dockerignore", "environment/gemm.json",
         "environment/docker/Dockerfile", "environment/docker/install-python.sh",
         "environment/docker/entrypoint.sh", "environment/verify_environment.py", "dev.cmd", "dev.sh",
         ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json",
@@ -144,10 +144,6 @@ def exported(extra, machine):
             continue
         requirement = Requirement(line)
         if requirement.marker is None or requirement.marker.evaluate(marker_env):
-            if requirement.name == "transformer-engine" and requirement.url:
-                assert requirement.url == f"git+https://github.com/NVIDIA/TransformerEngine.git@{policy.TE_COMMIT}"
-                packages[requirement.name] = "2.21.0.dev0"
-                continue
             versions = [specifier.version for specifier in requirement.specifier if specifier.operator == "=="]
             assert len(versions) == 1, line
             packages[requirement.name] = versions[0]
@@ -162,18 +158,14 @@ def test_accelerator_profiles_have_identical_common_packages(machine):
     assert npu["torch"] == baseline["training_profiles"]["ascend"]["torch"]
     assert dev["torch"] == baseline["development_profile"]["torch"]
     assert npu["torch-npu"] == baseline["training_profiles"]["ascend"]["torch_npu"]
-    te_dependencies = {
-        "transformer-engine", "pybind11", "nvdlfw-inspect", "apache-tvm-ffi", "cuda-bindings", "cuda-pathfinder",
-        "annotated-types", "einops", "importlib-metadata", "ml-dtypes", "onnx",
-        "onnx-ir", "onnxscript", "pydantic", "pydantic-core", "typing-inspection", "zipp",
-    }
-    for name in te_dependencies:
+    dsl_dependencies = {"nvidia-cutlass-dsl", "cuda-python", "cuda-bindings"}
+    for name in dsl_dependencies:
         assert name in gpu
         assert name not in npu and name not in dev
     for name in set(gpu) | set(npu):
         if name in {"torch", "torch-npu", "triton"} or name.startswith("nvidia-"):
             continue
-        if name in te_dependencies:
+        if name in dsl_dependencies:
             continue
         assert gpu.get(name) == npu.get(name), name
         assert gpu.get(name) == dev.get(name), name
@@ -203,87 +195,48 @@ def test_compose_and_devcontainers_use_the_shared_build():
     assert {entry["extra"] for entry in conflict} == {"development", "nvidia", "ascend"}
 
 
-def test_transformer_engine_is_nvidia_only():
+
+def test_cutlass_dsl_matches_official_source_version():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    extras = project["project"]["optional-dependencies"]
-    assert "transformer-engine==2.21.0.dev0" in extras["nvidia"]
-    for profile in ("development", "ascend"):
-        assert not any(Requirement(item).name.startswith("transformer-engine") for item in extras[profile])
-    build = project["tool"]["uv"]["extra-build-variables"]["transformer-engine"]
-    assert build["NVTE_FRAMEWORK"] == "pytorch"
-    assert build["NVTE_CUDA_ARCHS"] == "120"
-    assert build["NVTE_WITH_NCCL_EP"] == "0"
-    assert project["tool"]["uv"]["sources"]["transformer-engine"]["rev"] == policy.TE_COMMIT
-    assert project["tool"]["uv"]["override-dependencies"] == ["nvidia-cudnn-cu12==9.12.0.46"]
-    assert "nvidia-cudnn-cu12==9.12.0.46" in extras["nvidia"]
-    assert {"requirement": "torch", "match-runtime": True} in project["tool"]["uv"]["extra-build-dependencies"]["transformer-engine"]
-    assert {"requirement": "nvidia-cudnn-cu12", "match-runtime": True} in project["tool"]["uv"]["extra-build-dependencies"]["transformer-engine"]
-    for profile in ("development", "ascend"):
-        assert not any(Requirement(item).name == "nvidia-cudnn-cu12" for item in extras[profile])
     baseline = json.loads((ROOT / policy.BASELINE).read_text())
-    assert baseline["training_profiles"]["nvidia"]["cudnn"] == "9.12.0.46"
+    gemm = json.loads((ROOT / "environment/gemm.json").read_text())
+    profile = baseline["training_profiles"]["nvidia"]
+    assert profile["cutlass_dsl"] == gemm["cutlass_version"] == "4.2.1"
+    assert "nvidia-cutlass-dsl==4.2.1" in project["project"]["optional-dependencies"]["nvidia"]
+    assert baseline["import_map"]["cutlass"] == "nvidia-cutlass-dsl"
+    assert baseline["import_map"]["cuda"] == "cuda-bindings"
 
 
-def test_docker_install_stages_share_uv_build_cache():
-    source = (ROOT / "environment/docker/Dockerfile").read_text()
-    assert source.count("--mount=type=cache,target=/var/cache/sdc-uv,sharing=locked") == 4
-    for profile in ("common", "development", "nvidia", "ascend"):
-        assert f"UV_NO_CACHE=0 UV_CACHE_DIR=/var/cache/sdc-uv bash /opt/sdc/install-python.sh {profile}" in source
+def test_policy_rejects_mismatched_cutlass_source(training_snapshot):
+    gemm = json.loads(training_snapshot.read("environment/gemm.json"))
+    gemm["cutlass_version"] = "4.3.0"
+    training_snapshot.content["environment/gemm.json"] = json.dumps(gemm)
+    with pytest.raises(policy.PolicyError, match="source versions must match"):
+        check_snapshot(training_snapshot)
+
+
+def test_policy_rejects_mismatched_cutlass_package(training_snapshot):
+    change_baseline(training_snapshot, lambda b: b["training_profiles"]["nvidia"].update(cutlass_dsl="4.3.0"))
+    with pytest.raises(policy.PolicyError, match="CUTLASS DSL version"):
+        check_snapshot(training_snapshot)
 
 
 @pytest.mark.parametrize("profile", ["common", "development", "nvidia", "ascend"])
-def test_installer_limits_source_build_to_te(tmp_path, profile):
-    # Exercise shell argument construction without installing packages.
+def test_installer_uses_locked_binary_distributions(tmp_path, profile):
     script = (ROOT / "environment/docker/install-python.sh").read_text()
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / "uv.lock").write_bytes((ROOT / "uv.lock").read_bytes())
-    (project / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
-    (project / "environment").mkdir()
-    (project / "environment/baseline.json").write_bytes((ROOT / "environment/baseline.json").read_bytes())
     venv = tmp_path / "venv"
     venv.mkdir()
-    script = script.replace("/opt/sdc/project", str(project)).replace("/opt/venv", str(venv))
-    command = 'uv() { printf "%s\\n" "$@"; }\n'
-    command += 'python() { if [[ "$2" == *nvidia-cudnn-cu12* || "$2" == *nvidia-nccl-cu12* ]]; then echo /locked/cuda/include; else command python "$@"; fi; }\n'
-    command += script
+    script = script.replace("/opt/venv", str(venv))
+    command = 'uv() { printf "%s\\n" "$@"; }\n' + script
     result = subprocess.run(["bash", "-c", command, "installer", profile], capture_output=True, text=True, check=True)
     arguments = result.stdout.splitlines()
     assert "--locked" in arguments
-    if profile == "nvidia":
-        assert arguments.count("--no-build") == 1
-        assert "--no-install-package" in arguments
-        assert "--no-build-isolation-package" in arguments
-        blocked = {arguments[i + 1] for i, arg in enumerate(arguments) if arg == "--no-build-package"}
-        assert "torch" in blocked
-        assert "nvidia-cudnn-frontend" in blocked
-        assert "transformer-engine" not in blocked
-    else:
-        assert "--no-build" in arguments
+    assert "--no-build" in arguments
+    assert "--no-build-isolation-package" not in arguments
+    assert ("--extra" in arguments) == (profile != "common")
 
 
-def test_only_pinned_official_te_git_source_is_allowed():
-    def source_lock(name="transformer-engine", version="2.21.0.dev0", source=policy.TE_GIT_SOURCE):
-        return f'version = 1\n[[package]]\nname = "{name}"\nversion = "{version}"\nsource = {{ git = "{source}" }}\n'
-
-    assert policy.parse_lock(source_lock()) == {"transformer-engine": "2.21.0.dev0"}
-    for change in [
-        {"name": "other"}, {"version": "2.8.0"},
-        {"source": policy.TE_GIT_SOURCE.replace("NVIDIA", "other")},
-        {"source": policy.TE_GIT_SOURCE.replace(policy.TE_COMMIT, "main")},
-        {"source": policy.TE_GIT_SOURCE.replace("#" + policy.TE_COMMIT, "#" + "a" * 40)},
-    ]:
-        with pytest.raises(policy.PolicyError, match="SHA256"):
-            policy.parse_lock(source_lock(**change))
-
-
-@pytest.mark.parametrize("replacement", [
-    'override-dependencies = ["nvidia-cudnn-cu12==9.12.0.46", "numpy==2.0.0"]',
-    'override-dependencies = ["nvidia-cudnn-cu12>=9.12.0.46"]',
-    'override-dependencies = []',
-])
-def test_policy_rejects_broader_dependency_override(training_snapshot, replacement):
-    source = training_snapshot.read(policy.PROJECT)
-    training_snapshot.content[policy.PROJECT] = source.replace('override-dependencies = ["nvidia-cudnn-cu12==9.12.0.46"]', replacement)
-    with pytest.raises(policy.PolicyError, match="cuDNN"):
-        check_snapshot(training_snapshot)
+def test_git_distributions_have_no_policy_exception():
+    text = 'version = 1\n[[package]]\nname = "example"\nversion = "1.0.0"\nsource = { git = "https://example.invalid/repo.git#' + "a" * 40 + '" }\n'
+    with pytest.raises(policy.PolicyError, match="registry packages"):
+        policy.parse_lock(text)

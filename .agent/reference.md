@@ -10,7 +10,6 @@
 | 云端初始化 | [setup-cloud.sh](../environment/docker/setup-cloud.sh)、[configure-cloud.py](../environment/docker/configure-cloud.py) |
 | 训练与数据 | [训练配置](../configs/training/qwen3_06b.yaml)、[src/training](../src/training/)、[训练测试](../tests/training/) |
 | CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[src/cutlass_gemm](../src/cutlass_gemm/)、[算子测试](../tests/cutlass_gemm/) |
-| FP8、FP4 训练 | [src/low_precision](../src/low_precision/)、[训练连接测试](../tests/low_precision/)、[训练教程](../docs/training.md#fp8-与-fp4-训练) |
 | CI 与代码审查 | [工作流](../.github/workflows/)、[环境检查](../scripts/ci/)、[检查测试](../tests/ci/)、[审查规范](../.github/CODE_REVIEW.md) |
 
 ## 环境与依赖维护
@@ -50,9 +49,11 @@ GitHub Actions 检查 Compose 配置、脚本语法、锁文件和环境策略�
 | [runner.py](../src/training/runner.py) | 解析设备、加载模型、构建 Trainer、保存结果与恢复训练 |
 | [__main__.py](../src/training/__main__.py) | `prepare` 和 `train` 命令入口 |
 
-公共配置的 `device: accelerator` 按 `SDC_RUNTIME` 解析为 `cuda` 或 `npu`。模型以 FP32 加载，混合精度由训练配置控制。数据准备先写临时目录，再重命名为目标目录；训练启动时检查数据签名及文件哈希。
+公共配置的 `device: accelerator` 按 `SDC_RUNTIME` 解析为 `cuda` 或 `npu`。NVIDIA 使用 `gemm.backend: cutlass`；NPU 使用 `torch` 兼容路径。模型以 FP32 加载，混合精度由训练配置控制。数据准备先写临时目录，再重命名为目标目录；训练启动时检查数据签名及文件哈希。
 
-`train()` 提供模型变换接口。下面是接口示意，其中 `install` 由具体方法实现：
+`train()` 根据 `gemm` 配置安装对应线性层，统一命令为 `bash scripts/train.sh train --config YAML`。实验参数、输出目录、离线与续训设置均读取 YAML。
+
+`train()` 同时提供模型变换接口。下面是接口示意，其中 `install` 由具体方法实现：
 
 ```python
 train(
@@ -75,42 +76,46 @@ train(
 
 ## CUTLASS 调用关系
 
-入口 `cutlass_gemm.train` 复用公共训练流程，通过 `model_transform=install` 将 Qwen 的全部 `nn.Linear` 替换为 `CutlassLinear`，包括 attention 投影、MLP 与 `lm_head`。其他算子沿用原模型实现。这条 CUTLASS 基础训练使用 BF16 或 FP32；FP8、FP4 组件使用下面的独立入口。
+统一 Trainer 根据 `gemm` 配置将 Qwen 的全部 `nn.Linear` 替换为 `CutlassLinear`，包括 attention 投影、MLP 与 `lm_head`。前向 `X @ W.T`、输入梯度 `dY @ W` 和权重梯度 `dY.T @ X` 均调用所选精度的 CUTLASS GEMM。替换保留原 Parameter 对象、共享权重与模块别名，其他算子沿用原模型。
 
 | 文件 | 职责 |
 | --- | --- |
 | [backend.py](../src/cutlass_gemm/backend.py) | 读取编译配置、生成构建标识、编译加载扩展、检查设备 |
 | [bindings.cpp](../src/cutlass_gemm/bindings.cpp) | 注册 PyTorch 算子及 CUDA 实现 |
-| [gemm.cu](../src/cutlass_gemm/gemm.cu) | 检查输入、分配输出、调用官方 `cutlass::gemm::device::Gemm` |
-| [linear.py](../src/cutlass_gemm/linear.py) | 替换线性层并连接 autograd |
-| [train.py](../src/cutlass_gemm/train.py) | 解析训练参数，接入公共 `train()` |
+| [gemm.cu](../src/cutlass_gemm/gemm.cu) | FP32 与 BF16 官方 GEMM |
+| [fp8.cu](../src/cutlass_gemm/fp8.cu) | 官方 SM120 E4M3 GEMM，FP32 列主序输出 |
+| [nvfp4.cu](../src/cutlass_gemm/nvfp4.cu) | 官方 example 79a GEMM，BF16 输出及 SF 布局辅助函数 |
+| [quantization.py](../src/cutlass_gemm/quantization.py) | Torch 缩放与官方 CUTLASS 类型转换连接 |
+| [linear.py](../src/cutlass_gemm/linear.py) | 统一线性层与 autograd 适配 |
 
-GEMM 使用官方 mainloop 和 epilogue。BF16 路径采用官方 SM80 单测中的 `128×128×64` 分块和默认三阶段配置，共享内存为 96 KiB，满足 SM120 每个 CTA 的 99 KiB 上限。原默认分块需要 144 KiB。FP32 路径保留默认分块并使用 SIMT；两条路径均采用 FP32 累加。具体编译目标读取 `environment/gemm.json`。
+四种 GEMM 均使用 FP32 累加。FP32 外围精度为 FP32，其余外围精度为 BF16；主权重保持 FP32，参数梯度返回原参数 dtype。BF16 使用官方 SM80 单测的 `128×128×64` 分块和默认三阶段配置，共享内存为 96 KiB。FP8 保留官方单测的 FP32 列主序输出，前向再转为 BF16，反向返回对应输入和参数的 dtype。NVFP4 使用 example 79a 的 BF16 输出配置。
 
-线性层前向计算 `X @ W.T`，输入梯度计算 `dY @ W`，权重梯度计算 `dY.T @ X`，三者均调用 CUTLASS。BF16 autocast 下，乘法操作数转为 BF16，参数保留 FP32；参数梯度返回原参数 dtype。替换层保留原 Parameter 对象和参数共享关系。
+`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 当前仅支持 `none`。具体字段见 [config.py](../src/training/config.py)。
 
-`build_key()` 包含编译配置、PyTorch 版本与 ABI、模块内的 Python/C++/CUDA 源码。训练将该标识写入 `transform_id`。修改这些内容后，重新启动进程编译，并使用新输出目录训练。
+### 量化准备
 
-[test_linear.py](../tests/cutlass_gemm/test_linear.py) 使用替代后端 `torch.mm` 检查 Python 桥接行为；[test_cuda.py](../tests/cutlass_gemm/test_cuda.py) 检查实际 CUTLASS 运算。[gemm-accept.sh](../scripts/gemm-accept.sh) 为 GPU 检查入口。检查步骤见 [GEMM 教程](../docs/gemm.md)。
+量化准备组合现有 Torch 的 amax、乘除等运算与 `nvidia-cutlass-dsl==4.2.1` 中未改动的官方转换内核。主机端缓存 `cute.compile(cute.testing._convert, ...)`，按设备、类型和布局复用编译结果；所有视图保留动态布局，每次传入当前张量。官方转换负责 E4M3、E2M1 类型转换和 FP4 打包，完整量化由项目适配代码组织。项目不新增 CUDA 或 Triton 量化内核。
 
-## FP8 与 FP4 训练连接
+FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的全局乘子为 `448/amax`，NVFP4 为 `(6*448)/amax`，全零矩阵取 1；显式正数配置直接指定该乘子。NVFP4 使用官方 `gett.hpp` 的通用参考公式，输入采用 E2M1 与 E4M3 block16 尺度：`sf=E4M3(block_amax*(st*(1/6)))`，再使用该尺度的 FP32 倒数与全局乘子准备 E2M1 输入。example 79b 作为相关对照，其输出尺度使用 UE8M0。GEMM 的 alpha 抵消两输入的全局乘子。SF 的物理位置由官方 CuTe layout 在 CPU 辅助函数中生成，再使用现有 Torch scatter 写入尺度张量。
 
-`low_precision.train` 复用公共 Trainer，使用 NVIDIA extra 中固定的 Transformer Engine 上游 PR #3669 提交 `fb98b935d6054a2fc68137951051695de3acaee3`，版本为 `2.21.0.dev0`。该提交在官方快照的 SM120/121 RHT 适配和 CUDA 12.8 编译修复上，修正一处 RHT 矩阵参数转发遗漏。核心与 PyTorch 扩展从同一源码构建。NVIDIA 使用 cuDNN 9.12，PyTorch 2.9 和 CUDA 12.8 保持不变。BF16 的 CUTLASS 基线保持独立。低精度组件调用 TE 的 cuBLASLt GEMM，后续 ABFT 的可修改内核仍在 CUTLASS 中逐项实现。
+### 官方源码对应
 
-- FP8 使用 `Float8CurrentScaling(fp8_format=Format.HYBRID)`：前向 E4M3，反向梯度 E5M2，动态缩放。
-- FP4 使用 `NVFP4BlockScaling()` 默认训练机制：E2M1 码值、分块尺度、Hadamard 变换、随机舍入及权重二维量化。没有使用 MXFP8 或高精度模拟 GEMM。
-- 主权重为 FP32，外围 autocast 为 BF16。FP4 层将来自 Qwen 的 FP32 输入转为 BF16，再交给官方量化器执行 RHT 和 FP4 量化，保留输入梯度。低精度 GEMM 使用 FP32 累加；FP8 的 split accumulator 设置也写入运行记录。
-- `adapter.install()` 先检查全部线性层，再用 TE Linear 替换，保留原 Parameter、共享权重与模块别名。每层 `forward()` 内进入 recipe 上下文，供梯度检查点重计算重新进入相同配方。
-- 两个配方不维护历史校准状态，TE `_extra_state` 可为空张量。配方由固定的模型变换重新建立，模型、优化器和 RNG 沿用公共检查点保存与恢复。`run.json.low_precision` 记录配方、组件版本和官方源码提交；这些信息及适配代码共同决定模型变换标识。
-- NVFP4 的输入、输出维度及展开 token 数均要求 32 对齐，对应官方 CUDA 转置路径。公共 Qwen 配置使用 512 token。未满足条件时直接报错。
+所有链接固定到 CUTLASS 提交 `f3fde58372d33e9a5650ba7b80fc48b3b49d40c8`。
 
-上游依据：[SM120/121 RHT 修复](https://github.com/NVIDIA/TransformerEngine/pull/3300)、[CUDA 12.8 编译修复](https://github.com/NVIDIA/TransformerEngine/pull/3602)、[参数转发修复 PR #3669](https://github.com/NVIDIA/TransformerEngine/pull/3669)、[固定源码](https://github.com/NVIDIA/TransformerEngine/tree/fb98b935d6054a2fc68137951051695de3acaee3)。PR #3669 在接入时尚未合入；项目固定其完整提交，不跟随浮动分支。
+| 项目用途 | 官方源码 |
+| --- | --- |
+| FP32、BF16 GEMM 接口 | [gemm.h](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/gemm/device/gemm.h) |
+| FP8 kernel 配置 | [SM120 f8_f8_f32 单测](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/test/unit/gemm/device/sm120_tensorop_gemm/sm120_gemm_f8_f8_f32_tensor_op.cu) |
+| NVFP4 kernel 配置与 BF16 输出 | [example 79a](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/79_blackwell_geforce_gemm/79a_blackwell_geforce_nvfp4_bf16_gemm.cu) |
+| 通用量化公式与相关对照（79b 输出尺度为 UE8M0） | [gett.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/tools/util/include/cutlass/util/reference/host/gett.hpp)、[example 79b](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/79_blackwell_geforce_gemm/79b_blackwell_geforce_nvfp4_nvfp4_gemm.cu) |
+| E4M3、E2M1 转换与 FP4 打包 | [cute.testing.convert](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/cute/testing.py)、[cute_tensor_like](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/torch.py) |
+| SF 物理布局 | [sm100_blockscaled_layout.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/detail/sm100_blockscaled_layout.hpp) |
 
-`tests/low_precision/test_adapter.py` 使用替代层检查连接、参数共享和重计算；`test_low_precision_cuda.py` 在 SM120 上执行真实 TE 内核，观察三类 GEMM 的低精度操作数，并验证参数更新和量化状态保存恢复。没有 GPU 时会跳过后者，不能据此记录为硬件训练通过。
+`_extension_key()` 按 C++/CUDA 源码与编译设置缓存扩展；`build_key()` 还包含 Python 适配源码，用于训练的模型变换标识，GEMM 配置另存为变换参数。修改实现或实验参数后，使用新输出目录。GPU 检查入口为 [gemm-accept.sh](../scripts/gemm-accept.sh)，操作步骤见 [GEMM 教程](../docs/gemm.md)。
 
 ## 已有验证记录
 
-以下内容迁自原 GEMM 验证说明，记录日期为 2026-10-13，对应提交 `1c79d21`：
+以下为统一入口改造前的 BF16 基线记录。最初记录日期为 2026-10-13，对应提交 `1c79d21`：
 
 - 在项目 Docker 中完成 SM120a 扩展编译、链接和加载，构建标识为 `5d8c186a22f49b11`。
 - 测试通过 175 项，另有 49 项子测试通过；Ruff 通过。
@@ -119,12 +124,23 @@ GEMM 使用官方 mainloop 和 epilogue。BF16 路径采用官方 SM80 单测中
 
 2026-10-14 在 RTX 5090 上调整 BF16 分块后，构建标识为 `e0bdef356dd8c139`。CUTLASS 检查共 21 项通过，其中包含 11 项实际 GPU 用例；完整检查共 186 项及 49 项子测试通过，Ruff 通过。
 
-同日完成 Qwen3-0.6B 的 CUTLASS BF16 继续预训练，共 1000 个参数更新步。训练中断后从 `checkpoint-100` 恢复，重跑的 110—140 步日志中，loss、梯度范数和学习率与中断前一致。最终验证 loss 为 `2.6606974601745605`，perplexity 为 `14.306263668996365`。配置、日志和恢复记录保存在 `results/validation/5090/`，完整检查点保存在服务器的 `results/training/qwen3_cutlass_bf16/`。
+同日完成 Qwen3-0.6B 的 CUTLASS BF16 继续预训练，共 1000 个参数更新步。训练中断后从 `checkpoint-100` 恢复，重跑的 110—140 步日志中，loss、梯度范数和学习率与中断前一致。最终验证 loss 为 `2.6606974601745605`，perplexity 为 `14.306263668996365`。配置、日志和恢复记录保存在 `results/validation/5090/`，完整检查点当时保存在旧服务器的 `results/training/qwen3_cutlass_bf16/`。
 
-同日使用上述固定 TE 提交完成 FP8、NVFP4 接入验证。上游 SM120 RHT 回归测试 16 项通过；项目完整检查 222 项及 49 项子测试通过，Ruff 通过。其中 5 项低精度 GPU 测试检查 cuDNN、真实低精度前向与反向 GEMM，以及带共享权重的微型 Qwen 在公共 Trainer 中恢复模型、优化器和随机状态。
+统一入口改造后，在 RTX 5090 的项目 Docker 容器中完成四种 CUTLASS 精度的 Qwen3-0.6B / WikiText-103 训练。每种精度运行 20 个参数更新步，batch size 为 1，序列长度为 512，梯度累积步数为 1。
 
-Qwen3-0.6B 在同一 WikiText-103 数据配置下分别完成 20 个参数更新步，FP8 验证 loss 为 `2.818451404571533`，NVFP4 为 `3.0721590518951416`。这两次为短程训练接入验证，不用于判断长期收敛或比较性能；短程运行不写完整检查点，实际恢复由上述 GPU 测试覆盖。结果汇总和日志保存在 `results/validation/5090/fp-training/summary.json` 及同目录中带 `fb98` 的日志，训练记录保存在 `results/training/qwen3_fp8_te221_integration/` 和 `results/training/qwen3_fp4_te221_integration/`。
+| GEMM 精度 | 验证 loss |
+| --- | --- |
+| FP32 | `2.934720754623413` |
+| BF16 | `2.9449222087860107` |
+| FP8 | `2.9549427032470703` |
+| NVFP4 | `3.1861612796783447` |
 
-5090 服务器的默认镜像 `sdc-nvidia:py311` 已更新为 `sdc-nvidia:py311-te-fb98`，旧镜像保留为 `sdc-nvidia:py311-bf16-20261014`。从新镜像独立创建容器后，设备检查及上述 5 项 GPU 测试再次通过，日志为 `fresh-image-gpu.log`。镜像使用同一份已验证的 TE 编译包，不依赖维护容器的源码和编译缓存。
+本轮完整检查通过 237 项测试及 55 项子测试，Ruff 通过，其中低精度 GPU 用例通过 7 项。未修改的官方 FP32 basic example、FP8 SM120 单测和 NVFP4 example 79a 分别运行通过。结果汇总保存在 `results/validation/5090/cutlass-official/summary.json`。
+
+这四次短程运行用于验证统一训练链路。此前 BF16 运行了 1000 步，梯度累积步数为 16，与本轮训练配置不同，loss 不直接比较。
+
+当时在服务器保存镜像 `sdc-nvidia:py311-cutlass-official`，默认标签 `sdc-nvidia:py311` 指向同一镜像。从新镜像启动的容器使用默认 `sdc` 用户与入口脚本，通过加速器检查及全部 7 项低精度 GPU 测试。镜像标识、启动命令和日志保存在 `results/validation/5090/cutlass-official/image.json` 与 `fresh-container-gpu.log`。当时服务器的嵌套 Docker 配置为 `/tmp` 挂载可写目录，避免 uv 临时目录权限错误。
+
+2026-10-15 用户已释放旧服务器，旧 SSH 连接不可用。上述历史验证日志保留在本地 `results/`；旧服务器镜像与 1000 步训练完整检查点的路径仅作为历史记录。
 
 后续硬件运行记录设备、提交版本、执行命令和结果，保存在实验输出目录。教程只维护操作步骤。

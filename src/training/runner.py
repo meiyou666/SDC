@@ -13,7 +13,7 @@ autocast, trains for ``max_steps`` optimizer updates, evaluates, and writes
 ``result.json``
     final training and validation metrics, or the failure reason
 ``checkpoint-<step>/``
-    model, optimizer, scheduler and RNG state for ``--resume``
+    model, optimizer, scheduler and RNG state for ``training.resume``
 
 ``model_transform`` receives the loaded model and ``transform_params`` before
 the Trainer is built. Its versioned ``transform_id`` and parameters are saved
@@ -46,15 +46,21 @@ from transformers import (
 )
 from transformers.trainer_utils import enable_full_determinism, get_last_checkpoint, set_seed
 
-from .config import ROOT, Config, file_digest, model_source, resolve_path, run_signature
-from .data import CausalCollator, load_tokenizer, prepared_digest, read_prepared
+from .config import ROOT, Config, file_digest, resolve_path, run_signature, validate
+from .data import (
+    CausalCollator,
+    load_tokenizer,
+    prepared_digest,
+    read_prepared,
+    runtime_model_source,
+)
 from .metrics import JsonMetrics, NonFiniteLossError, check_finite_loss, write_json
 
 
 #: ``device: accelerator`` resolves through the container's SDC_RUNTIME.
 RUNTIME_DEVICES = {"nvidia": "cuda", "ascend": "npu"}
 
-#: Files a checkpoint must contain before it is accepted for ``--resume``.
+#: Files a checkpoint must contain before it is accepted for resume.
 CHECKPOINT_FILES = ("trainer_state.json", "optimizer.pt", "scheduler.pt", "rng_state.pth")
 
 
@@ -145,7 +151,7 @@ def resolve_runtime_config(config: Config) -> Config:
 def training_arguments(config: Config) -> TrainingArguments:
     """Translate the config into Trainer arguments.
 
-    FP32 master weights with BF16 autocast, TF32 off, attention kernel from the
+    FP32 master weights; autocast, TF32 and optimisation choices come from the
     config.
     """
     t = config.training
@@ -154,21 +160,21 @@ def training_arguments(config: Config) -> TrainingArguments:
     args = TrainingArguments(
         output_dir=str(resolve_path(t.output_dir)),
         use_cpu=t.device == "cpu", bf16=t.precision == "bf16", fp16=t.precision == "fp16",
-        tf32=False, seed=t.seed, data_seed=t.seed, full_determinism=t.full_determinism,
+        tf32=t.tf32, seed=t.seed, data_seed=t.seed, full_determinism=t.full_determinism,
         max_steps=t.max_steps,
         per_device_train_batch_size=t.batch_size, per_device_eval_batch_size=t.eval_batch_size,
         gradient_accumulation_steps=t.gradient_accumulation_steps,
         learning_rate=t.learning_rate, weight_decay=t.weight_decay, warmup_steps=t.warmup_steps,
-        lr_scheduler_type="cosine", optim="adamw_torch", max_grad_norm=t.max_grad_norm,
+        lr_scheduler_type=t.lr_scheduler_type, optim=t.optimizer, max_grad_norm=t.max_grad_norm,
         logging_strategy="steps", logging_steps=t.logging_steps, logging_first_step=True,
         logging_nan_inf_filter=False,
-        eval_strategy="steps", eval_steps=t.eval_steps,
-        save_strategy="steps", save_steps=t.save_steps, save_total_limit=t.save_total_limit,
+        eval_strategy=t.eval_strategy, eval_steps=t.eval_steps,
+        save_strategy=t.save_strategy, save_steps=t.save_steps, save_total_limit=t.save_total_limit,
         gradient_checkpointing=config.model.gradient_checkpointing,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
+        gradient_checkpointing_kwargs={"use_reentrant": config.model.gradient_checkpointing_use_reentrant},
         dataloader_num_workers=t.dataloader_num_workers, dataloader_pin_memory=t.device != "cpu",
         dataloader_persistent_workers=False, dataloader_drop_last=False,
-        ddp_find_unused_parameters=False, report_to=[], disable_tqdm=True,
+        ddp_find_unused_parameters=False, report_to=[], disable_tqdm=not t.progress_bar,
         prediction_loss_only=True, save_safetensors=True,
     )
     if args.device.type != t.device:
@@ -185,7 +191,7 @@ def resolve_checkpoint(output: Path, resume: str | None) -> str | None:
     if resume is None:
         if output.exists() and any(output.iterdir()):
             raise ValueError(
-                f"output_dir 非空：{output}。续训请加 --resume latest；"
+                f"output_dir 非空：{output}。续训请设置 training.resume: latest；"
                 "上次训练没有留下检查点时，删除该目录或换一个 output_dir 重新开始。"
             )
         return None
@@ -258,7 +264,7 @@ def _run_record(
 
 def _load_model(config: Config, offline: bool):
     """Load the pinned model in FP32 with the configured attention kernel."""
-    source = model_source(config.model)
+    source = runtime_model_source(config, offline)
     model_config = AutoConfig.from_pretrained(
         source, revision=config.model.revision, trust_remote_code=False, local_files_only=offline,
     )
@@ -277,7 +283,7 @@ def _load_model(config: Config, offline: bool):
 def train(
     config: Config,
     resume: str | None = None,
-    offline: bool = False,
+    offline: bool | None = None,
     callbacks: Sequence[TrainerCallback] = (),
     model_transform: Callable[..., PreTrainedModel] | None = None,
     *,
@@ -285,11 +291,34 @@ def train(
     transform_params: dict[str, Any] | None = None,
 ) -> tuple[Trainer, dict[str, Any]]:
     """Run one training job and return the Trainer and its final metrics."""
-    transform = transform_record(model_transform, transform_id, transform_params)
     config = resolve_runtime_config(config)
+    config = validate(replace(config, training=replace(
+        config.training,
+        resume=config.training.resume if resume is None else resume,
+        offline=config.training.offline if offline is None else offline,
+    )))
+    resume, offline = config.training.resume, config.training.offline
+    if config.gemm.backend == "cutlass":
+        if model_transform is not None or transform_id is not None or transform_params is not None:
+            raise ValueError("gemm.backend: cutlass 不能同时提供自定义 model_transform。")
+        from cutlass_gemm import backend
+        from cutlass_gemm.linear import install
+
+        model_transform = install
+        transform_id = "cutlass:" + backend.build_key()
+        transform_params = {
+            "precision": config.gemm.precision, "scaling": config.gemm.scaling,
+            "global_scale": config.gemm.global_scale,
+        }
+    transform = transform_record(model_transform, transform_id, transform_params)
     output = resolve_path(config.training.output_dir)
     checkpoint = resolve_checkpoint(output, resume)
+    print("[训练] 开始读取并校验已准备的数据。", flush=True)
     datasets, data_manifest = read_prepared(config)
+    print(
+        f"[训练] 数据读取完成：训练 {len(datasets['train'])} 条，"
+        f"验证 {len(datasets['validation'])} 条。", flush=True,
+    )
     args = training_arguments(config)
     data_hash = prepared_digest(data_manifest)
     if checkpoint:
@@ -300,11 +329,24 @@ def train(
         enable_full_determinism(config.training.seed)
     else:
         set_seed(config.training.seed)
+    print("[训练] 开始加载分词器。", flush=True)
     tokenizer = load_tokenizer(config, offline)
+    print("[训练] 分词器加载完成；开始加载模型。", flush=True)
     model = _load_model(config, offline)
+    print("[训练] 模型加载完成。", flush=True)
     if model_transform is not None:
+        print(
+            f"[训练] 开始安装 GEMM：backend={config.gemm.backend}，"
+            f"precision={config.gemm.precision}，transform={transform_id}。", flush=True,
+        )
         # Pass a copy so a transform cannot mutate the saved parameter record.
         model = model_transform(model, **json.loads(json.dumps(transform["parameters"])))
+        print("[训练] GEMM 安装完成。", flush=True)
+    else:
+        print(
+            f"[训练] GEMM：backend={config.gemm.backend}，precision={config.gemm.precision}。",
+            flush=True,
+        )
     record = _run_record(config, args, data_hash, checkpoint, transform)
     trainer = ResumeTrainer(
         model=model, args=args, processing_class=tokenizer,
@@ -312,8 +354,16 @@ def train(
         data_collator=CausalCollator(),
         callbacks=[RunRecord(output, config, record), JsonMetrics(output, session), *callbacks],
     )
+    print(
+        f"[训练] 开始训练：max_steps={config.training.max_steps}，"
+        f"batch_size={config.training.batch_size}，"
+        f"gradient_accumulation_steps={config.training.gradient_accumulation_steps}。", flush=True,
+    )
+    if checkpoint:
+        print(f"[训练] 从检查点恢复：{checkpoint}", flush=True)
     try:
         result = trainer.train(resume_from_checkpoint=checkpoint)
+        print("[训练] 开始最终验证。", flush=True)
         evaluation = trainer.evaluate(metric_key_prefix="validation")
         check_finite_loss({**result.metrics, **evaluation})
     except NonFiniteLossError as exc:
@@ -343,4 +393,9 @@ def train(
         metrics.pop("train_loss", None)
     write_json(output / "result.json", metrics)
     trainer.save_state()
+    print(
+        f"[训练] 最终验证完成：loss={loss:.6f}，perplexity={metrics['validation_perplexity']}。",
+        flush=True,
+    )
+    print(f"[训练] 结果目录：{output}", flush=True)
     return trainer, metrics
