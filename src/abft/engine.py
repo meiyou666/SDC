@@ -9,7 +9,7 @@ from cutlass_gemm import backend
 
 from .config import parse_abft_config, parse_fault_config
 from .methods import get_method
-from .operands import PreparedGemm
+from .operands import INPUT_REFERENCE_PRECISIONS, PreparedGemm
 
 
 @dataclass
@@ -106,7 +106,7 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
     input_fused = cfg.reference_mode == "input_fused"
     if input_fused:
-        if prepared.precision != "fp8":
+        if prepared.precision not in INPUT_REFERENCE_PRECISIONS:
             raise NotImplementedError(f"input_fused reference is not implemented for {prepared.precision}")
         if fault.location in {"a", "b"}:
             raise ValueError("input_fused protects computation only; input memory faults require separate reference")

@@ -1,0 +1,45 @@
+"""Legacy adapter preserves the pinned scheduling and rejects upstream drift."""
+
+import hashlib
+
+import pytest
+
+from cutlass_gemm import legacy_adapter as adapter
+
+
+def test_mainloops_only_gain_reference_pointer_and_stage_hook(tmp_path, monkeypatch):
+    originals = {}
+    hashes = {}
+    for stem in adapter.SOURCES:
+        name = "MmaMultistage" if stem == "mma_multistage" else "MmaPipelined"
+        loop = ("    for (; gemm_k_iterations > (-Base::kStages + 1);) {"
+                if stem == "mma_multistage" else
+                "    for (; gemm_k_iterations > 0; --gemm_k_iterations) {")
+        text = f"// untouched license\nclass {name} {{\n  using Shape = Shape_;\n{loop}\n// unchanged MMA\n}};\n"
+        source = tmp_path / "include/cutlass/gemm/threadblock" / (stem + ".h")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(text)
+        originals[stem] = text
+        hashes[stem] = hashlib.sha256(text.encode()).hexdigest()
+    monkeypatch.setattr(adapter, "SOURCES", hashes)
+    targets = adapter.generate_legacy_reference_headers(tmp_path, tmp_path / "generated")
+    for (stem, upstream), target in zip(originals.items(), targets, strict=True):
+        name = "MmaMultistage" if stem == "mma_multistage" else "MmaPipelined"
+        stage = "smem_read_stage_idx_" if stem == "mma_multistage" else "smem_write_stage_idx ^ 1"
+        restored = target.read_text().replace("Abft" + name, name).replace(
+            "  using Reference = sdc_abft::LegacyTileReference<Base>;\n"
+            "  Reference* reference = nullptr;\n", "", 1
+        ).replace(f"\n      if (reference) reference->consume({stage});", "", 1)
+        assert restored == upstream
+    mtimes = [target.stat().st_mtime_ns for target in targets]
+    adapter.generate_legacy_reference_headers(tmp_path, tmp_path / "generated")
+    assert [target.stat().st_mtime_ns for target in targets] == mtimes
+
+
+def test_changed_legacy_source_is_rejected(tmp_path):
+    source = tmp_path / "include/cutlass/gemm/threadblock/mma_multistage.h"
+    source.parent.mkdir(parents=True)
+    source.write_text("unrecognized source")
+    with pytest.raises(RuntimeError, match="pinned CUTLASS"):
+        adapter.generate_legacy_reference_headers(tmp_path, tmp_path / "generated")
+    assert not (tmp_path / "generated").exists()

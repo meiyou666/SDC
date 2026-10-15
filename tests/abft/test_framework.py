@@ -410,7 +410,7 @@ def test_input_fused_rejects_input_memory_faults(location):
                          {"location": location}, reference_collector_fn=fused_cpu_collector)
 
 
-@pytest.mark.parametrize("precision", ["fp32", "bf16", "nvfp4"])
+@pytest.mark.parametrize("precision", ["nvfp4"])
 def test_input_fused_rejects_unsupported_precision(precision):
     from abft import execute_prepared
     p = nvfp4() if precision == "nvfp4" else PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
@@ -419,6 +419,20 @@ def test_input_fused_rejects_unsupported_precision(precision):
                          reference_collector_fn=fused_cpu_collector)
     with pytest.raises(NotImplementedError, match=precision):
         p.collected_reference_native(torch.ones(2, 3))
+
+
+@pytest.mark.parametrize("precision", ["fp32", "bf16"])
+def test_legacy_prepared_uses_fused_reference_without_decoding(monkeypatch, precision):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Unexpected separate reference"))
+    output, report = execute_prepared(
+        p, {"method": "classic", "reference_mode": "input_fused"},
+        reference_collector_fn=fused_cpu_collector,
+    )
+    assert not report.detected
+    assert report.context["precision"] == precision
+    torch.testing.assert_close(output, torch.full((3, 2), 16.))
 
 
 def test_classic_binds_tile_partial_reference():

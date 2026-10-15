@@ -36,7 +36,7 @@ def _extension_key():
     digest = hashlib.sha256(json.dumps(settings(), sort_keys=True).encode())
     digest.update(f"{torch.__version__}:{torch._C._GLIBCXX_USE_CXX11_ABI}".encode())
     for path in sorted(SOURCE.iterdir()):
-        if path.suffix in {".cpp", ".cu", ".h", ".cuh"} or path.name == "official_adapter.py":
+        if path.suffix in {".cpp", ".cu", ".h", ".cuh"} or path.name in {"official_adapter.py", "legacy_adapter.py"}:
             digest.update(path.name.encode())
             digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
@@ -58,16 +58,19 @@ def load_extension():
         raise RuntimeError("编译配置已更新，请重建 NVIDIA 镜像。")
     os.environ.setdefault("MAX_JOBS", str(config["max_build_jobs"]))
     arch = config["cuda_arch"]
+    from .legacy_adapter import generate_legacy_reference_headers
     from .official_adapter import generate_reference_kernel
 
     generated = Path(os.environ.get("TORCH_EXTENSIONS_DIR", get_default_build_root())) / "sdc_generated" / _extension_key()
     generate_reference_kernel(cutlass, generated)
+    generate_legacy_reference_headers(cutlass, generated)
     return load(
         name=f"sdc_cutlass_{_extension_key()}",
         sources=[str(SOURCE / name) for name in (
             "bindings.cpp", "gemm.cu", "fp8.cu", "nvfp4.cu",
             "abft_legacy.cu", "abft_fp8.cu", "abft_nvfp4.cu",
             "abft_fp8_reference.cu",
+            "abft_legacy_reference.cu",
         )],
         extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],
         extra_cflags=["-O2", f"-std={config['cxx_standard']}"],
