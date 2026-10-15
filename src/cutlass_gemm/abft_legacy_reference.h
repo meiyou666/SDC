@@ -28,10 +28,13 @@ struct LegacyTileReference {
   CUTLASS_DEVICE void consume(int stage) {
     auto a = operands.operand_A_ref();
     auto b = operands.operand_B_ref();
+    // Both official legacy iterators visit the residue tile first, then all
+    // remaining K tiles are full. A tail-last mask would truncate a full tile.
+    const int valid_k = k_tile == 0 ? (inner - 1) % Shape::kK + 1 : Shape::kK;
     for (int k = thread; k < Shape::kK; k += Threads) {
       float q0 = 0.f, q1 = 0.f, a0 = 0.f, a1 = 0.f;
       // Explicit K mask also protects predicated non-zfill tail stages.
-      if (k_tile * Shape::kK + k < inner) {
+      if (k < valid_k) {
         for (int m = 0; m < Shape::kM; ++m) {
           int row = tile_m * Shape::kM + m;
           if (row < rows) {
@@ -51,7 +54,7 @@ struct LegacyTileReference {
       int n = thread + slot * Threads;
       if (n < Shape::kN && tile_n * Shape::kN + n < columns) {
         for (int k = 0; k < Shape::kK; ++k) {
-          if (k_tile * Shape::kK + k < inner) {
+          if (k < valid_k) {
             float value = float(b.at({stage * Shape::kK + k, n}));
             for (int p = 0; p < 2; ++p) {
               predicted[p][slot] = fmaf(scratch.q[p][k], value, predicted[p][slot]);

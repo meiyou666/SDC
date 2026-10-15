@@ -65,3 +65,25 @@ def test_legacy_accumulator_fault_preserves_prediction(precision):
     delta = torch.zeros_like(obs)
     delta[:, 1, 143] = -2 * weights[:, 135]
     torch.testing.assert_close(fault_obs - obs, delta, atol=0, rtol=0)
+
+
+@pytest.mark.parametrize("precision,k", [("bf16", 80), ("fp32", 33)])
+def test_reference_visits_residue_k_tile_before_full_tiles(precision, k):
+    from cutlass_gemm import backend
+
+    backend.require_device(torch.device("cuda"))
+    dtype = torch.bfloat16 if precision == "bf16" else torch.float32
+    m, n = 128, 128
+    a = torch.arange(1, k + 1, device="cuda", dtype=torch.float32).expand(m, -1).contiguous().to(dtype)
+    b = torch.ones(k, n, device="cuda", dtype=dtype)
+    weights = torch.zeros(2, m, device="cuda")
+    weights[0, 0], weights[1, 1] = 1, -2
+    output, observed, _, predicted, magnitude = torch.ops.sdc_cutlass.abft_reference_mm(
+        a, b, weights, -1, -1, -1,
+    )
+    total = k * (k + 1) / 2
+    torch.testing.assert_close(output, torch.full_like(output, total), rtol=0, atol=0)
+    expected = torch.tensor([total, -2 * total], device="cuda")[:, None].expand(-1, n)
+    torch.testing.assert_close(predicted[:, 0], expected, rtol=0, atol=0)
+    torch.testing.assert_close(observed[:, 0], expected, rtol=0, atol=0)
+    torch.testing.assert_close(magnitude[:, 0], expected.abs(), rtol=0, atol=0)
