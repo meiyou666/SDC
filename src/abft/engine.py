@@ -67,11 +67,10 @@ def _selected(fault, context):
 @torch.no_grad()
 def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
             fault_config=None, context=None, *, raw_fn=None, reference_mm=None, collector_fn=None):
-    """Return output and optional report; injected callables support CPU tests.
+    """Training convenience entry: prepare once, then execute prepared GEMM.
 
-    raw_fn(prepared), collector_fn(prepared, weights, fault_tuple), and
-    reference_mm(left, right) are dependency injection hooks. Production uses
-    existing native CUTLASS operations. No autograd graph is created here.
+    Quantization/input preparation is outside the returned report's execution
+    timings. Unprotected calls preserve the original backend.gemm fast path.
     """
     cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
     context = {"layer": None, "role": None, "call_index": 1,
@@ -80,11 +79,36 @@ def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
     if cfg.method == "none" and not selected:
         if raw_fn is None:
             return backend.gemm(a, b, precision, scaling, global_scale), None
-        return raw_fn(PreparedGemm.prepare(a, b, precision, scaling, global_scale)), None
+    prepared = PreparedGemm.prepare(a, b, precision, scaling, global_scale)
+    return execute_prepared(prepared, cfg, fault, context, raw_fn=raw_fn,
+                            reference_mm=reference_mm, collector_fn=collector_fn)
+
+
+@torch.no_grad()
+def execute_prepared(prepared, abft_config=None, fault_config=None, context=None,
+                     *, raw_fn=None, reference_mm=None, collector_fn=None):
+    """Execute existing native operands without preparing or quantizing again.
+
+    Reference decoding and construction are protection costs inside this call.
+    raw_fn(prepared), collector_fn(prepared, weights, fault_tuple), and
+    reference_mm(left, right) are CPU-test dependency injection hooks.
+    Optional stage events exclude input preparation; external benchmark events
+    should encompass this entire call. host_seconds measures host execution,
+    including policy-required synchronization but not asynchronous GPU work.
+    """
+    cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
+    context = {"layer": None, "role": None, "call_index": 1,
+               "execution_kind": "forward", "retry": False, **dict(context or {})}
+    selected = _selected(fault, context)
+    if cfg.method == "none" and not selected:
+        return (raw_fn(prepared) if raw_fn else prepared.raw_native()), None
+    a = prepared.a
+    precision = prepared.precision
+    scaling = {"fp32": "none", "bf16": "none", "fp8": "tensorwise", "nvfp4": "block16"}[precision]
     started = time.perf_counter()
     events = []
     def begin():
-        if a.is_cuda:
+        if cfg.timing and a.is_cuda:
             event = torch.cuda.Event(enable_timing=True)
             event.record(torch.cuda.current_stream(a.device))
             return event
@@ -94,10 +118,9 @@ def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
             finish = begin()
             events.append((name, event, finish))
     mark = begin()
-    prepared = PreparedGemm.prepare(a, b, precision, scaling, global_scale)
     method = get_method(cfg.method) if cfg.method != "none" else None
     state = method.prepare(prepared, cfg, reference_mm) if method else None
-    end("prepare_reference", mark)
+    end("reference", mark)
     mark = begin()
     active = prepared.injected(fault) if selected and fault.location in {"a", "b"} else prepared
     injection = (-1, -1, -1)
@@ -158,10 +181,11 @@ def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
         if not bool(checked["detected"].item()):
             output = replacement
         end("recover_recheck", mark)
-    report.host_seconds = time.perf_counter() - started
     if not cfg.diagnostics:
         for key in ("residual", "threshold", "retry_residual"):
             result.pop(key, None)
-    if method and cfg.on_error == "raise" and bool((result["detected"] & ~result["recovered"]).item()):
+    should_raise = method and cfg.on_error == "raise" and bool((result["detected"] & ~result["recovered"]).item())
+    report.host_seconds = time.perf_counter() - started
+    if should_raise:
         raise AbftError(report)
     return output, report

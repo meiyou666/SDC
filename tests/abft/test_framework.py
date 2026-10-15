@@ -251,3 +251,90 @@ def test_report_serialization_preserves_nonfinite_paths_as_strict_json():
     assert record["nonfinite_metrics"] == {"residual[0][0]": "nan", "residual[0][1]": "inf",
                                            "residual[0][2]": "-inf"}
     json.dumps(record, allow_nan=False)
+
+
+def test_prepared_baseline_and_protection_share_exact_operands(monkeypatch):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(16, 3).T, torch.ones(2, 16).T, "fp32", "none")
+    monkeypatch.setattr(PreparedGemm, "prepare", lambda *args: pytest.fail("Prepared twice"))
+    seen = []
+    def raw(operands):
+        seen.append(operands)
+        return operands.a @ operands.b
+    def collected(operands, weights, fault):
+        seen.append(operands)
+        return collect(operands, weights, fault)
+    baseline, empty = execute_prepared(p, raw_fn=raw)
+    protected, report = execute_prepared(p, "classic", reference_mm=torch.mm, collector_fn=collected)
+    assert seen == [p, p]
+    assert seen[0].a is p.a and seen[0].b is p.b
+    assert empty is None and not report.detected
+    torch.testing.assert_close(baseline, protected)
+
+
+def test_prepared_retry_never_prepares_and_reference_runs_inside_call(monkeypatch):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 32), torch.ones(32, 2), "fp32", "none")
+    monkeypatch.setattr(PreparedGemm, "prepare", lambda *args: pytest.fail("Prepared twice"))
+    actions = []
+    original_decode = p.decode_block
+    def decode(start, end):
+        actions.append("decode")
+        return original_decode(start, end)
+    monkeypatch.setattr(p, "decode_block", decode)
+    def collector(operands, weights, fault):
+        actions.append("collect")
+        assert operands is p
+        return collect(operands, weights, fault)
+    assert not actions
+    output, report = execute_prepared(p, {"method": "classic", "recovery": "recompute", "reference_block_k": 16},
+                                      {"location": "accumulator", "bit": 31},
+                                      reference_mm=torch.mm, collector_fn=collector)
+    assert actions[:2] == ["decode", "decode"]
+    assert actions.count("collect") == 2
+    assert report.recovered
+    torch.testing.assert_close(output, p.a @ p.b)
+
+
+def test_prepared_none_uses_native_without_original_gemm_or_reference(monkeypatch):
+    from abft import engine
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    output = torch.ones(3, 2)
+    monkeypatch.setattr(p, "raw_native", lambda: output)
+    monkeypatch.setattr(engine.backend, "gemm", lambda *args: pytest.fail("Original gemm re-prepares"))
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Unexpected reference"))
+    actual, report = engine.execute_prepared(p)
+    assert actual is output and report is None
+
+
+@pytest.mark.parametrize("timing", [False, True])
+def test_stage_events_are_opt_in_and_reference_is_in_timed_boundary(monkeypatch, timing):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    actions = []
+    class Event:
+        def __init__(self, **kwargs):
+            actions.append("event")
+        def record(self, stream):
+            actions.append("record")
+    monkeypatch.setattr(torch.Tensor, "is_cuda", property(lambda self: True))
+    monkeypatch.setattr(torch.cuda, "Event", Event)
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda *args: None)
+    def reference(a, b):
+        actions.append("reference_mm")
+        return a @ b
+    _, report = execute_prepared(p, {"method": "classic", "timing": timing},
+                                 reference_mm=reference, collector_fn=collect)
+    if timing:
+        assert [entry[0] for entry in report.timing_events] == ["reference", "fault_prepare", "execute", "verify"]
+        assert actions[:3] == ["event", "record", "reference_mm"]
+        assert actions[6:8] == ["event", "record"]
+    else:
+        assert "event" not in actions
+        assert report.timing_events == []
+    assert report.host_seconds >= 0
+
+
+def test_invalid_timing_config():
+    with pytest.raises(ValueError, match="timing"):
+        AbftConfig(timing=1)
