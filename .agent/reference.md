@@ -164,3 +164,7 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 后续硬件运行记录设备、提交版本、执行命令和结果，保存在实验输出目录。教程只维护操作步骤。
 
 2026-10-15 在本地 `meiyou666/feature-abft-gemm` 分支加入 ABFT epilogue 投影与训练连接。项目 NVIDIA 容器完成全部无保护与融合源文件的 SM120a 编译、链接和扩展加载；扩展标识为 `6162930f1741c598`。`bash scripts/check.sh` 通过 261 项测试及 55 项子测试，Ruff 通过。105 项 GPU 用例跳过，其中 87 项为新增 ABFT 原生与端到端用例。当前容器没有目标 GPU，尚未执行融合内核的 SM120 数值测试或受保护 Qwen 训练。日志保存在 `results/validation/abft-local/`。
+
+同日提交 `b2bb9d0` 分离 `execute_prepared()` 与量化准备，并加入 YAML 驱动的配对 GEMM 测量。保护计时覆盖参考生成至设备判定，输入量化与布局准备不计入；阶段计时默认关闭。训练及接口回归通过 136 项，测量和框架检查通过 59 项。
+
+随后接入 FP8 `input_fused` 原型：`abft_fp8_mainloop.cuh` 仅在固定官方 `mma()` 的 stage wait 后消费共享输入，`official_adapter.py` 从固定哈希的官方 kernel 生成独立类，只扩展 MMA 调用点。原始 CUTLASS 安装目录和无保护实例不改。参考部分使用全局行权重，保留原检查粒度；预测与 magnitude 作为局部和返回。寄存器保存列累加器后，新增共享缓冲为 1024 字节，流水线仍为 6 级，完整动态共享内存为 101376 字节。全扩展 `b4e2a13b8c17b118` 编译、链接与加载成功；完整检查为 301 项通过、112 项 GPU 跳过、55 项子测试通过，Ruff 通过。日志在 `results/validation/abft-input-fused/`；无实机时延或数值结论。

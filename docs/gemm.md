@@ -130,3 +130,9 @@ python -m abft.benchmark --config configs/gemm/abft_benchmark.yaml
 输出 JSON 包含无保护与保护时延、配对比例、逐位输出一致性和正常调用报警结果。测量顺序交替，报告在计时外读取。`profile_repeats` 可单独测各阶段时间；它不计入主测量样本。正常重复调用使用同一输入，报警比例用于检查当前配置，不替代独立正常样本上的阈值校准。
 
 自行编写实验时，先调用 `PreparedGemm.prepare()`，再将同一对象交给 `raw_native()` 和 `abft.execute_prepared()`。`execute()` 继续作为训练入口，负责准备一次输入并调用后者。`abft.timing` 默认关闭，只在需要阶段计时时开启。
+
+FP8 的输入侧融合使用 `abft.reference_mode: input_fused`；默认 `separate` 使用独立参考计算。比较时分别保存两份配置，采用相同输入、权重与阈值。输入融合配置中的 `formats` 先只保留 FP8，其他精度正在逐项接入。
+
+输入融合在官方主循环的 A、B tile 就绪后计算参考校验，复用共享内存数据。内核同时返回预测、幅值和结果校验的局部和，随后沿 M tile 合并判定。当前原生路径保持全局两路行权重及原 MMA 顺序，FP8 的 6 级流水线不变。此配置使用计算故障注入；`fault.location: accumulator` 对应已有的 epilogue FP32 注入点。
+
+新增原生路径已完成编译检查，SM120 数值与性能结果待实机测量。测试入口为 `tests/cutlass_gemm/test_fp8_input_reference_gpu.py`，包含多 K 阶段、尾块、持久化调度及输出逐位对照。
