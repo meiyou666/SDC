@@ -19,6 +19,10 @@ sdc_cutlass_abft_fp8_reference_mm(const at::Tensor&, const at::Tensor&, const at
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 sdc_cutlass_abft_reference_mm(const at::Tensor&, const at::Tensor&, const at::Tensor&,
                              int64_t, int64_t, int64_t);
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+sdc_cutlass_abft_nvfp4_reference_mm(const at::Tensor&, const at::Tensor&,
+                                  const at::Tensor&, const at::Tensor&, int64_t,
+                                  const at::Tensor&, const at::Tensor&, int64_t, int64_t, int64_t);
 AbftOutput sdc_cutlass_abft_nvfp4_mm(const at::Tensor&, const at::Tensor&,
                                    const at::Tensor&, const at::Tensor&, int64_t,
                                    const at::Tensor&, const at::Tensor&,
@@ -33,6 +37,7 @@ TORCH_LIBRARY(sdc_cutlass, library) {
   library.def("abft_fp8_mm(Tensor a, Tensor b_rows, Tensor alpha, Tensor weights, int row, int col, int bit) -> (Tensor, Tensor, Tensor)");
   library.def("abft_fp8_reference_mm(Tensor a, Tensor b_rows, Tensor alpha, Tensor weights, int row, int col, int bit) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
   library.def("abft_nvfp4_mm(Tensor a_packed, Tensor b_packed, Tensor sfa, Tensor sfb, int k, Tensor alpha, Tensor weights, int row, int col, int bit) -> (Tensor, Tensor, Tensor)");
+  library.def("abft_nvfp4_reference_mm(Tensor a_packed, Tensor b_packed, Tensor sfa, Tensor sfb, int k, Tensor alpha, Tensor weights, int row, int col, int bit) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
   // No tensor input: register the host-only layout helper as a catch-all.
   library.def("nvfp4_scale_layout(int m, int n, int k) -> (Tensor, Tensor, int, int)",
               &sdc_cutlass_nvfp4_scale_layout);
@@ -47,6 +52,7 @@ TORCH_LIBRARY_IMPL(sdc_cutlass, CUDA, library) {
   library.impl("abft_fp8_mm", &sdc_cutlass_abft_fp8_mm);
   library.impl("abft_fp8_reference_mm", &sdc_cutlass_abft_fp8_reference_mm);
   library.impl("abft_nvfp4_mm", &sdc_cutlass_abft_nvfp4_mm);
+  library.impl("abft_nvfp4_reference_mm", &sdc_cutlass_abft_nvfp4_reference_mm);
 }
 
 // Importing the extension registers torch.ops.sdc_cutlass operators. Autograd is

@@ -39,3 +39,17 @@
 尺度传播应从真实布局推导。例如 `A_ik = g_A sA_(i,b(k)) qA_ik` 时，行校验预测仍需计算 `sum_k A_ik sum_j B_kj`；当 `B` 的尺度随 `j` 变化，`sum_j sB_(j,b(k)) qB_kj` 内的尺度不能统一提出。该式是逻辑值恒等式，浮点实现仍有归约次序误差。
 
 优先顺序：先复现输入片段复用与 cast 前累加器校验，再比较 global/tile/block16 的同条件版本。每次只改一个机制，记录误报、漏报、故障命中与总开销。当前没有新性能、覆盖率或首次性结论。
+
+## 限定补检：FP8/FP4 与流水线资源
+
+2026-10-15 通过项目 Docker 的 Python 标准库访问公开检索接口，未安装依赖或运行编译。GitHub repository search 的五组查询均返回零个仓库匹配：
+
+- [ABFT FP8](https://github.com/search?q=ABFT+FP8&type=repositories)
+- [ABFT NVFP4](https://github.com/search?q=ABFT+NVFP4&type=repositories)
+- [ABFT FP4](https://github.com/search?q=ABFT+FP4&type=repositories)
+- [ABFT register pressure](https://github.com/search?q=ABFT+register+pressure&type=repositories)
+- [checksum GEMM pipeline stages](https://github.com/search?q=checksum+GEMM+pipeline+stages&type=repositories)
+
+另用上述主题的三个组合查询尝试公开网页搜索。Google 请求发生 TLS EOF；Bing RSS 对 FP8 仅返回无关结果，对 FP4/NVFP4 和流水线资源组合没有返回条目。因此，本轮没有新增可核对原文的 ABFT 论文或作者代码。GitHub 仓库元数据搜索没有覆盖代码全文、所有 README 或论文全文；网页搜索也未形成有效文献覆盖。该结果只能说明本轮未找到，不能据此判断这些机制未被研究，更不能推导首次性。
+
+当前可直接借用的依据仍是前表中的 FT-SGEMM、AI-guided ABFT、FT-Transformer 和 AEGIS。NVFP4 文献补充了尺度与量化语义，没有提供 FP4 ABFT 检测或开销结论。保持流水线级数的资源分配仍是待测工程方案。

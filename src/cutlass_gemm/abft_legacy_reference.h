@@ -39,7 +39,7 @@ struct LegacyTileReference {
           int row = tile_m * Shape::kM + m;
           if (row < rows) {
             float value = float(a.at({m, stage * Shape::kK + k}));
-            float w0 = projection.weights[row], w1 = projection.weights[rows + row];
+            float w0 = projection.weights[row], w1 = projection.weights[int64_t(rows) + row];
             q0 = fmaf(w0, value, q0); q1 = fmaf(w1, value, q1);
             a0 = fmaf(fabsf(w0), fabsf(value), a0);
             a1 = fmaf(fabsf(w1), fabsf(value), a1);

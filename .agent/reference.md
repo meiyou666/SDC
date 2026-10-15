@@ -95,7 +95,7 @@ train(
 
 ### ABFT 调用关系
 
-线性层通过 `abft.engine.execute()` 依次完成输入准备、参考校验、故障注入、原生 GEMM、校验判定和可选重算。关闭保护与注入时直接调用原有 GEMM。`classic` 使用全 1 与递增行权重，两路 FP32 列投影从 epilogue 中乘 alpha 后、输出转换前的值生成。参考校验按 K 分块解码真实码值与尺度，再使用现有 FP32 CUTLASS GEMM 计算。
+线性层通过 `abft.engine.execute()` 准备一次输入，再交给 `execute_prepared()` 完成保护。关闭保护与注入时直接调用原有 GEMM。`classic` 使用全 1 与递增行权重，两路 FP32 列投影从 epilogue 中乘 alpha 后、输出转换前的值生成。`reference_mode: input_fused` 在主循环内复用已经加载的 A、B 及 NVFP4 block16 scale，生成预测和 magnitude；`separate` 保留按 K 分块解码及独立 FP32 GEMM 的参考路径。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -107,6 +107,19 @@ train(
 | [abft_fp8.cu](../src/cutlass_gemm/abft_fp8.cu)、[abft_nvfp4.cu](../src/cutlass_gemm/abft_nvfp4.cu)、[abft_sm120.cuh](../src/cutlass_gemm/abft_sm120.cuh) | FP8/NVFP4 epilogue 注入与两路 reduction |
 
 原生路径保留官方 mainloop，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。每次受保护 GEMM 调用均执行方法工厂，当前未接入插件历史状态的检查点保存。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
+
+输入融合的原生入口为 `abft_reference_mm`（FP32/BF16）、`abft_fp8_reference_mm`、`abft_nvfp4_reference_mm`，返回 `(output, observed_partials, hit, predicted_partials, magnitude_partials)`。局部数组均为 `[2,ceil(M/tileM),padded_N]`，保持全局行权重，最终沿 M tile 合并。融合模式只接受计算故障，重算复检继续使用首次参考。`parameters` 提供方法专用 YAML 参数，`validate_config/prepare_fused/bind_reference` 用于扩展方法；默认 `classic` 不接受额外参数。
+
+`official_adapter.py` 与 `legacy_adapter.py` 对固定哈希的官方源码生成独立类型，不修改 `/opt/cutlass`。两份 SM120 consumer 函数在剔除新增校验调用后与官方一致，见 `test_mainloop_preservation.py`。legacy iterator 先处理 K 余数块，再处理完整块，参考路径的 K 掩码必须遵循该顺序。
+
+| 输入融合路径 | 原流水线级数 | 新增共享校验缓冲 | 完整 kernel 共享存储 |
+| --- | ---: | ---: | ---: |
+| FP32 | 2 | 128 B | 21,568 B |
+| BF16 | 3 | 1,024 B | 99,328 B |
+| FP8 | 6 | 1,024 B | 101,376 B |
+| NVFP4 | 4 | 2,048 B | 90,112 B |
+
+以上是编译期布局与单文件编译检查结果；设备容量还由原生入口查询，数值结果及吞吐需在目标 GPU 上测量。现有测试检查四精度输出、预测、幅值、尾块、异构 scale、恢复与线性层前反向。
 
 ### 量化准备
 
@@ -168,3 +181,7 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 同日提交 `b2bb9d0` 分离 `execute_prepared()` 与量化准备，并加入 YAML 驱动的配对 GEMM 测量。保护计时覆盖参考生成至设备判定，输入量化与布局准备不计入；阶段计时默认关闭。训练及接口回归通过 136 项，测量和框架检查通过 59 项。
 
 随后接入 FP8 `input_fused` 原型：`abft_fp8_mainloop.cuh` 仅在固定官方 `mma()` 的 stage wait 后消费共享输入，`official_adapter.py` 从固定哈希的官方 kernel 生成独立类，只扩展 MMA 调用点。原始 CUTLASS 安装目录和无保护实例不改。参考部分使用全局行权重，保留原检查粒度；预测与 magnitude 作为局部和返回。寄存器保存列累加器后，新增共享缓冲为 1024 字节，流水线仍为 6 级，完整动态共享内存为 101376 字节。全扩展 `b4e2a13b8c17b118` 编译、链接与加载成功；完整检查为 301 项通过、112 项 GPU 跳过、55 项子测试通过，Ruff 通过。日志在 `results/validation/abft-input-fused/`；无实机时延或数值结论。
+
+2026-10-15 四精度输入融合已接通，示例测量及 ABFT 训练配置使用 `input_fused`。完整扩展 `aeac1951a13c2293` 编译、链接、加载和三个 CUDA 接口注册检查通过，构建标识为 `e51127644c279838`。完整本地检查为 316 项通过、171 项 GPU 跳过、55 项子测试通过；Ruff 通过。独立检查修正了 legacy 余数块先行时的 K 掩码，以及第二路权重索引的 int32 加法溢出。最终源码对照的 6 项检查通过。
+
+日志和 `summary.json` 保存在 `results/validation/abft-four-input/`。用户确认暂时没有目标 GPU，先推进本地实现。因此尚未执行四精度的 GPU 数值、恢复、前反向或性能测试。后续取得设备后先运行 `bash scripts/gemm-accept.sh`，再执行配对 benchmark，按实际瓶颈进行单项优化；不要将编译结果或 CPU 桥接测试视作实机结果。故障注入当前仍在 epilogue 的 alpha 后，尚未扩展为 MMA 指令内部注入。

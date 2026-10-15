@@ -40,7 +40,7 @@ struct Fp8TileReference {
         int row = c.tile_m * M + m;
         if (row < c.rows) {
           float value = decode(a(m, k, stage));
-          float w0 = c.weights[row], w1 = c.weights[c.rows + row];
+          float w0 = c.weights[row], w1 = c.weights[int64_t(c.rows) + row];
           q0 = fmaf(w0, value, q0);
           q1 = fmaf(w1, value, q1);
           a0 = fmaf(fabsf(w0), fabsf(value), a0);

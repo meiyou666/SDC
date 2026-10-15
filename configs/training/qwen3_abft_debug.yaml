@@ -29,6 +29,7 @@ gemm:
   # 示例阈值仅用于调试；正式比较需按精度与训练操作数独立校准。
   abft:
     method: classic
+    reference_mode: input_fused
     atol: 0.0001
     rtol: 0.0001
     recovery: none

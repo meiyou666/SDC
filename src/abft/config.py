@@ -1,6 +1,7 @@
 """Lightweight experiment configuration; importing this module never loads Torch."""
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
+import json
 import math
 
 
@@ -15,8 +16,25 @@ class AbftConfig:
     diagnostics: bool = False
     timing: bool = False
     reference_mode: str = "separate"
+    parameters: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        def validate_parameters(value):
+            if isinstance(value, dict):
+                if not all(isinstance(key, str) for key in value):
+                    raise ValueError("ABFT parameters require string dictionary keys")
+                for child in value.values():
+                    validate_parameters(child)
+            elif isinstance(value, (list, tuple)):
+                for child in value:
+                    validate_parameters(child)
+        if not isinstance(self.parameters, dict):
+            raise ValueError("ABFT parameters must be a string-key dictionary")
+        try:
+            json.dumps(self.parameters, allow_nan=False)
+            validate_parameters(self.parameters)
+        except (TypeError, ValueError, OverflowError, RecursionError) as error:
+            raise ValueError("ABFT parameters must contain finite JSON-serializable values and string keys") from error
         if self.reference_mode not in {"separate", "input_fused"}:
             raise ValueError("reference_mode must be separate or input_fused")
         if self.reference_mode == "input_fused" and self.method == "none":

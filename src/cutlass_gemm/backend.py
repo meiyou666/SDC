@@ -71,6 +71,7 @@ def load_extension():
             "abft_legacy.cu", "abft_fp8.cu", "abft_nvfp4.cu",
             "abft_fp8_reference.cu",
             "abft_legacy_reference.cu",
+            "abft_nvfp4_reference.cu",
         )],
         extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],
         extra_cflags=["-O2", f"-std={config['cxx_standard']}"],

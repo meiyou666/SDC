@@ -132,6 +132,8 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
             events.append((name, event, finish))
     mark = begin()
     method = get_method(cfg.method) if cfg.method != "none" else None
+    if method:
+        method.validate_config(cfg)
     state = (method.prepare_fused(prepared, cfg) if input_fused
              else method.prepare(prepared, cfg, reference_mm)) if method else None
     end("reference", mark)

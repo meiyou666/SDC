@@ -410,10 +410,11 @@ def test_input_fused_rejects_input_memory_faults(location):
                          {"location": location}, reference_collector_fn=fused_cpu_collector)
 
 
-@pytest.mark.parametrize("precision", ["nvfp4"])
+@pytest.mark.parametrize("precision", ["fp16"])
 def test_input_fused_rejects_unsupported_precision(precision):
     from abft import execute_prepared
-    p = nvfp4() if precision == "nvfp4" else PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+    p = fused_fp8_operands()
+    p.precision = precision
     with pytest.raises(NotImplementedError, match=precision):
         execute_prepared(p, {"method": "classic", "reference_mode": "input_fused"},
                          reference_collector_fn=fused_cpu_collector)
@@ -458,3 +459,46 @@ def test_method_fused_interface_defaults_to_explicit_unsupported():
         method.prepare_fused(fused_fp8_operands(), AbftConfig())
     with pytest.raises(NotImplementedError):
         method.bind_reference(None, None, {})
+
+
+def test_plugin_parameters_control_detection(monkeypatch):
+    from abft import methods
+    monkeypatch.setattr(methods, "_METHODS", dict(methods._METHODS))
+    class ConfiguredMethod(Classic):
+        def validate_config(self, config):
+            if set(config.parameters) != {"always_detect"} or type(config.parameters["always_detect"]) is not bool:
+                raise ValueError("always_detect must be specified as boolean")
+        def verify(self, observed, output, state, config):
+            result = super().verify(observed, output, state, config)
+            result["detected"] = torch.tensor(config.parameters["always_detect"])
+            return result
+    register_method("configured_plugin", ConfiguredMethod)
+    for forced in [False, True]:
+        _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                        abft_config={"method": "configured_plugin", "on_error": "report",
+                                     "parameters": {"always_detect": forced}})
+        assert bool(report.detected) is forced
+    with pytest.raises(ValueError, match="always_detect"):
+        run(torch.ones(3, 16), torch.ones(16, 2), abft_config="configured_plugin")
+
+
+def test_classic_rejects_unrecognized_parameters_before_reference():
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    with pytest.raises(ValueError, match="classic does not accept"):
+        execute_prepared(p, {"method": "classic", "parameters": {"unused": 1}},
+                         reference_mm=lambda *args: pytest.fail("Invalid config reached reference"))
+
+
+@pytest.mark.parametrize("parameters", [None, [], {1: "bad"}, {"nested": {1: 2}},
+                                         {"bad": object()}, {"bad": float("nan")},
+                                         {"nested": [float("inf")]}, {"bad": -float("inf")}])
+def test_parameters_reject_unsafe_json(parameters):
+    with pytest.raises(ValueError, match="parameters"):
+        AbftConfig(parameters=parameters)
+
+
+def test_parameter_defaults_are_independent():
+    first, second = AbftConfig(), AbftConfig()
+    first.parameters["new"] = 1
+    assert second.parameters == {}
