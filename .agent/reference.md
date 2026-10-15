@@ -185,3 +185,7 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 2026-10-15 四精度输入融合已接通，示例测量及 ABFT 训练配置使用 `input_fused`。完整扩展 `aeac1951a13c2293` 编译、链接、加载和三个 CUDA 接口注册检查通过，构建标识为 `e51127644c279838`。完整本地检查为 316 项通过、171 项 GPU 跳过、55 项子测试通过；Ruff 通过。独立检查修正了 legacy 余数块先行时的 K 掩码，以及第二路权重索引的 int32 加法溢出。最终源码对照的 6 项检查通过。
 
 日志和 `summary.json` 保存在 `results/validation/abft-four-input/`。用户确认暂时没有目标 GPU，先推进本地实现。因此尚未执行四精度的 GPU 数值、恢复、前反向或性能测试。后续取得设备后先运行 `bash scripts/gemm-accept.sh`，再执行配对 benchmark，按实际瓶颈进行单项优化；不要将编译结果或 CPU 桥接测试视作实机结果。故障注入当前仍在 epilogue 的 alpha 后，尚未扩展为 MMA 指令内部注入。
+
+随后在本机 RTX 4070（SM89）补充 legacy 原生正确性诊断。独立容器 `sdc-abft-sm89-check` 使用同一项目锁文件，环境与 CUDA 检查通过；仅将相同 FP32/BF16 源文件编译为 SM89，正式 `gemm.json` 和生产设备检查保持 SM120。隔离进程复用原测试，只选 FP32/BF16，并显式使用真实 SM89 能力检查。源码基于 `167b55b`。
+
+实际运行 96 项通过：输入融合 44 项、输出校验 48 项、完整执行与线性层前反向 4 项；FP8/NVFP4 的 43 项被排除。Compute Sanitizer 的 memcheck 对 BF16 K80、FP32 K33 两项通过，0 errors；racecheck 对 BF16 K448 四种布局通过，0 hazards、0 errors、0 warnings。原始日志、逐项结果、源码哈希及诊断脚本在 `results/validation/sm89/`。这些结果补充 FP32/BF16 的真实执行证据，未测时延，也不替代 SM120 或 FP8/NVFP4 验证。
