@@ -7,6 +7,9 @@ import torch
 from cutlass_gemm import backend
 
 
+INPUT_REFERENCE_PRECISIONS = frozenset({"fp32", "bf16", "fp8"})
+
+
 @dataclass
 class PreparedGemm:
     a: torch.Tensor
@@ -65,7 +68,10 @@ class PreparedGemm:
 
     def collected_reference_native(self, weights, fault=(-1, -1, -1)):
         """Return output, observed, hit, predicted and magnitude partials."""
-        if self.precision != "fp8":
+        if self.precision in {"fp32", "bf16"}:
+            backend.require_device(self.a.device)
+            return torch.ops.sdc_cutlass.abft_reference_mm(self.a, self.b, weights, *fault)
+        if self.precision not in INPUT_REFERENCE_PRECISIONS:
             raise NotImplementedError(f"input_fused reference is not implemented for {self.precision}")
         return torch.ops.sdc_cutlass.abft_fp8_reference_mm(
             self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn),
