@@ -76,6 +76,7 @@ gemm:
   global_scale: amax
   abft:
     method: classic
+    reference_mode: input_fused
     atol: 0.0001
     rtol: 0.0001
     recovery: none
@@ -106,16 +107,21 @@ gemm:
 
 当前提供 `classic` 示例。新增方法在 [src/abft/methods.py](../src/abft/methods.py) 继承 `AbftMethod`，实现下列接口，并用 `register_method("方法名", 方法工厂)` 注册。自定义模块须在训练开始前导入，随后在 YAML 的 `abft.method` 中选择该名称。
 
+方法专用参数放在 `abft.parameters` 中，由方法的 `validate_config(config)` 检查；参数需能保存为 JSON。当前 `classic` 仅使用已有的阈值字段，不接受额外参数。
+
 | 接口 | 实现内容 |
 | --- | --- |
+| `validate_config(config)` | 检查该方法的专用参数 |
 | `prepare(operands, config, mm=None)` | 注入前从干净操作数生成参考校验，返回含 `weights` 的状态；当前原生接口接受形状为 `(2, M)` 的 FP32 行权重 |
+| `prepare_fused(operands, config)` | 准备输入融合所需的权重与方法状态，不独立扫描操作数 |
+| `bind_reference(predicted_partials, magnitude_partials, state)` | 接收并组织主 GEMM 内生成的参考数据 |
 | `propagate(partials, state)` | 合并原生 epilogue 返回的分块列投影 |
 | `verify(observed, output, state, config)` | 返回设备张量字典，包含 `detected`、`nonfinite`、`located`、`location` 等判定 |
 | `recover(operands, state)` | 返回重算输出、投影和注入命中标记；默认复用干净的已准备操作数 |
 
 工厂在每次受保护 GEMM 调用时执行。需要历史状态的方法自行管理实例生命周期；当前训练检查点不保存插件状态。V-ABFT、GVFA、Strided ABFT 和 AEGIS 的机制需分别实现与验证。
 
-原生融合位于输出 epilogue：两路权重对乘 alpha 后、输出 cast 前的 FP32 值做列投影。FP32/BF16 通过官方 example 35 的 visitor 接口接入，FP8/NVFP4 通过 `Sm90RowReduction` 接入。各路径保留官方 mainloop。参考校验生成、分块投影合并和判定由 Python 层组织；修改权重数量或原生投影布局时，同时修改 CUDA 接口。文件及固定源码链接见[技术参考](../.agent/reference.md#官方源码对应)。
+输出融合位于 epilogue：两路权重对乘 alpha 后、输出 cast 前的 FP32 值做列投影。FP32/BF16 通过官方 example 35 的 visitor 接口接入，FP8/NVFP4 通过 `Sm90RowReduction` 接入。选择 `input_fused` 时，方法以 `prepare_fused()` 准备权重，再由主循环复用已加载输入生成参考；`bind_reference()` 接收原生预测与幅值。选择 `separate` 时调用原来的 `prepare()` 独立生成参考。分块投影合并和判定由 Python 层组织。修改权重数量或原生投影布局时，同时修改 CUDA 接口。文件及固定源码链接见[技术参考](../.agent/reference.md#官方源码对应)。
 
 ## 测量 GEMM 保护开销
 
@@ -131,8 +137,8 @@ python -m abft.benchmark --config configs/gemm/abft_benchmark.yaml
 
 自行编写实验时，先调用 `PreparedGemm.prepare()`，再将同一对象交给 `raw_native()` 和 `abft.execute_prepared()`。`execute()` 继续作为训练入口，负责准备一次输入并调用后者。`abft.timing` 默认关闭，只在需要阶段计时时开启。
 
-FP8 的输入侧融合使用 `abft.reference_mode: input_fused`；默认 `separate` 使用独立参考计算。比较时分别保存两份配置，采用相同输入、权重与阈值。输入融合配置中的 `formats` 先只保留 FP8，其他精度正在逐项接入。
+四种精度均已接入 `abft.reference_mode: input_fused`，示例配置使用此模式；`separate` 保留独立参考计算。比较时分别保存两份配置，采用相同输入、权重与阈值。API 未指定 `reference_mode` 时仍保留 `separate` 行为。
 
-输入融合在官方主循环的 A、B tile 就绪后计算参考校验，复用共享内存数据。内核同时返回预测、幅值和结果校验的局部和，随后沿 M tile 合并判定。当前原生路径保持全局两路行权重及原 MMA 顺序，FP8 的 6 级流水线不变。此配置使用计算故障注入；`fault.location: accumulator` 对应已有的 epilogue FP32 注入点。
+输入融合在官方主循环的 A、B tile 就绪后计算参考校验，复用共享内存数据；NVFP4 同时读取该 tile 的 block16 scale。内核返回预测、幅值和结果校验的局部和，随后沿 M tile 合并判定。全局两路行权重及原 MMA 顺序保持一致；FP32、BF16、FP8、NVFP4 分别保留原来的 2、3、6、4 级流水线。此配置使用计算故障注入；`fault.location: accumulator` 对应已有的 epilogue FP32 注入点。
 
-新增原生路径已完成编译检查，SM120 数值与性能结果待实机测量。测试入口为 `tests/cutlass_gemm/test_fp8_input_reference_gpu.py`，包含多 K 阶段、尾块、持久化调度及输出逐位对照。
+新增原生路径已完成单文件编译检查，SM120 数值与性能结果待实机测量。`tests/cutlass_gemm/` 中的输入融合测试覆盖多 K 阶段、余数块、持久化调度、异构 scale、输出逐位对照、恢复与线性层前反向。运行 `bash scripts/gemm-accept.sh` 执行 GPU 检查。

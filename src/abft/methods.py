@@ -7,6 +7,9 @@ from cutlass_gemm import backend
 
 
 class AbftMethod(ABC):
+    def validate_config(self, config):
+        """Validate method-specific parameters before preparing evidence."""
+
     def prepare_fused(self, operands, config):
         """Prepare projection metadata for native input-side reference generation."""
         raise NotImplementedError("Method does not support input_fused reference")
@@ -60,6 +63,10 @@ def get_method(name):
 
 
 class Classic(AbftMethod):
+    def validate_config(self, config):
+        if config.parameters:
+            raise ValueError("classic does not accept method parameters")
+
     def prepare_fused(self, operands, config):
         weights = torch.stack((torch.ones(operands.m, device=operands.a.device),
                                torch.arange(1, operands.m+1, device=operands.a.device, dtype=torch.float32)))
