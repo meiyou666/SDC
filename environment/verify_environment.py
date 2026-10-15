@@ -54,6 +54,13 @@ def accelerator_smoke(runtime, baseline):
     backend = getattr(torch, device_name, None)
     if backend is None or not backend.is_available():
         raise ValueError(f"{device_name} device is unavailable. Check the host driver and container device mapping.")
+    if runtime == "nvidia":
+        from cuda.bindings import runtime as cudart
+
+        status, cuda_runtime = cudart.cudaRuntimeGetVersion()
+        if status != cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"Cannot query the CUDA runtime version: {status}.")
+        check_cuda_versions(baseline["training_profiles"][runtime], torch.version.cuda, cuda_runtime)
     a = torch.tensor([[1., 2.], [3., 4.]], device=device_name)
     result = a @ a
     backend.synchronize()
@@ -75,8 +82,17 @@ def check_torch_version(baseline, runtime):
     expected = profile["torch"]
     if importlib.metadata.version("torch") != expected:
         raise ValueError(f"The {runtime} profile requires torch {expected}.")
-    if runtime == "nvidia" and importlib.metadata.version("nvidia-cudnn-cu12") != profile["cudnn"]:
-        raise ValueError(f"The nvidia profile requires cuDNN {profile['cudnn']}.")
+    if runtime == "nvidia":
+        for package, key in (("nvidia-cudnn-cu12", "cudnn"), ("nvidia-cutlass-dsl", "cutlass_dsl"),
+                             ("cuda-python", "cuda_python"), ("cuda-bindings", "cuda_bindings")):
+            if importlib.metadata.version(package) != profile[key]:
+                raise ValueError(f"The nvidia profile requires {package} {profile[key]}.")
+
+
+def check_cuda_versions(profile, torch_cuda, runtime_cuda):
+    major, minor = (int(part) for part in profile["cuda"].split(".")[:2])
+    if torch_cuda != f"{major}.{minor}" or (runtime_cuda // 1000, runtime_cuda % 1000 // 10) != (major, minor):
+        raise ValueError(f"Expected CUDA {major}.{minor}; found torch CUDA {torch_cuda}, runtime {runtime_cuda}.")
 
 
 def smoke_test():

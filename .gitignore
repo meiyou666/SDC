@@ -15,6 +15,7 @@ dist/
 # Local editor and OS files
 /.vscode/*
 !/.vscode/extensions.json
+!/.vscode/launch.json
 /.idea/
 /.devcontainer/cloud-*/
 .DS_Store

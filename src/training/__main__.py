@@ -19,8 +19,6 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--data-only", action="store_true", help="只准备数据和分词器，不下载模型权重")
     run = commands.add_parser("train", help="全参数 next-token 训练与验证")
     run.add_argument("--config", required=True, help="训练配置的 YAML 路径")
-    run.add_argument("--resume", help="latest 或某个 checkpoint 目录")
-    run.add_argument("--offline", action="store_true", help="模型和分词器只从本地缓存读取")
     return parser
 
 
@@ -40,9 +38,10 @@ def main() -> None:
                 indent=2,
             ))
         else:
+            print(f"[训练] 配置已加载：{args.config}", flush=True)
             from .runner import train
 
-            train(config, resume=args.resume, offline=args.offline)
+            train(config)
     except (ValueError, FileNotFoundError) as exc:
         parser.exit(2, f"训练任务：{exc}\n")
 

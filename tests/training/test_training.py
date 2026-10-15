@@ -15,7 +15,16 @@ import torch
 from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM, TrainerCallback
 from transformers.modeling_utils import load_state_dict
 
-from training.config import Config, DataConfig, ModelConfig, TrainConfig, load_config, validate
+from training.config import (
+    Config,
+    DataConfig,
+    GemmConfig,
+    ModelConfig,
+    TrainConfig,
+    load_config,
+    run_signature,
+    validate,
+)
 from training.data import CausalCollator, load_tokenizer, pack_texts, prepare_data, read_prepared
 from training.metrics import JsonMetrics, NonFiniteLossError, write_json
 from training.runner import resolve_runtime_config, train
@@ -76,6 +85,28 @@ def test_packing_preserves_tokens_and_eos_across_tokenizer_batches(config):
     assert torch.equal(batch["labels"], batch["input_ids"])
     assert (batch["labels"] == tokenizer.eos_token_id).any()
     assert batch["attention_mask"].all()
+
+
+def test_offline_hub_models_load_from_cached_snapshot(config):
+    import training.data as data
+    import training.runner as runner
+
+    local = config.model.name_or_path
+    revision = "a" * 40
+    task = replace(config, model=replace(config.model, name_or_path="test/model", revision=revision))
+    with patch.object(data, "snapshot_download", return_value=local) as download:
+        assert data.runtime_model_source(task, offline=True) == local
+        download.assert_called_once_with(repo_id="test/model", revision=revision, local_files_only=True)
+        download.reset_mock()
+        assert data.runtime_model_source(task, offline=False) == "test/model"
+        assert data.runtime_model_source(config, offline=True) == local
+        download.assert_not_called()
+        # Real local loading must work without passing the Hub id into either
+        # Transformers loader, and must not change the logical model identity.
+        assert data.load_tokenizer(task, offline=True).eos_token_id is not None
+        model = runner._load_model(task, offline=True)
+        assert next(model.parameters()).dtype == torch.float32
+        assert data.model_source(task.model) == "test/model"
 
 
 def test_prepared_data_is_reusable_and_detects_source_changes(config):
@@ -429,6 +460,181 @@ def test_public_configs_are_loadable():
 
     for filename in (ROOT / "configs/training").glob("*.yaml"):
         load_config(filename)
+
+
+@pytest.mark.parametrize(("precision", "scaling", "outer"), [
+    ("fp32", "none", "fp32"), ("bf16", "none", "bf16"),
+    ("fp8", "tensorwise", "bf16"), ("nvfp4", "block16", "bf16"),
+])
+def test_cutlass_config_precision_contract(config, precision, scaling, outer):
+    task = replace(config, gemm=GemmConfig("cutlass", precision, scaling),
+                   training=replace(config.training, device="cuda", precision=outer))
+    assert validate(task) == task
+    with pytest.raises(ValueError, match="training.precision"):
+        validate(replace(task, training=replace(task.training, precision="fp16")))
+    with pytest.raises(ValueError, match="CUDA"):
+        validate(replace(task, training=replace(task.training, device="npu")))
+
+
+@pytest.mark.parametrize("gemm", [
+    GemmConfig("transformer_engine"), GemmConfig("cutlass", "fp8", "none"),
+    GemmConfig("cutlass", "fp4", "block16"), GemmConfig("torch", "fp8", "tensorwise"),
+    GemmConfig(abft="unimplemented"),
+    GemmConfig(global_scale=0), GemmConfig(global_scale=float("inf")),
+    GemmConfig(global_scale=True), GemmConfig(global_scale="auto"),
+])
+def test_config_rejects_unsupported_gemm(config, gemm):
+    with pytest.raises(ValueError):
+        validate(replace(config, gemm=gemm))
+
+
+def test_runtime_options_do_not_change_resume_signature(config):
+    operational = replace(config, training=replace(
+        config.training, offline=True, resume="latest", progress_bar=not config.training.progress_bar,
+    ))
+    assert run_signature(config) == run_signature(operational)
+    assert run_signature(config) != run_signature(replace(config, gemm=GemmConfig(precision="bf16")))
+    scaled = replace(config, gemm=replace(config.gemm, global_scale=2.0))
+    assert validate(scaled) == scaled
+    assert run_signature(config) != run_signature(scaled)
+
+
+@pytest.mark.parametrize("progress_bar", [True, False])
+def test_native_progress_and_stage_output_preserve_training_results(config, capsys, progress_bar):
+    from transformers.trainer_callback import PrinterCallback, ProgressCallback
+
+    prepare_data(config)
+    task = replace(config, training=replace(
+        config.training, max_steps=1, gradient_accumulation_steps=1, offline=True,
+        progress_bar=progress_bar, save_strategy="no", eval_strategy="no",
+    ))
+    trainer, metrics = train(task)
+    expected = ProgressCallback if progress_bar else PrinterCallback
+    assert any(isinstance(callback, expected) for callback in trainer.callback_handler.callbacks)
+    assert trainer.args.disable_tqdm is not progress_bar
+    captured = capsys.readouterr()
+    stages = [
+        "开始读取并校验", "数据读取完成", "开始加载分词器", "分词器加载完成",
+        "开始加载模型", "模型加载完成", "GEMM：backend=torch", "开始训练",
+        "开始最终验证", "最终验证完成", "结果目录",
+    ]
+    positions = [captured.out.index(stage) for stage in stages]
+    assert positions == sorted(positions)
+    assert "'loss':" in captured.out and "'learning_rate':" in captured.out
+    output = Path(task.training.output_dir)
+    assert json.loads((output / "result.json").read_text())["validation_loss"] == metrics["validation_loss"]
+    records = [json.loads(line) for line in (output / "metrics.jsonl").read_text().splitlines()]
+    assert any("loss" in record and "learning_rate" in record for record in records)
+
+
+@pytest.mark.parametrize("precision", ["fp32", "bf16", "fp16"])
+def test_torch_gemm_precision_inherits_or_matches_training(config, precision):
+    task = replace(config, gemm=GemmConfig(),
+                   training=replace(config.training, device="npu", precision=precision))
+    assert validate(task).gemm.precision == precision
+    explicit = replace(task, gemm=GemmConfig(precision=precision))
+    assert validate(explicit) == explicit
+    mismatch = "bf16" if precision == "fp32" else "fp32"
+    with pytest.raises(ValueError, match="gemm.precision.*training.precision"):
+        validate(replace(task, gemm=GemmConfig(precision=mismatch)))
+
+
+@pytest.mark.parametrize(("section", "key", "value"), [
+    ("training", "optimizer", "sgd"), ("training", "lr_scheduler_type", "linear"),
+    ("training", "tf32", True), ("training", "save_strategy", "no"),
+    ("training", "eval_strategy", "no"),
+    ("model", "gradient_checkpointing_use_reentrant", True),
+])
+def test_training_algorithm_choices_change_resume_signature(config, section, key, value):
+    task = replace(config, **{section: replace(getattr(config, section), **{key: value})})
+    assert validate(task) == task
+    assert run_signature(task) != run_signature(config)
+
+
+def test_training_algorithm_choices_reach_trainer(config, monkeypatch):
+    import training.runner as runner
+
+    task = replace(config,
+                   model=replace(config.model, gradient_checkpointing_use_reentrant=True),
+                   training=replace(config.training, optimizer="sgd", lr_scheduler_type="linear",
+                                    tf32=True, save_strategy="no", eval_strategy="no"))
+    captured = {}
+
+    def arguments(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(device=torch.device("cpu"), world_size=1, n_gpu=0)
+
+    monkeypatch.setattr(runner, "TrainingArguments", arguments)
+    runner.training_arguments(task)
+    assert captured["optim"] == "sgd"
+    assert captured["lr_scheduler_type"] == "linear"
+    assert captured["tf32"] is True
+    assert captured["save_strategy"] == captured["eval_strategy"] == "no"
+    assert captured["gradient_checkpointing_kwargs"] == {"use_reentrant": True}
+
+
+@pytest.mark.parametrize(("key", "value"), [
+    ("optimizer", ""), ("lr_scheduler_type", None), ("tf32", "true"),
+    ("progress_bar", "true"),
+    ("save_strategy", "epoch"), ("eval_strategy", "epoch"),
+])
+def test_training_algorithm_choices_reject_invalid_values(config, key, value):
+    with pytest.raises(ValueError, match=key):
+        validate(replace(config, training=replace(config.training, **{key: value})))
+
+
+def test_config_alone_controls_offline_and_resume(config):
+    prepare_data(config)
+    task = replace(config, training=replace(config.training, offline=True))
+    train(task, callbacks=[StopAtOne()])
+    task = replace(task, training=replace(task.training, resume="latest"))
+    _, metrics = train(task)
+    assert metrics["global_step"] == 3
+    resolved = json.loads((Path(task.training.output_dir) / "config.resolved.json").read_text())
+    assert resolved["training"]["offline"] is True
+    assert resolved["training"]["resume"] == "latest"
+
+
+@pytest.mark.parametrize("strategy", ["no", "steps"])
+def test_config_controls_final_checkpoint(config, strategy):
+    prepare_data(config)
+    task = replace(config, training=replace(
+        config.training, offline=True, save_strategy=strategy,
+        save_steps=100, eval_strategy="no",
+    ))
+    _, metrics = train(task)
+    assert metrics["status"] == "completed" and metrics["global_step"] == 3
+    checkpoints = sorted(Path(task.training.output_dir).glob("checkpoint-*"))
+    if strategy == "no":
+        assert checkpoints == []
+    else:
+        assert [path.name for path in checkpoints] == ["checkpoint-3"]
+        assert (checkpoints[0] / "optimizer.pt").is_file()
+
+
+def test_config_cutlass_selects_transform_before_data_loading(config, monkeypatch):
+    from cutlass_gemm import backend
+    from cutlass_gemm.linear import install
+    import training.runner as runner
+
+    task = replace(config, gemm=GemmConfig("cutlass", "fp8", "tensorwise", global_scale=2.0),
+                   training=replace(config.training, device="cuda", precision="bf16"))
+    monkeypatch.setattr(backend, "build_key", lambda: "test-build")
+    captured = []
+    original = runner.transform_record
+
+    def capture(transform, identity, parameters):
+        captured.append((transform, identity, parameters))
+        return original(transform, identity, parameters)
+
+    monkeypatch.setattr(runner, "transform_record", capture)
+    with pytest.raises(ValueError, match="请先执行 prepare"):
+        train(task)
+    assert captured == [(install, "cutlass:test-build", {
+        "precision": "fp8", "scaling": "tensorwise", "global_scale": 2.0,
+    })]
+    with pytest.raises(ValueError, match="model_transform"):
+        train(task, model_transform=wrap_gate_proj, transform_id="custom")
 
 
 @pytest.mark.parametrize(("runtime", "device"), [("nvidia", "cuda"), ("ascend", "npu")])

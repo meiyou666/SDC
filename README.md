@@ -7,14 +7,14 @@
 | 要做什么 | 阅读入口 |
 | --- | --- |
 | 在本地或云服务器搭建环境、选择和切换容器 | [搭建开发环境](environment/README.md) |
-| 准备数据、运行 Qwen BF16/FP8/FP4 训练、查看结果和恢复训练 | [运行训练](docs/training.md) |
+| 准备数据、运行 Qwen FP32/BF16/FP8/NVFP4 训练、查看结果和恢复训练 | [运行训练](docs/training.md) |
 | 编译、检查和修改 CUTLASS GEMM，并接入训练 | [开发 GEMM](docs/gemm.md) |
 
 ## 项目目录
 
 | 目录 | 用途 |
 | --- | --- |
-| `src/`、`tests/` | 实现与测试；公共训练在 `src/training/`，CUTLASS 在 `src/cutlass_gemm/`，FP8/FP4 在 `src/low_precision/` |
+| `src/`、`tests/` | 实现与测试；公共训练在 `src/training/`，CUTLASS 在 `src/cutlass_gemm/`（含 FP32、BF16、FP8、NVFP4） |
 | `environment/`、`.devcontainer/` | Docker 环境与 VS Code 容器入口 |
 | `configs/`、`experiments/` | 公共配置与实验配置 |
 | `docs/` | 教程、论文精读及复现记录 |

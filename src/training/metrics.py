@@ -80,7 +80,8 @@ class JsonMetrics(TrainerCallback):
         check_finite_loss(logs)
 
     def on_step_end(self, args, state, control, **kwargs):
-        # Always leave a checkpoint at the final step, whatever save_steps is.
-        if state.global_step >= state.max_steps:
+        # Keep the final checkpoint when saving is enabled, including when
+        # save_steps exceeds max_steps. Respect config's explicit "no".
+        if args.save_strategy != "no" and state.global_step >= state.max_steps:
             control.should_save = True
         return control
