@@ -66,7 +66,8 @@ def _selected(fault, context):
 
 @torch.no_grad()
 def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
-            fault_config=None, context=None, *, raw_fn=None, reference_mm=None, collector_fn=None):
+            fault_config=None, context=None, *, raw_fn=None, reference_mm=None, collector_fn=None,
+            reference_collector_fn=None):
     """Training convenience entry: prepare once, then execute prepared GEMM.
 
     Quantization/input preparation is outside the returned report's execution
@@ -81,22 +82,34 @@ def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
             return backend.gemm(a, b, precision, scaling, global_scale), None
     prepared = PreparedGemm.prepare(a, b, precision, scaling, global_scale)
     return execute_prepared(prepared, cfg, fault, context, raw_fn=raw_fn,
-                            reference_mm=reference_mm, collector_fn=collector_fn)
+                            reference_mm=reference_mm, collector_fn=collector_fn,
+                            reference_collector_fn=reference_collector_fn)
 
 
 @torch.no_grad()
 def execute_prepared(prepared, abft_config=None, fault_config=None, context=None,
-                     *, raw_fn=None, reference_mm=None, collector_fn=None):
+                     *, raw_fn=None, reference_mm=None, collector_fn=None, reference_collector_fn=None):
     """Execute existing native operands without preparing or quantizing again.
 
     Reference decoding and construction are protection costs inside this call.
     raw_fn(prepared), collector_fn(prepared, weights, fault_tuple), and
     reference_mm(left, right) are CPU-test dependency injection hooks.
+    reference_collector_fn(prepared, weights, fault_tuple) explicitly returns
+    (output, observed_partials, hit, predicted_partials, magnitude_partials).
+    In input_fused mode the reference stage prepares projection metadata;
+    input-side reference arithmetic belongs to the execute stage, and binding
+    its tile partials belongs to verify. Retry retains the first reference.
     Optional stage events exclude input preparation; external benchmark events
     should encompass this entire call. host_seconds measures host execution,
     including policy-required synchronization but not asynchronous GPU work.
     """
     cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
+    input_fused = cfg.reference_mode == "input_fused"
+    if input_fused:
+        if prepared.precision != "fp8":
+            raise NotImplementedError(f"input_fused reference is not implemented for {prepared.precision}")
+        if fault.location in {"a", "b"}:
+            raise ValueError("input_fused protects computation only; input memory faults require separate reference")
     context = {"layer": None, "role": None, "call_index": 1,
                "execution_kind": "forward", "retry": False, **dict(context or {})}
     selected = _selected(fault, context)
@@ -119,7 +132,8 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
             events.append((name, event, finish))
     mark = begin()
     method = get_method(cfg.method) if cfg.method != "none" else None
-    state = method.prepare(prepared, cfg, reference_mm) if method else None
+    state = (method.prepare_fused(prepared, cfg) if input_fused
+             else method.prepare(prepared, cfg, reference_mm)) if method else None
     end("reference", mark)
     mark = begin()
     active = prepared.injected(fault) if selected and fault.location in {"a", "b"} else prepared
@@ -135,8 +149,14 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         if collector_fn is not None:
             return collector_fn(operands, weights, fault_tuple)
         return operands.collected_native(weights, fault_tuple)
+    def collect_reference(operands, fault_tuple):
+        if reference_collector_fn is not None:
+            return reference_collector_fn(operands, weights, fault_tuple)
+        return operands.collected_reference_native(weights, fault_tuple)
     mark = begin()
-    if fused:
+    if input_fused:
+        output, partials, hit, predicted, magnitude = collect_reference(active, injection)
+    elif fused:
         output, partials, hit = collect(active, injection)
     else:
         output = raw_fn(active) if raw_fn else active.raw_native()
@@ -145,6 +165,8 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         hit = torch.ones(1, device=a.device, dtype=torch.int32)
     end("execute", mark)
     mark = begin()
+    if input_fused:
+        state = method.bind_reference(predicted, magnitude, state)
     if method:
         result = method.verify(method.propagate(partials, state), output, state, cfg)
     else:
@@ -156,6 +178,8 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     end("verify", mark)
     report_context = {**context, "fault": asdict(fault), "fault_selected": selected,
                       "precision": precision, "scaling": scaling,
+                      "reference_mode": cfg.reference_mode,
+                      "protection_scope": "computation_after_input_load" if input_fused else "prepared_inputs_and_computation",
                       "m": prepared.m, "n": prepared.n, "k": prepared.k,
                       "input_precision": precision, "accumulator_precision": "fp32",
                       "output_precision": str(output.dtype), "check_precision": "fp32",
@@ -169,7 +193,11 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         mark = begin()
         # Reuse state and clean buffers. The same collector gives a pre-cast
         # recheck, which cannot be replaced by summing a rounded BF16 output.
-        if collector_fn is None:
+        if input_fused:
+            # Never replace the original reference with retry evidence: a
+            # co-varying retry reference must not authorize corrupted output.
+            replacement, retry_partials, _, _, _ = collect_reference(prepared, (-1, -1, -1))
+        elif collector_fn is None:
             replacement, retry_partials, _ = method.recover(prepared, state)
         else:
             replacement, retry_partials, _ = collect(prepared, (-1, -1, -1))

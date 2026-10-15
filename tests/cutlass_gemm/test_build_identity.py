@@ -26,3 +26,7 @@ def test_headers_rebuild_extension_but_method_changes_only_training_identity(tmp
     with_method = backend.build_key(), backend._extension_key()
     assert with_method[0] != with_header[0]
     assert with_method[1] == with_header[1]
+
+    generator = source / "official_adapter.py"
+    generator.write_text("modified call-site adapter")
+    assert backend._extension_key() != with_method[1]

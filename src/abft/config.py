@@ -14,8 +14,13 @@ class AbftConfig:
     reference_block_k: int = 256
     diagnostics: bool = False
     timing: bool = False
+    reference_mode: str = "separate"
 
     def __post_init__(self):
+        if self.reference_mode not in {"separate", "input_fused"}:
+            raise ValueError("reference_mode must be separate or input_fused")
+        if self.reference_mode == "input_fused" and self.method == "none":
+            raise ValueError("input_fused requires an ABFT method")
         if not isinstance(self.method, str) or not self.method:
             raise ValueError("ABFT method must be a nonempty registered name")
         for value in (self.atol, self.rtol):

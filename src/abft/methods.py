@@ -7,6 +7,14 @@ from cutlass_gemm import backend
 
 
 class AbftMethod(ABC):
+    def prepare_fused(self, operands, config):
+        """Prepare projection metadata for native input-side reference generation."""
+        raise NotImplementedError("Method does not support input_fused reference")
+
+    def bind_reference(self, predicted_partials, magnitude_partials, state):
+        """Return state bound to the first execution's native reference."""
+        raise NotImplementedError("Method does not support input_fused reference")
+
     @abstractmethod
     def prepare(self, operands, config, mm=None):
         """Build clean-input evidence before any injected mutation."""
@@ -52,6 +60,15 @@ def get_method(name):
 
 
 class Classic(AbftMethod):
+    def prepare_fused(self, operands, config):
+        weights = torch.stack((torch.ones(operands.m, device=operands.a.device),
+                               torch.arange(1, operands.m+1, device=operands.a.device, dtype=torch.float32)))
+        return {"weights": weights, "m": operands.m, "n": operands.n}
+
+    def bind_reference(self, predicted_partials, magnitude_partials, state):
+        return {**state, "expected": self.propagate(predicted_partials, state),
+                "magnitude": self.propagate(magnitude_partials, state)}
+
     def prepare(self, operands, config, mm=None):
         # CUDA uses the existing FP32 CUTLASS GEMM, never Torch's TF32 matmul.
         mm = backend.mm if mm is None else mm

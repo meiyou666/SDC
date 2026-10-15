@@ -338,3 +338,109 @@ def test_stage_events_are_opt_in_and_reference_is_in_timed_boundary(monkeypatch,
 def test_invalid_timing_config():
     with pytest.raises(ValueError, match="timing"):
         AbftConfig(timing=1)
+
+
+def fused_fp8_operands():
+    codes = torch.ones(3, 16).to(torch.float8_e4m3fn).view(torch.uint8)
+    return PreparedGemm(codes, codes[:2].clone(), "fp8", 3, 2, 16, alpha=torch.tensor(1.))
+
+
+def fused_cpu_collector(p, weights, fault):
+    output = torch.full((p.m, p.n), 16.)
+    predicted = (weights @ output).unsqueeze(1)
+    if fault[0] >= 0:
+        output[fault[0], fault[1]] *= -1
+    return output, (weights @ output).unsqueeze(1), torch.tensor([int(fault[0] >= 0)]), predicted, predicted.abs()
+
+
+def test_input_fused_uses_native_reference_without_decode_or_reference_mm(monkeypatch):
+    from abft import execute_prepared
+    p = fused_fp8_operands()
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Decoded input"))
+    monkeypatch.setattr(p, "collected_reference_native", lambda weights, fault: fused_cpu_collector(p, weights, fault))
+    def forbidden(*args):
+        pytest.fail("Separate reference or collector invoked")
+    _, report = execute_prepared(p, {"method": "classic", "reference_mode": "input_fused"},
+                                 reference_mm=forbidden, collector_fn=forbidden)
+    assert not report.detected
+    assert report.context["reference_mode"] == "input_fused"
+    assert report.context["protection_scope"] == "computation_after_input_load"
+
+
+def test_input_fused_native_reference_actually_controls_verification():
+    from abft import execute_prepared
+    def mismatched(p, weights, fault):
+        output, observed, hit, predicted, magnitude = fused_cpu_collector(p, weights, fault)
+        return output, observed, hit, predicted + 100., magnitude
+    _, report = execute_prepared(fused_fp8_operands(),
+                                 {"method": "classic", "reference_mode": "input_fused", "on_error": "report"},
+                                 reference_collector_fn=mismatched)
+    assert report.detected
+
+
+@pytest.mark.parametrize("corrupt_retry", [False, True])
+def test_input_fused_retry_keeps_original_reference(corrupt_retry):
+    from abft import execute_prepared
+    calls = []
+    def collector(p, weights, fault):
+        calls.append(fault)
+        output, observed, hit, predicted, magnitude = fused_cpu_collector(p, weights, fault)
+        if len(calls) == 2:
+            # A bad retry and its co-varying new reference must be rejected.
+            predicted = predicted + 200.
+            if corrupt_retry:
+                observed = predicted.clone()
+                output += 200.
+        return output, observed, hit, predicted, magnitude
+    _, report = execute_prepared(fused_fp8_operands(),
+                                 {"method": "classic", "reference_mode": "input_fused", "on_error": "report",
+                                  "recovery": "recompute"},
+                                 {"location": "accumulator", "row": 1, "bit": 31},
+                                 reference_collector_fn=collector)
+    assert calls == [(1, 0, 31), (-1, -1, -1)]
+    assert bool(report.recovered) is not corrupt_retry
+    assert bool(report.recheck_failed) is corrupt_retry
+
+
+@pytest.mark.parametrize("location", ["a", "b"])
+def test_input_fused_rejects_input_memory_faults(location):
+    from abft import execute_prepared
+    with pytest.raises(ValueError, match="input memory"):
+        execute_prepared(fused_fp8_operands(), {"method": "classic", "reference_mode": "input_fused"},
+                         {"location": location}, reference_collector_fn=fused_cpu_collector)
+
+
+@pytest.mark.parametrize("precision", ["fp32", "bf16", "nvfp4"])
+def test_input_fused_rejects_unsupported_precision(precision):
+    from abft import execute_prepared
+    p = nvfp4() if precision == "nvfp4" else PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+    with pytest.raises(NotImplementedError, match=precision):
+        execute_prepared(p, {"method": "classic", "reference_mode": "input_fused"},
+                         reference_collector_fn=fused_cpu_collector)
+    with pytest.raises(NotImplementedError, match=precision):
+        p.collected_reference_native(torch.ones(2, 3))
+
+
+def test_classic_binds_tile_partial_reference():
+    method = Classic()
+    state = method.prepare_fused(fused_fp8_operands(), AbftConfig())
+    predicted = torch.arange(24.).reshape(2, 3, 4)
+    bound = method.bind_reference(predicted, predicted.abs(), state)
+    assert "expected" not in state
+    assert torch.equal(bound["expected"], predicted.sum(1)[:, :2])
+
+
+def test_method_fused_interface_defaults_to_explicit_unsupported():
+    from abft.methods import AbftMethod
+    class SeparateOnly(AbftMethod):
+        def prepare(self, *args):
+            pass
+        def propagate(self, *args):
+            pass
+        def verify(self, *args):
+            pass
+    method = SeparateOnly()
+    with pytest.raises(NotImplementedError):
+        method.prepare_fused(fused_fp8_operands(), AbftConfig())
+    with pytest.raises(NotImplementedError):
+        method.bind_reference(None, None, {})

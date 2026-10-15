@@ -63,6 +63,15 @@ class PreparedGemm:
             return torch.ops.sdc_cutlass.abft_fp8_mm(self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn), self.alpha, weights, *fault)
         return torch.ops.sdc_cutlass.abft_nvfp4_mm(self.a, self.b, self.sfa, self.sfb, self.k, self.alpha, weights, *fault)
 
+    def collected_reference_native(self, weights, fault=(-1, -1, -1)):
+        """Return output, observed, hit, predicted and magnitude partials."""
+        if self.precision != "fp8":
+            raise NotImplementedError(f"input_fused reference is not implemented for {self.precision}")
+        return torch.ops.sdc_cutlass.abft_fp8_reference_mm(
+            self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn),
+            self.alpha, weights, *fault,
+        )
+
     def decode_block(self, start, end):
         if not 0 <= start < end <= self.k:
             raise ValueError("Invalid K block")
