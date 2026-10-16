@@ -2,7 +2,7 @@
 
 | 项目 | 设置 |
 |---|---|
-| 容器 | Ubuntu 24.04，Linux amd64，即 x86-64 |
+| 共同基础系统 | Ubuntu 22.04；支持 Linux x86-64、ARM64 |
 | Python | uv 安装 3.11.17，固定在 `.python-version` |
 | uv | 0.12.24，工具镜像固定 digest |
 | Node.js、npm | 初始安装 24.21.0、11.19.0，供 AI 工具使用 |
@@ -13,33 +13,45 @@
 | 依赖声明 | 根目录 `pyproject.toml` |
 | 依赖锁定 | 根目录 `uv.lock` |
 | Python 依赖源 | [清华 PyPI 镜像](https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple) |
+| 共同训练库 | PyTorch 2.9.0、Transformers 4.57.6、Datasets 4.4.2、Accelerate 1.12.0 |
+| 共同数值与数据依赖 | NumPy 1.26.4、PyArrow 21.0.0；其余依赖统一锁定在 `uv.lock` |
+| NVIDIA GPU | PyTorch 2.9.0+cu128、CUDA Toolkit 12.8.1 |
+| 昇腾 NPU | PyTorch 2.9.0+cpu、torch_npu 2.9.0.post8、CANN 9.1.0 |
+| PyTorch wheel 源 | PyTorch 官方 CPU、cu128 源；其余 Python 依赖使用清华源 |
 | WSL Docker 安装包源 | [清华 Docker CE 镜像](https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu) |
 | 容器基础镜像源 | Ubuntu 使用 Docker Hub；uv 使用 GHCR |
 | Node.js、npm 软件源 | npmmirror |
 
 ## 启动与执行
 
-按[项目 README](../README.md)选择 WSL 或 Windows 方案，打开 `SDC.code-workspace`，执行 **Dev Containers: Reopen in Container**。
+按[项目 README](../README.md)选择本地或云端开发。本地分 Windows、WSL；云端在 VS Code 的 Remote-SSH 终端运行 `bash environment/docker/setup-cloud.sh`，再进入生成的 **SDC 云端（…）** 容器。详细步骤见[云端开发说明](../docs/cloud.md)。
 
 终端启动：WSL 使用 `./dev.sh`，Windows PowerShell 使用 `.\dev.cmd`。
 
-容器通过 `uv sync --locked --all-groups` 安装锁定的依赖。
+两套训练镜像从同一个 `common` 阶段构建，使用同一系统工具、Python 和锁文件。仅 SDK 与 PyTorch 硬件构建分开：`nvidia` 和 `ascend`。本机开发与单元测试使用 `development` extra。
+
+容器通过 `uv sync --locked --all-groups --extra 配置名` 安装依赖；配置名为 `development`、`nvidia` 或 `ascend`。在对应容器中运行 uv 时使用相同的 `--extra`。训练和检查脚本会自动选择。
 
 容器内执行：
 
 ```bash
 python environment/verify_environment.py --smoke
-uv run --locked pytest -q
-uv run --locked ruff check .
+bash scripts/check.sh
 ```
 
 所有项目代码、依赖管理、测试与实验均在 Docker 中执行。宿主机用于编辑、Git 操作和启动容器。
+
+公共训练任务、GPU/NPU 容器启动和断点续训见[训练说明](../docs/training.md)。驱动与固件安装在宿主机；CUDA、CANN 和项目依赖随训练镜像提供。服务器型号确定后，由维护人设置设备映射和驱动。
+
+昇腾镜像按芯片选择同一版本的 CANN 算子包：`SDC_ASCEND_SOC=910b`、`a3` 或 `950`。所有 SDK 镜像 digest 记录在 `baseline.json`。PyTorch 的 `+cpu` 表示供昇腾插件使用的框架构建，计算设备由 `torch_npu` 提供。
+
+版本依据：[Ascend 配套表](https://github.com/Ascend/pytorch/blob/master/COMPATIBILITY.en.md) · [uv 的 PyTorch 多后端配置](https://docs.astral.sh/uv/guides/integration/pytorch/)。
 
 ## Codex 配置
 
 首次启动从 `environment/docker/codex-default.toml` 初始化 Codex。模型和审查模型均为 `gpt-6-astra`，启用模型发现和 goals。已有个人配置不被覆盖，可自行增添插件、MCP 和 skills。
 
-根目录 `.env` 已预填服务地址，只需填写个人 `OPENAI_API_KEY`。容器启动时自动完成 API 密钥登录。`.env.example` 为模板，`.env` 不提交。修改后重建 Dev Container，命令行方式重新运行启动脚本。
+首次启动会从 `.env.example` 创建根目录 `.env`，保留已有文件。服务地址已预填，使用 Codex 时只需填写个人 `OPENAI_API_KEY`。容器尝试 API 密钥登录，超时或失败后继续启动，训练与测试照常使用。`.env` 不提交。
 
 容器已启动时，也可执行 `sh /opt/sdc/setup-codex.sh` 重新读取 `.env` 并完成登录，然后重新打开 Codex 面板。
 
@@ -61,9 +73,11 @@ AI 工具、插件、MCP 和 skills 可自行配置和升级，不加入 CI 检�
 
 系统软件包使用清华 Ubuntu 源。项目 Python 依赖仍由 `uv.lock` 管理。个人命令行工具可通过 `uv tool install 包名` 或 `npm install -g 包名` 安装到独立目录。
 
-共享内存设为 2 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
+开发容器共享内存 2 GB，训练容器 8 GB。模型和数据放在 `data/`，实验输出放在 `results/`。`~/.cache` 持久化保存下载缓存，Hugging Face 缓存位于 `~/.cache/huggingface`。
 
-## 连接远程服务器
+## 命令行连接与文件传输
+
+VS Code 切换到云端开发的步骤见[云端开发说明](../docs/cloud.md)。下面的命令用于终端操作和文件传输。
 
 在容器终端使用：
 
@@ -99,5 +113,9 @@ WSL 运行维护命令时，在 `tools` 前添加 `--user "$(id -u):$(id -g)"`�
 ## CI
 
 GitHub Actions 在项目容器中运行锁文件检查、测试和 Ruff。
+
+CI 缓存 `tooling` 和 `development` 的 Docker 构建层，直接复用已构建的容器执行检查。同一 PR 更新后，自动取消旧任务。首次构建需要下载依赖，后续运行复用缓存。
+
+GitHub runner 使用 Ubuntu 官方 APT 源，并通过 `SDC_INSTALL_AI_TOOLS=false` 跳过 Node.js 和 Codex 安装。系统库、Python 与锁定的项目依赖保持一致；本地构建仍默认使用清华源并安装 AI 工具。
 
 维护人也可手动运行 GitHub Actions 的 **Update uv lock**，下载生成的 `uv.lock` 后提交。切换依赖源时可填写 `index-url`，并同步修改 `pyproject.toml` 中的源地址。

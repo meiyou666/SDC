@@ -26,11 +26,15 @@ def main():
     if not key:
         print("Codex: fill OPENAI_API_KEY in .env, then run sh /opt/sdc/setup-codex.sh.")
         return 0
-    result = subprocess.run(
-        ["codex", "login", "--with-api-key"],
-        input=key + "\n", env=environment, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            ["codex", "login", "--with-api-key"],
+            input=key + "\n", env=environment, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        print("Codex login is unavailable. Retry sh /opt/sdc/setup-codex.sh when ready.", file=sys.stderr)
+        return 1
     if result.returncode:
         print("Codex API login failed. Check the API settings in .env.", file=sys.stderr)
         return result.returncode

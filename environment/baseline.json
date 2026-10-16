@@ -1,11 +1,12 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "state": "frozen",
-  "profile": "cpu-development",
-  "base_image": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+  "profile": "shared-development",
+  "base_image": "ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401",
   "os_id": "ubuntu",
-  "os_version": "24.04",
+  "os_version": "22.04",
   "platform": "linux/amd64",
+  "platforms": ["linux/amd64", "linux/arm64"],
   "python": "3.11.17",
   "uv": "0.12.24",
   "uv_image": "ghcr.io/astral-sh/uv:0.12.24@sha256:3af4716e991d6956a41e573eab705d0ee08500cd829ed30293eb8472f372c65a",
@@ -13,6 +14,29 @@
     "yaml": "PyYAML",
     "PIL": "pillow",
     "dateutil": "python-dateutil"
+  },
+  "development_profile": {
+    "device": "cpu",
+    "torch": "2.9.0+cpu"
+  },
+  "training_profiles": {
+    "nvidia": {
+      "device": "cuda",
+      "torch": "2.9.0+cu128",
+      "cuda": "12.8.1",
+      "sdk_image": "nvidia/cuda:12.8.1-devel-ubuntu22.04@sha256:a99a1860ba8e2916e5c3e73b72ec4c4301653a84586e05bfc9a2aa2d58027e97"
+    },
+    "ascend": {
+      "device": "npu",
+      "torch": "2.9.0+cpu",
+      "torch_npu": "2.9.0.post8",
+      "cann": "9.1.0",
+      "sdk_images": {
+        "910b": "ascendai/cann:9.1.0-910b-ubuntu22.04-py3.11-devel@sha256:7f0dc8f9525b6c21dd554cb95184de94d4bf9531699cc0bee6150fefe5466a16",
+        "a3": "ascendai/cann:9.1.0-a3-ubuntu22.04-py3.11-devel@sha256:690752f297817231736c7cd07c5637b8de6fbb9e42cf9f8f0499d6b32143c623",
+        "950": "ascendai/cann:9.1.0-950-ubuntu22.04-py3.11-devel@sha256:c8c8b5a800b583ffdf52a5b53e64992b5d327534d56f8eb20bb379b3e0846438"
+      }
+    }
   },
   "accelerator": {
     "backend": "ascend",
