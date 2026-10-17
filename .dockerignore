@@ -4,6 +4,7 @@
 !.python-version
 !environment/
 !environment/baseline.json
+!environment/gemm.json
 !environment/verify_environment.py
 !environment/docker/
 !environment/docker/Dockerfile
@@ -11,3 +12,8 @@
 !environment/docker/setup-codex.sh
 !environment/docker/login-codex.py
 !environment/docker/codex-default.toml
+!environment/docker/install-system.sh
+!environment/docker/install-node.sh
+!environment/docker/install-python.sh
+!environment/docker/install-cutlass.sh
+!environment/docker/activate-accelerator.sh

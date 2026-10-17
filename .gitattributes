@@ -1,10 +1,13 @@
 /environment/** text eol=lf
 /.devcontainer/** text eol=lf
 /.github/** text eol=lf
-/scripts/ci/** text eol=lf
+/scripts/** text eol=lf
+/src/** text eol=lf
+/tests/cutlass_gemm/** text eol=lf
 /tests/ci/** text eol=lf
 /compose.yaml text eol=lf
 /AGENTS.md text eol=lf
+/.agent/** text eol=lf
 /.env.example text eol=lf
 /pyproject.toml text eol=lf
 /uv.lock text eol=lf

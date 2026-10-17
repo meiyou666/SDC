@@ -1,0 +1,65 @@
+{
+  "name": "SDC NVIDIA",
+  "build": {
+    "dockerfile": "../../environment/docker/Dockerfile",
+    "context": "../..",
+    "target": "nvidia"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
+  "workspaceFolder": "/workspace/SDC",
+  "containerEnv": {
+    "PYTHONPATH": "/workspace/SDC/src",
+    "CUDA_VISIBLE_DEVICES": "${localEnv:SDC_CUDA_VISIBLE_DEVICES:0}"
+  },
+  "runArgs": [
+    "--gpus=all",
+    "--shm-size=8g"
+  ],
+  "mounts": [
+    "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",
+    "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume",
+    "source=sdc-ssh-${devcontainerId},target=/home/sdc/.ssh,type=volume",
+    "source=sdc-cache-${devcontainerId},target=/home/sdc/.cache,type=volume"
+  ],
+  "forwardPorts": [
+    6006,
+    8888
+  ],
+  "portsAttributes": {
+    "6006": {
+      "label": "TensorBoard",
+      "onAutoForward": "silent"
+    },
+    "8888": {
+      "label": "Jupyter",
+      "onAutoForward": "silent"
+    }
+  },
+  "init": true,
+  "remoteUser": "sdc",
+  "updateRemoteUserUID": true,
+  "overrideCommand": true,
+  "shutdownAction": "stopContainer",
+  "postCreateCommand": "python /opt/sdc/project/environment/verify_environment.py --project /workspace/SDC --smoke",
+  "postStartCommand": "sh /opt/sdc/setup-codex.sh || true",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "openai.chatgpt"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
+        "ruff.path": [
+          "/opt/venv/bin/ruff"
+        ]
+      }
+    }
+  }
+}

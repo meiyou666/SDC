@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "cutlass_version": "4.2.1",
+  "cutlass_commit": "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8",
+  "cuda_arch": "120a",
+  "cxx_standard": "c++17",
+  "max_build_jobs": 1,
+  "fast_math": false
+}

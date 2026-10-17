@@ -1,149 +1,55 @@
 # SDC
 
-## 1. 配置开发容器
+## 使用教程
 
-### 第一步：克隆仓库
+首次使用先搭建环境，进入容器后按任务选择教程。
 
-在 PowerShell 中执行以下命令。未安装 Git 时，先安装 [Git for Windows](https://git-scm.com/downloads/win)。
+| 要做什么 | 阅读入口 |
+| --- | --- |
+| 在本地或云服务器搭建环境、选择和切换容器 | [搭建开发环境](environment/README.md) |
+| 准备数据、运行 Qwen FP32/BF16/FP8/NVFP4 训练、查看结果和恢复训练 | [运行训练](docs/training.md) |
+| 编译、检查和修改 CUTLASS GEMM，并接入训练 | [开发 GEMM](docs/gemm.md) |
 
-```powershell
-git clone https://github.com/meiyou666/SDC.git
-cd SDC
-Copy-Item .env.example .env
-```
+## 项目目录
 
-随后选择下面一种环境方案。两套方案均在 VS Code 中使用 Ubuntu 24.04 开发容器，共用 Dockerfile、Compose、`pyproject.toml` 和 `uv.lock`。VS Code 安装 **Dev Containers** 和 **Container Tools** 扩展。
+| 目录 | 用途 |
+| --- | --- |
+| `src/`、`tests/` | 实现与测试；公共训练在 `src/training/`，CUTLASS 在 `src/cutlass_gemm/`（含 FP32、BF16、FP8、NVFP4） |
+| `environment/`、`.devcontainer/` | Docker 环境与 VS Code 容器入口 |
+| `configs/`、`experiments/` | 公共配置与实验配置 |
+| `docs/` | 教程、论文精读及复现记录 |
+| `data/`、`results/` | 本地模型、数据与实验输出，不提交 Git |
+| `archive/` | 历史实验归档 |
 
-在 `.env` 中填写自己的 `OPENAI_API_KEY` 即可，API 地址已预填为 `https://s2api.top/v1`。Codex 初始模型和审查模型均为 `gpt-6-astra`，`.env` 只保存在本机。
+Agent 从 [AGENTS.md](AGENTS.md) 开始，读取[项目研究说明](docs/project.md)和[技术参考](.agent/reference.md)。
 
-### 方案一：WSL
+## 协作流程
 
-1. 在管理员 PowerShell 执行 `wsl --install -d Ubuntu-24.04`，按提示重启并完成 Ubuntu 用户初始化。
-2. 在已克隆的仓库目录打开 PowerShell，执行 `wsl -d Ubuntu-24.04`。进入 Ubuntu 后，从清华源安装 Docker Engine 和 Compose：
+所有成员在个人分支开发，通过 PR 合并到 `main`。拥有者使用 `meiyou666/dev`；其他成员使用自己的分支。公共环境、训练配置和 CI 由 `meiyou666` 维护。
 
-   ```bash
-   bash environment/docker/install-wsl-docker.sh
-   ```
-
-3. 执行 `exit` 返回 PowerShell，再执行 `wsl -d Ubuntu-24.04`，使 Docker 用户组设置生效。
-4. VS Code 安装 **WSL** 扩展，连接 Ubuntu，打开仓库中的 [`SDC.code-workspace`](SDC.code-workspace)。
-5. 执行 **Dev Containers: Reopen in Container**。终端启动命令为 `./dev.sh`。
-
-### 方案二：Windows
-
-1. 下载 [Docker Desktop 安装程序](https://docs.docker.com/desktop/setup/install/windows-install/)。在安装包所在目录打开 PowerShell，使用 Docker VMM 后端安装：
-
-   ```powershell
-   Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
-   ```
-
-2. 安装完成后启动 Docker Desktop，重新打开 VS Code 和仓库目录中的 PowerShell。
-3. 在 Docker Desktop 的 **Settings** 完成以下设置，然后点击 **Apply & restart**：
-
-   - **General → Virtual Machine Manager**：选择 **Docker VMM**。
-   - **Resources**：分配至少 4 GB 内存。
-   - **Resources → File sharing**：添加仓库目录。
-
-4. 在 Windows 的 VS Code 中打开 [`SDC.code-workspace`](SDC.code-workspace)，执行 **Dev Containers: Reopen in Container**。PowerShell 启动命令为 `.\dev.cmd`。
-
-进入容器后，Python 使用 `/opt/venv/bin/python`，依赖由 `uv sync --locked` 安装。环境更新后执行 **Dev Containers: Rebuild Container**。详细设置见[环境说明](environment/README.md)。
-
-Python 依赖和 WSL 下的 Docker 安装包使用清华源；容器基础镜像来自 Docker Hub 和 GHCR。
-
-容器已安装 Node.js、npm 和 Codex CLI，VS Code 自动安装 Codex 插件。进入容器后可在侧栏使用 Codex，或在终端运行 `codex`。CLI 不锁版本，更新命令为 `npm install -g @openai/codex@latest`。修改 `.env` 后执行 **Dev Containers: Rebuild Container**。
-
-AI 工具、插件、MCP 和 skills 可自行扩展。个人 AI 依赖放在独立环境，项目实验继续使用统一的 `uv.lock`。Dev Container 保留个人 Codex 配置和 npm 全局工具。
-
-容器提供 SSH、SCP、SFTP、rsync、编译调试工具和 tmux。SSH 配置、密钥及下载缓存会保留。连接服务器时，在容器终端执行：
+**1. 开始任务。** 在宿主机仓库目录执行，将 `name/task` 换成自己的分支名：
 
 ```bash
-ssh -p 22 用户名@服务器地址
+git fetch origin
+git switch -c name/task origin/main
 ```
 
-VS Code 预留 6006 和 8888 端口转发。工具清单与远程使用示例见[环境说明](environment/README.md)。
+已有分支时使用 `git switch name/task`，再执行 `git pull --ff-only` 和 `git merge origin/main`。
 
-配置入口：[Dockerfile](environment/docker/Dockerfile) · [Compose](compose.yaml) · [Dev Container](.devcontainer/devcontainer.json)。
-
-## 2. 项目结构
-
-```text
-SDC/
-├── environment/
-│   ├── docker/
-│   │   ├── Dockerfile             # 镜像构建
-│   │   ├── codex-default.toml     # Codex 初始配置
-│   │   ├── entrypoint.sh          # 容器启动
-│   │   ├── install-wsl-docker.sh  # WSL 安装 Docker，使用清华源
-│   │   ├── setup-codex.sh         # 初始化 Codex 并读取 API 密钥
-│   │   └── start-dev.ps1          # Windows 启动辅助
-│   ├── baseline.json          # 环境基线
-│   └── verify_environment.py  # 环境校验
-├── compose.yaml               # 命令行容器入口
-├── dev.cmd                    # Windows 启动脚本
-├── dev.sh                     # WSL 启动脚本
-├── pyproject.toml             # 项目依赖声明
-├── uv.lock                    # uv 原生锁文件
-├── .python-version            # Python 版本
-├── .env.example               # 个人 API 配置模板
-├── .env                       # 个人密钥，不提交
-├── SDC.code-workspace          # VS Code 工作区入口
-├── .vscode/extensions.json     # 推荐扩展
-├── .devcontainer/             # VS Code 容器配置
-├── src/
-│   ├── algorithms/            # ABFT 算法
-│   ├── evaluation/            # 注入、统计与计时
-│   ├── training/              # 训练流程与 GEMM 采集
-│   └── backends/ascend/        # 昇腾算子实现
-├── configs/
-│   ├── training/              # 公共训练配置
-│   └── evaluation/            # 评测配置
-├── docs/
-│   ├── papers/                # 论文精读记录
-│   └── reproduction/          # 复现与人工比对记录
-├── experiments/               # 实验配置与小型摘要
-├── scripts/                   # 运行脚本
-├── tests/                     # 测试
-├── data/                      # 本地模型与数据，不提交
-├── results/                   # 本地实验输出，不提交
-├── archive/                   # 旧实验归档
-├── .github/
-│   ├── workflows/             # CI
-│   └── CODE_REVIEW.md         # 代码审查规范
-└── AGENTS.md                  # Agent 开发规范
-```
-
-## 3. 协作流程
-
-仓库拥有者可直接提交 `main`；其他成员按以下流程开发和合并。
-
-以下命令在**宿主机的仓库目录**执行。
-
-通过 VS Code、GitHub Desktop 或 Git 命令行提交。HTTPS 使用凭据管理器或个人访问令牌认证；使用 [SSH](https://docs.github.com/zh/authentication/connecting-to-github-with-ssh) 时，将远端设为 `git@github.com:meiyou666/SDC.git`。
-
-**开始任务**：将 `name/task` 换成自己的分支名。
+**2. 修改并检查。** 代码改动在项目容器中检查：
 
 ```bash
-git switch main
-git pull --ff-only
-git switch -c name/task
+bash scripts/check.sh
 ```
 
-**在容器内运行测试**：
-
-```bash
-uv run --locked pytest -q
-uv run --locked ruff check .
-```
-
-**回到宿主机提交**：
+**3. 提交个人分支。** 回到宿主机仓库目录，检查改动并提交选定文件：
 
 ```bash
 git status
-git add .
+git diff
+git add <本次修改的文件>
 git commit -m "简述改动"
 git push -u origin HEAD
 ```
 
-在 GitHub 网页点击 **Compare & pull request**，简述改动和验证结果。Codex 自动审查；CI 通过且获得一名成员批准后合并。Issue 按需使用。
-+
-+QZR Try
+也可使用 VS Code 或 GitHub Desktop 提交。随后在 GitHub 网页点击 **Compare & pull request**，目标分支选择 `main`，填写改动与检查结果。CI 通过并获得成员批准后合并。
