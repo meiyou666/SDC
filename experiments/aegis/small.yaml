@@ -1,0 +1,15 @@
+# Small mathematical validation only; shape order is M, N, K.
+seed: 42
+shape: [8, 8, 16]
+input_dtype: bf16
+output_dtype: bf16
+k_blocks: 4
+calibration_calls: 32
+test_calls: 8
+alpha: 0.02
+threshold_floor: 1.0e-12
+window: 50
+factor: 2.0
+columns: false
+targets: [A, B, accumulator]
+output_dir: results/aegis/small
