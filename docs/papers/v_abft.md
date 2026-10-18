@@ -15,7 +15,7 @@ V-ABFT对于浮点误差建模选择黑盒模型(black-box model)
 
 $$
 \begin{aligned}
-\operatorname{fl}(x \circ y) &= (x \circ y)(1 + \delta u),
+\mathrm{fl}(x \circ y) &= (x \circ y)(1 + \delta u),
 && |\delta| \leq 1
 \end{aligned}
 $$
@@ -36,10 +36,10 @@ $$
 $$
 \begin{aligned}
 A_{mk} &= \mu_{A_m} + \sigma_{A_m} \cdot a_{mk},
-&& a_{mk} \sim F_a,\; \operatorname{Var}(a_{mk}) = 1
+&& a_{mk} \sim F_a,\; \mathrm{Var}(a_{mk}) = 1
 &&\text{[式 (15)；矩阵 $A$ 的行统计分解]} \\
 B_{kn} &= \mu_{B_k} + \sigma_{B_k} \cdot b_{kn},
-&& b_{kn} \sim F_b,\; \operatorname{Var}(b_{kn}) = 1
+&& b_{kn} \sim F_b,\; \mathrm{Var}(b_{kn}) = 1
 &&\text{[式 (16)；矩阵 $B$ 的行统计分解]}
 \end{aligned}
 $$
@@ -48,9 +48,9 @@ $$
 
 $$
 \begin{aligned}
-\mu_{A_m}&=\operatorname{mean}_k A_{mk},&
+\mu_{A_m}&=\mathrm{mean}_k A_{mk},&
 v_{A_m}&=(\max_k A_{mk}-\mu_{A_m})(\mu_{A_m}-\min_k A_{mk}),\\
-\mu_{B_k}&=\operatorname{mean}_n B_{kn},&
+\mu_{B_k}&=\mathrm{mean}_n B_{kn},&
 v_{B_k}&=(\max_n B_{kn}-\mu_{B_k})(\mu_{B_k}-\min_n B_{kn}).
 \end{aligned}
 \quad\text{[式 (24)；Alg. 1 第 1–6 行]}
