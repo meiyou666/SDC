@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 @pytest.fixture
 def training_snapshot():
     files = [
-        policy.BASELINE, policy.PROJECT, policy.LOCKFILE, ".python-version", "compose.yaml", ".dockerignore",
+        policy.BASELINE, policy.PROJECT, policy.LOCKFILE, ".python-version", "compose.yaml", ".dockerignore", "environment/gemm.json",
         "environment/docker/Dockerfile", "environment/docker/install-python.sh",
         "environment/docker/entrypoint.sh", "environment/verify_environment.py", "dev.cmd", "dev.sh",
         ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json",
@@ -158,8 +158,14 @@ def test_accelerator_profiles_have_identical_common_packages(machine):
     assert npu["torch"] == baseline["training_profiles"]["ascend"]["torch"]
     assert dev["torch"] == baseline["development_profile"]["torch"]
     assert npu["torch-npu"] == baseline["training_profiles"]["ascend"]["torch_npu"]
+    dsl_dependencies = {"nvidia-cutlass-dsl", "cuda-python", "cuda-bindings"}
+    for name in dsl_dependencies:
+        assert name in gpu
+        assert name not in npu and name not in dev
     for name in set(gpu) | set(npu):
         if name in {"torch", "torch-npu", "triton"} or name.startswith("nvidia-"):
+            continue
+        if name in dsl_dependencies:
             continue
         assert gpu.get(name) == npu.get(name), name
         assert gpu.get(name) == dev.get(name), name
@@ -187,3 +193,50 @@ def test_compose_and_devcontainers_use_the_shared_build():
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     conflict = project["tool"]["uv"]["conflicts"][0]
     assert {entry["extra"] for entry in conflict} == {"development", "nvidia", "ascend"}
+
+
+
+def test_cutlass_dsl_matches_official_source_version():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    baseline = json.loads((ROOT / policy.BASELINE).read_text())
+    gemm = json.loads((ROOT / "environment/gemm.json").read_text())
+    profile = baseline["training_profiles"]["nvidia"]
+    assert profile["cutlass_dsl"] == gemm["cutlass_version"] == "4.2.1"
+    assert "nvidia-cutlass-dsl==4.2.1" in project["project"]["optional-dependencies"]["nvidia"]
+    assert baseline["import_map"]["cutlass"] == "nvidia-cutlass-dsl"
+    assert baseline["import_map"]["cuda"] == "cuda-bindings"
+
+
+def test_policy_rejects_mismatched_cutlass_source(training_snapshot):
+    gemm = json.loads(training_snapshot.read("environment/gemm.json"))
+    gemm["cutlass_version"] = "4.3.0"
+    training_snapshot.content["environment/gemm.json"] = json.dumps(gemm)
+    with pytest.raises(policy.PolicyError, match="source versions must match"):
+        check_snapshot(training_snapshot)
+
+
+def test_policy_rejects_mismatched_cutlass_package(training_snapshot):
+    change_baseline(training_snapshot, lambda b: b["training_profiles"]["nvidia"].update(cutlass_dsl="4.3.0"))
+    with pytest.raises(policy.PolicyError, match="CUTLASS DSL version"):
+        check_snapshot(training_snapshot)
+
+
+@pytest.mark.parametrize("profile", ["common", "development", "nvidia", "ascend"])
+def test_installer_uses_locked_binary_distributions(tmp_path, profile):
+    script = (ROOT / "environment/docker/install-python.sh").read_text()
+    venv = tmp_path / "venv"
+    venv.mkdir()
+    script = script.replace("/opt/venv", str(venv))
+    command = 'uv() { printf "%s\\n" "$@"; }\n' + script
+    result = subprocess.run(["bash", "-c", command, "installer", profile], capture_output=True, text=True, check=True)
+    arguments = result.stdout.splitlines()
+    assert "--locked" in arguments
+    assert "--no-build" in arguments
+    assert "--no-build-isolation-package" not in arguments
+    assert ("--extra" in arguments) == (profile != "common")
+
+
+def test_git_distributions_have_no_policy_exception():
+    text = 'version = 1\n[[package]]\nname = "example"\nversion = "1.0.0"\nsource = { git = "https://example.invalid/repo.git#' + "a" * 40 + '" }\n'
+    with pytest.raises(policy.PolicyError, match="registry packages"):
+        policy.parse_lock(text)

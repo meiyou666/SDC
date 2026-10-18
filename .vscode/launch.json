@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "训练：按 YAML 调试（容器内）",
+      "type": "debugpy",
+      "request": "launch",
+      "python": "/opt/venv/bin/python",
+      "module": "training",
+      "args": ["train", "--config", "${input:trainingConfig}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "trainingConfig",
+      "type": "promptString",
+      "description": "训练 YAML 路径（相对仓库根目录）",
+      "default": "configs/training/qwen3_debug.yaml"
+    }
+  ]
+}

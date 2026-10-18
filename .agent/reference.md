@@ -1,0 +1,146 @@
+# Agent 技术参考
+
+开始任务时先读 [AGENTS.md](../AGENTS.md) 和[项目研究说明](../docs/project.md)，再按下表读取相关实现。成员的操作步骤集中在[环境](../environment/README.md)、[训练](../docs/training.md)和 [GEMM](../docs/gemm.md) 三篇教程。
+
+## 按任务阅读
+
+| 任务 | 配置与实现入口 |
+| --- | --- |
+| 环境、依赖与容器 | [baseline.json](../environment/baseline.json)、[pyproject.toml](../pyproject.toml)、[uv.lock](../uv.lock)、[Dockerfile](../environment/docker/Dockerfile)、[Compose](../compose.yaml)、[Dev Container](../.devcontainer/) |
+| 云端初始化 | [setup-cloud.sh](../environment/docker/setup-cloud.sh)、[configure-cloud.py](../environment/docker/configure-cloud.py) |
+| 训练与数据 | [训练配置](../configs/training/qwen3_06b.yaml)、[src/training](../src/training/)、[训练测试](../tests/training/) |
+| CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[src/cutlass_gemm](../src/cutlass_gemm/)、[算子测试](../tests/cutlass_gemm/) |
+| CI 与代码审查 | [工作流](../.github/workflows/)、[环境检查](../scripts/ci/)、[检查测试](../tests/ci/)、[审查规范](../.github/CODE_REVIEW.md) |
+
+## 环境与依赖维护
+
+版本以配置文件为准：系统、Python 和训练平台版本在 `environment/baseline.json`，Python 依赖在 `pyproject.toml` 与 `uv.lock`，CUTLASS 源码和编译目标在 `environment/gemm.json`。不在教程中另行维护版本表。
+
+Dockerfile 的 `development`、`nvidia` 和 `ascend` 均从 `common` 阶段构建，分别安装对应的 uv extra。公共 Python 依赖共用锁文件，硬件 SDK 与 PyTorch 构建按平台选择。`tools` 服务使用 `tooling` 阶段，负责依赖解析与锁文件维护；`nvidia-build` 使用 NVIDIA 镜像，只提供编译入口，不挂载 GPU。
+
+驱动与固件位于宿主机，CUDA 或 CANN 位于训练镜像。昇腾通过 `SDC_ASCEND_SOC` 选择算子包；SDK 镜像及 digest 在 `baseline.json` 中登记。昇腾使用的 PyTorch `+cpu` 构建由 `torch_npu` 提供 NPU 计算。
+
+容器中的项目环境为 `/opt/venv`，工作目录为 `/workspace/SDC`。`SDC_RUNTIME` 指定 uv extra；训练和检查脚本自动使用该值。模型下载缓存位于 `~/.cache/huggingface`。Codex 配置、个人工具、SSH 配置和下载缓存通过卷保存；卷的命名由 Compose 或 Dev Container 配置决定。
+
+Codex 首次配置来自 [codex-default.toml](../environment/docker/codex-default.toml)。[setup-codex.sh](../environment/docker/setup-codex.sh) 读取 `.env`，已有个人配置不被覆盖。登录失败不阻止容器启动。AI 工具独立安装在个人目录，不改动项目的 `/opt/venv`。
+
+**依赖调整由维护人执行。** 在宿主机仓库目录调用 `tools` 容器：
+
+```bash
+docker compose run --build --rm tools add --no-sync "包名==版本"
+docker compose run --build --rm tools lock --check
+```
+
+开发工具使用 `add --dev --no-sync`。直接编辑 `pyproject.toml` 后，执行 `docker compose run --build --rm tools lock`。同时提交声明和锁文件，再重建相应容器。Linux 或 WSL 可在 `tools` 前添加 `--user "$(id -u):$(id -g)"`，使生成文件归当前用户所有。
+
+调整 Python 版本时同步检查 `.python-version`、Dockerfile 和 `baseline.json`。发行包名与导入名不同时，更新 `baseline.json` 的 `import_map`。
+
+GitHub Actions 检查 Compose 配置、脚本语法、锁文件和环境策略，再执行测试与 Ruff。工作流缓存 Docker 的 `tooling` 和 `development` 构建层，同一 PR 更新时取消旧任务。GitHub runner 使用 Ubuntu 官方 APT 源，并设置 `SDC_INSTALL_AI_TOOLS=false`；本地构建默认使用清华 APT 源并安装 AI 工具。
+
+维护人也可运行 **Update uv lock** 工作流，下载并提交生成的锁文件。改变依赖源时同步更新 `pyproject.toml`。
+
+## 训练模块与接入接口
+
+| 文件 | 职责 |
+| --- | --- |
+| [config.py](../src/training/config.py) | 解析配置、检查字段、生成数据与运行签名 |
+| [data.py](../src/training/data.py) | 读取语料、分词、拼接序列、保存数据及文件哈希 |
+| [metrics.py](../src/training/metrics.py) | 保存指标、处理非有限值 |
+| [runner.py](../src/training/runner.py) | 解析设备、加载模型、构建 Trainer、保存结果与恢复训练 |
+| [__main__.py](../src/training/__main__.py) | `prepare` 和 `train` 命令入口 |
+
+公共配置的 `device: accelerator` 按 `SDC_RUNTIME` 解析为 `cuda` 或 `npu`。NVIDIA 使用 `gemm.backend: cutlass`；NPU 使用 `torch` 兼容路径。模型以 FP32 加载，混合精度由训练配置控制。数据准备先写临时目录，再重命名为目标目录；训练启动时检查数据签名及文件哈希。
+
+`train()` 根据 `gemm` 配置安装对应线性层，统一命令为 `bash scripts/train.sh train --config YAML`。实验参数、输出目录、离线与续训设置均读取 YAML。
+
+`train()` 同时提供模型变换接口。下面是接口示意，其中 `install` 由具体方法实现：
+
+```python
+train(
+    config,
+    model_transform=install,
+    transform_id="protected-linear:v1",
+    transform_params={"tile_size": 64},
+    callbacks=[...],
+)
+```
+
+- 模型加载后、Trainer 创建前执行 `install(model, tile_size=64)`，返回用于训练的模型。
+- 提供 `model_transform` 时必须提供 `transform_id`；`transform_params` 为可保存为 JSON 的参数字典。
+- `callbacks` 接收 `TrainerCallback` 列表，用于读取训练状态和记录事件。
+- Python、NumPy 和 Torch 的随机种子在模型加载与变换之前设置。需要随检查点保存的校验向量或在线状态，注册为参数或持久化 buffer。
+
+`run.json` 保存配置签名、数据摘要、锁文件哈希、提交版本、设备、模型变换标识和参数。续训时比对配置、数据、锁文件和模型变换信息，并检查检查点中的模型、优化器、调度器和随机状态。缺少模型变换记录的旧运行使用新目录重新训练。
+
+非有限指标写为 `null`，原值记录在 `nonfinite_metrics` 中。loss 非有限时停止训练并保存失败原因；其他指标非有限时继续运行。输出文件用途见[训练教程](../docs/training.md)，不在此重复维护。
+
+## CUTLASS 调用关系
+
+统一 Trainer 根据 `gemm` 配置将 Qwen 的全部 `nn.Linear` 替换为 `CutlassLinear`，包括 attention 投影、MLP 与 `lm_head`。前向 `X @ W.T`、输入梯度 `dY @ W` 和权重梯度 `dY.T @ X` 均调用所选精度的 CUTLASS GEMM。替换保留原 Parameter 对象、共享权重与模块别名，其他算子沿用原模型。
+
+| 文件 | 职责 |
+| --- | --- |
+| [backend.py](../src/cutlass_gemm/backend.py) | 读取编译配置、生成构建标识、编译加载扩展、检查设备 |
+| [bindings.cpp](../src/cutlass_gemm/bindings.cpp) | 注册 PyTorch 算子及 CUDA 实现 |
+| [gemm.cu](../src/cutlass_gemm/gemm.cu) | FP32 与 BF16 官方 GEMM |
+| [fp8.cu](../src/cutlass_gemm/fp8.cu) | 官方 SM120 E4M3 GEMM，FP32 列主序输出 |
+| [nvfp4.cu](../src/cutlass_gemm/nvfp4.cu) | 官方 example 79a GEMM，BF16 输出及 SF 布局辅助函数 |
+| [quantization.py](../src/cutlass_gemm/quantization.py) | Torch 缩放与官方 CUTLASS 类型转换连接 |
+| [linear.py](../src/cutlass_gemm/linear.py) | 统一线性层与 autograd 适配 |
+
+四种 GEMM 均使用 FP32 累加。FP32 外围精度为 FP32，其余外围精度为 BF16；主权重保持 FP32，参数梯度返回原参数 dtype。BF16 使用官方 SM80 单测的 `128×128×64` 分块和默认三阶段配置，共享内存为 96 KiB。FP8 保留官方单测的 FP32 列主序输出，前向再转为 BF16，反向返回对应输入和参数的 dtype。NVFP4 使用 example 79a 的 BF16 输出配置。
+
+`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 当前仅支持 `none`。具体字段见 [config.py](../src/training/config.py)。
+
+### 量化准备
+
+量化准备组合现有 Torch 的 amax、乘除等运算与 `nvidia-cutlass-dsl==4.2.1` 中未改动的官方转换内核。主机端缓存 `cute.compile(cute.testing._convert, ...)`，按设备、类型和布局复用编译结果；所有视图保留动态布局，每次传入当前张量。官方转换负责 E4M3、E2M1 类型转换和 FP4 打包，完整量化由项目适配代码组织。项目不新增 CUDA 或 Triton 量化内核。
+
+FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的全局乘子为 `448/amax`，NVFP4 为 `(6*448)/amax`，全零矩阵取 1；显式正数配置直接指定该乘子。NVFP4 使用官方 `gett.hpp` 的通用参考公式，输入采用 E2M1 与 E4M3 block16 尺度：`sf=E4M3(block_amax*(st*(1/6)))`，再使用该尺度的 FP32 倒数与全局乘子准备 E2M1 输入。example 79b 作为相关对照，其输出尺度使用 UE8M0。GEMM 的 alpha 抵消两输入的全局乘子。SF 的物理位置由官方 CuTe layout 在 CPU 辅助函数中生成，再使用现有 Torch scatter 写入尺度张量。
+
+### 官方源码对应
+
+所有链接固定到 CUTLASS 提交 `f3fde58372d33e9a5650ba7b80fc48b3b49d40c8`。
+
+| 项目用途 | 官方源码 |
+| --- | --- |
+| FP32、BF16 GEMM 接口 | [gemm.h](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/gemm/device/gemm.h) |
+| FP8 kernel 配置 | [SM120 f8_f8_f32 单测](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/test/unit/gemm/device/sm120_tensorop_gemm/sm120_gemm_f8_f8_f32_tensor_op.cu) |
+| NVFP4 kernel 配置与 BF16 输出 | [example 79a](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/79_blackwell_geforce_gemm/79a_blackwell_geforce_nvfp4_bf16_gemm.cu) |
+| 通用量化公式与相关对照（79b 输出尺度为 UE8M0） | [gett.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/tools/util/include/cutlass/util/reference/host/gett.hpp)、[example 79b](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/examples/79_blackwell_geforce_gemm/79b_blackwell_geforce_nvfp4_nvfp4_gemm.cu) |
+| E4M3、E2M1 转换与 FP4 打包 | [cute.testing.convert](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/cute/testing.py)、[cute_tensor_like](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/python/CuTeDSL/cutlass/torch.py) |
+| SF 物理布局 | [sm100_blockscaled_layout.hpp](https://github.com/NVIDIA/cutlass/blob/f3fde58372d33e9a5650ba7b80fc48b3b49d40c8/include/cutlass/detail/sm100_blockscaled_layout.hpp) |
+
+`_extension_key()` 按 C++/CUDA 源码与编译设置缓存扩展；`build_key()` 还包含 Python 适配源码，用于训练的模型变换标识，GEMM 配置另存为变换参数。修改实现或实验参数后，使用新输出目录。GPU 检查入口为 [gemm-accept.sh](../scripts/gemm-accept.sh)，操作步骤见 [GEMM 教程](../docs/gemm.md)。
+
+## 已有验证记录
+
+以下为统一入口改造前的 BF16 基线记录。最初记录日期为 2026-10-13，对应提交 `1c79d21`：
+
+- 在项目 Docker 中完成 SM120a 扩展编译、链接和加载，构建标识为 `5d8c186a22f49b11`。
+- 测试通过 175 项，另有 49 项子测试通过；Ruff 通过。
+- Python 桥接测试使用 `torch.mm`，覆盖前向、反向、参数共享、参数更新与检查点恢复。
+- 当时未执行实际 GPU 检查及完整 Qwen3-0.6B 训练。
+
+2026-10-14 在 RTX 5090 上调整 BF16 分块后，构建标识为 `e0bdef356dd8c139`。CUTLASS 检查共 21 项通过，其中包含 11 项实际 GPU 用例；完整检查共 186 项及 49 项子测试通过，Ruff 通过。
+
+同日完成 Qwen3-0.6B 的 CUTLASS BF16 继续预训练，共 1000 个参数更新步。训练中断后从 `checkpoint-100` 恢复，重跑的 110—140 步日志中，loss、梯度范数和学习率与中断前一致。最终验证 loss 为 `2.6606974601745605`，perplexity 为 `14.306263668996365`。配置、日志和恢复记录保存在 `results/validation/5090/`，完整检查点当时保存在旧服务器的 `results/training/qwen3_cutlass_bf16/`。
+
+统一入口改造后，在 RTX 5090 的项目 Docker 容器中完成四种 CUTLASS 精度的 Qwen3-0.6B / WikiText-103 训练。每种精度运行 20 个参数更新步，batch size 为 1，序列长度为 512，梯度累积步数为 1。
+
+| GEMM 精度 | 验证 loss |
+| --- | --- |
+| FP32 | `2.934720754623413` |
+| BF16 | `2.9449222087860107` |
+| FP8 | `2.9549427032470703` |
+| NVFP4 | `3.1861612796783447` |
+
+本轮完整检查通过 237 项测试及 55 项子测试，Ruff 通过，其中低精度 GPU 用例通过 7 项。未修改的官方 FP32 basic example、FP8 SM120 单测和 NVFP4 example 79a 分别运行通过。结果汇总保存在 `results/validation/5090/cutlass-official/summary.json`。
+
+这四次短程运行用于验证统一训练链路。此前 BF16 运行了 1000 步，梯度累积步数为 16，与本轮训练配置不同，loss 不直接比较。
+
+当时在服务器保存镜像 `sdc-nvidia:py311-cutlass-official`，默认标签 `sdc-nvidia:py311` 指向同一镜像。从新镜像启动的容器使用默认 `sdc` 用户与入口脚本，通过加速器检查及全部 7 项低精度 GPU 测试。镜像标识、启动命令和日志保存在 `results/validation/5090/cutlass-official/image.json` 与 `fresh-container-gpu.log`。当时服务器的嵌套 Docker 配置为 `/tmp` 挂载可写目录，避免 uv 临时目录权限错误。
+
+2026-10-15 用户已释放旧服务器，旧 SSH 连接不可用。上述历史验证日志保留在本地 `results/`；旧服务器镜像与 1000 步训练完整检查点的路径仅作为历史记录。
+
+后续硬件运行记录设备、提交版本、执行命令和结果，保存在实验输出目录。教程只维护操作步骤。

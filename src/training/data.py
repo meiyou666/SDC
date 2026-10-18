@@ -37,10 +37,24 @@ INCOMPLETE = (
 )
 
 
+def runtime_model_source(config: Config, offline: bool = False) -> str:
+    """Resolve cached Hub snapshots locally without changing dataset identity.
+
+    Passing a directory also prevents Transformers tokenizer metadata probes
+    that can bypass ``local_files_only`` when given a Hub repository id.
+    """
+    source = model_source(config.model)
+    if offline and not Path(source).is_dir():
+        return snapshot_download(
+            repo_id=source, revision=config.model.revision, local_files_only=True,
+        )
+    return source
+
+
 def load_tokenizer(config: Config, offline: bool = False):
     """Load the pinned tokenizer and guarantee an EOS id for packing."""
     tokenizer = AutoTokenizer.from_pretrained(
-        model_source(config.model), revision=config.model.revision,
+        runtime_model_source(config, offline), revision=config.model.revision,
         trust_remote_code=False, local_files_only=offline,
     )
     if tokenizer.eos_token_id is None:
