@@ -85,7 +85,7 @@ def parse_lock(text):
             if name != "torch" or packages[name].split("+", 1)[0] != version.split("+", 1)[0]:
                 raise PolicyError(f"Conflicting locked versions for {name} in the shared profile.")
         artifacts = entry.get("wheels", []) + ([entry["sdist"]] if "sdist" in entry else [])
-        if "registry" not in source or not artifacts or any(not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", item.get("hash", "")) for item in artifacts):
+        if set(source) != {"registry"} or not artifacts or any(not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", item.get("hash", "")) for item in artifacts):
             raise PolicyError(f"{name}: keep registry packages with SHA256 artifact hashes in uv.lock.")
         packages[name] = version.split("+", 1)[0] if name == "torch" else version
     if not packages:
@@ -220,6 +220,16 @@ def check_cpu_container(snapshot, baseline, locked):
                 raise PolicyError(f"The {name} extra must match its pinned torch build.")
         if f"torch-npu=={profiles['ascend']['torch_npu']}" not in extras.get("ascend", []):
             raise PolicyError("Pin torch_npu in the ascend extra.")
+        dsl_version = profiles["nvidia"].get("cutlass_dsl")
+        if (not dsl_version or locked.get("nvidia-cutlass-dsl") != dsl_version
+                or f"nvidia-cutlass-dsl=={dsl_version}" not in extras.get("nvidia", [])):
+            raise PolicyError("Pin the NVIDIA CUTLASS DSL version in the baseline, extra and lock.")
+        try:
+            gemm = json.loads(snapshot.read("environment/gemm.json"))
+        except (KeyError, ValueError) as exc:
+            raise PolicyError("Declare the CUTLASS source version in environment/gemm.json.") from exc
+        if dsl_version != gemm.get("cutlass_version"):
+            raise PolicyError("CUTLASS DSL and CUTLASS source versions must match.")
     try:
         dev = json.loads(snapshot.read(devcontainer))
     except ValueError as exc:

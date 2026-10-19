@@ -67,24 +67,31 @@ COPY environment/docker/install-python.sh /opt/sdc/install-python.sh
 COPY environment/docker/activate-accelerator.sh /opt/sdc/activate-accelerator.sh
 RUN ln -s /opt/sdc/activate-accelerator.sh /etc/profile.d/sdc-accelerator.sh
 RUN chmod 755 /opt/sdc/entrypoint.sh
-RUN bash /opt/sdc/install-python.sh common
+RUN --mount=type=cache,target=/var/cache/sdc-uv,sharing=locked \
+    UV_NO_CACHE=0 UV_CACHE_DIR=/var/cache/sdc-uv bash /opt/sdc/install-python.sh common
 WORKDIR /workspace/SDC
 ENTRYPOINT ["/opt/sdc/entrypoint.sh"]
 CMD ["bash"]
 
 FROM common AS development
 ENV SDC_RUNTIME=development
-RUN bash /opt/sdc/install-python.sh development
+RUN --mount=type=cache,target=/var/cache/sdc-uv,sharing=locked \
+    UV_NO_CACHE=0 UV_CACHE_DIR=/var/cache/sdc-uv bash /opt/sdc/install-python.sh development
 USER sdc
 RUN python /opt/sdc/project/environment/verify_environment.py --smoke
 
 FROM common AS nvidia
 COPY --from=cuda_sdk /usr/local/cuda-12.8 /usr/local/cuda-12.8
+COPY environment/gemm.json /opt/sdc/gemm.json
+COPY environment/docker/install-cutlass.sh /opt/sdc/install-cutlass.sh
+RUN bash /opt/sdc/install-cutlass.sh
 ENV SDC_RUNTIME=nvidia CUDA_HOME=/usr/local/cuda-12.8 \
+    CUTLASS_PATH=/opt/cutlass TORCH_EXTENSIONS_DIR=/home/sdc/.cache/torch_extensions \
     PATH=/usr/local/cuda-12.8/bin:$PATH \
     LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64 \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
-RUN bash /opt/sdc/install-python.sh nvidia
+RUN --mount=type=cache,target=/var/cache/sdc-uv,sharing=locked \
+    UV_NO_CACHE=0 UV_CACHE_DIR=/var/cache/sdc-uv bash /opt/sdc/install-python.sh nvidia
 USER sdc
 RUN python /opt/sdc/project/environment/verify_environment.py --smoke
 
@@ -92,6 +99,7 @@ FROM common AS ascend
 ARG ASCEND_SOC
 COPY --from=cann_sdk /usr/local/Ascend /usr/local/Ascend
 ENV SDC_RUNTIME=ascend SDC_ASCEND_SOC=${ASCEND_SOC}
-RUN bash /opt/sdc/install-python.sh ascend
+RUN --mount=type=cache,target=/var/cache/sdc-uv,sharing=locked \
+    UV_NO_CACHE=0 UV_CACHE_DIR=/var/cache/sdc-uv bash /opt/sdc/install-python.sh ascend
 USER sdc
 RUN TORCH_DEVICE_BACKEND_AUTOLOAD=0 python /opt/sdc/project/environment/verify_environment.py --smoke

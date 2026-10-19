@@ -145,6 +145,26 @@ class RuntimeEnvironmentTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("files used to build this image", result.stderr)
 
+    def test_nvidia_package_versions_match_baseline(self):
+        baseline = json.loads((ROOT / "environment/baseline.json").read_text())
+        versions = {"torch": "2.9.0+cu128", "nvidia-cudnn-cu12": "9.10.2.21", "nvidia-cutlass-dsl": "4.2.1",
+                    "cuda-python": "12.8.0", "cuda-bindings": "12.8.0"}
+        with mock.patch.object(runtime.importlib.metadata, "version", side_effect=versions.__getitem__):
+            runtime.check_torch_version(baseline, "nvidia")
+            for package in ("nvidia-cutlass-dsl", "cuda-bindings", "nvidia-cudnn-cu12"):
+                previous = versions[package]
+                versions[package] = "0.0.0"
+                with self.subTest(package=package), self.assertRaisesRegex(ValueError, package):
+                    runtime.check_torch_version(baseline, "nvidia")
+                versions[package] = previous
+
+    def test_cuda_runtime_and_torch_build_match_sdk(self):
+        profile = {"cuda": "12.8.1"}
+        runtime.check_cuda_versions(profile, "12.8", 12080)
+        for torch_cuda, cuda_runtime in [("12.9", 12080), ("12.8", 12090), (None, 12080)]:
+            with self.subTest(torch_cuda=torch_cuda, cuda_runtime=cuda_runtime), self.assertRaisesRegex(ValueError, "Expected CUDA"):
+                runtime.check_cuda_versions(profile, torch_cuda, cuda_runtime)
+
     def test_optional_startup_failure_still_executes_container_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

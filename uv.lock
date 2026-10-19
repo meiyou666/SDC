@@ -143,6 +143,26 @@ wheels = [
 ]
 
 [[package]]
+name = "cuda-bindings"
+version = "12.8.0"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/1c/45/4db82dec1cec4579cd9c41fe171f7580b5b65aa0556baa0f60cff893674a/cuda_bindings-12.8.0-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:435f48a20acc9a89889784e4e7c333765bc40c6ae202101bde27b4abf7ba0233", size = 10991437, upload-time = "2025-01-25T03:27:40.459Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/9a/cc/27485aa29bbaadcc9eca07aaea1198807d7c2171550c290533a039d4efee/cuda_bindings-12.8.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:33182c8aadf1c4ecf5e2672b5f0023f3be06011c22c916663eae6f33b1af90ff", size = 11331750, upload-time = "2025-01-25T03:27:44.381Z" },
+]
+
+[[package]]
+name = "cuda-python"
+version = "12.8.0"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "cuda-bindings" },
+]
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/14/2c/02bb311b996ffb91d05f8c1fb79131bf50855f7410dd33d09f800fe78c58/cuda_python-12.8.0-py3-none-any.whl", hash = "sha256:3fca3a03c247d6aa1c414989dfe0dd21e9500307b8573f72216ed57d99344c5a", size = 11930, upload-time = "2025-01-25T03:30:07.301Z" },
+]
+
+[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
@@ -563,6 +583,20 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-cutlass-dsl"
+version = "4.2.1"
+source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
+dependencies = [
+    { name = "cuda-python" },
+    { name = "numpy" },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/1d/2a/e65312728338e5bb00b592ce0be12b51e7594a3ef288cd8c99bc1c456968/nvidia_cutlass_dsl-4.2.1-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:04e605417773957405cad0ac6c2d46139a88aca07a783b4f66e1363f3a91a835", size = 58540069, upload-time = "2025-09-23T14:38:56.002Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/be/f3/20eacdf9876abd892668c191003edc5d7100e45fabfa027d9f3f99d21871/nvidia_cutlass_dsl-4.2.1-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:874aa3620b3d3dc6598af2226fa3b78f2e7998b8656929b492259e0c9f778786", size = 62233009, upload-time = "2025-09-23T14:39:23.308Z" },
+]
+
+[[package]]
 name = "nvidia-nccl-cu12"
 version = "2.27.5"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" }
@@ -848,6 +882,9 @@ development = [
 ]
 nvidia = [
     { name = "accelerate" },
+    { name = "cuda-bindings" },
+    { name = "cuda-python" },
+    { name = "nvidia-cutlass-dsl" },
     { name = "torch", version = "2.9.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" } },
 ]
 
@@ -856,6 +893,7 @@ dev = [
     { name = "packaging" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "safetensors" },
     { name = "tokenizers" },
 ]
 
@@ -864,10 +902,13 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'ascend'", specifier = "==1.12.0" },
     { name = "accelerate", marker = "extra == 'development'", specifier = "==1.12.0" },
     { name = "accelerate", marker = "extra == 'nvidia'", specifier = "==1.12.0" },
+    { name = "cuda-bindings", marker = "extra == 'nvidia'", specifier = "==12.8.0" },
+    { name = "cuda-python", marker = "extra == 'nvidia'", specifier = "==12.8.0" },
     { name = "datasets", specifier = "==4.4.2" },
     { name = "decorator", specifier = "==5.2.1" },
     { name = "matplotlib", specifier = "==3.11.2" },
     { name = "numpy", specifier = "==1.26.4" },
+    { name = "nvidia-cutlass-dsl", marker = "extra == 'nvidia'", specifier = "==4.2.1" },
     { name = "pandas", specifier = "==3.0.6" },
     { name = "protobuf", specifier = "==6.33.0" },
     { name = "pyarrow", specifier = "==21.0.0" },
@@ -888,6 +929,7 @@ dev = [
     { name = "packaging", specifier = "==26.3" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "ruff", specifier = "==0.16.10" },
+    { name = "safetensors", specifier = "==0.8.0" },
     { name = "tokenizers", specifier = "==0.22.2" },
 ]
 

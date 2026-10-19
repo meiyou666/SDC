@@ -20,11 +20,11 @@ dependencies = [
 
 [project.optional-dependencies]
 development = ["torch==2.9.0+cpu", "accelerate==1.12.0"]
-nvidia = ["torch==2.9.0+cu128", "accelerate==1.12.0"]
+nvidia = ["torch==2.9.0+cu128", "accelerate==1.12.0", "nvidia-cutlass-dsl==4.2.1", "cuda-python==12.8.0", "cuda-bindings==12.8.0"]
 ascend = ["torch==2.9.0+cpu", "torch-npu==2.9.0.post8", "accelerate==1.12.0"]
 
 [dependency-groups]
-dev = ["pytest==9.1.1", "ruff==0.16.10", "packaging==26.3", "tokenizers==0.22.2"]
+dev = ["pytest==9.1.1", "ruff==0.16.10", "packaging==26.3", "tokenizers==0.22.2", "safetensors==0.8.0"]
 
 [tool.uv]
 package = false
