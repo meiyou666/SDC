@@ -143,7 +143,7 @@ apt-get install -y python3 python3-pip curl ca-certificates git tar xz-utils bui
 
 非 root 用户在上述安装命令前加 `sudo`。
 
-uv 从清华 PyPI 镜像下载到 `.sdc/bin`；引导用的 pip 只向项目临时目录安装 uv。项目依赖仍由 `uv.lock` 管理，普通 Python 包使用清华源，PyTorch 使用已配置的官方源；托管 Python 和 CUTLASS 仍从官方分发地址下载。
+uv 从清华 PyPI 镜像下载到 `.sdc/bin`；引导用的 pip 只向项目临时目录安装 uv。托管 Python 默认从南京大学的 python-build-standalone 镜像下载，保留 uv 的版本选择与校验，解释器和命令入口均保存在 `.sdc/`。可通过 `UV_PYTHON_INSTALL_MIRROR` 指定其他下载地址。项目依赖仍由 `uv.lock` 管理，普通 Python 包使用清华源；PyTorch 和 CUTLASS 使用现有官方源。
 
 安装完成后，在 VS Code 的 SSH 窗口通过 **文件 → 从文件打开工作区**，选择 `.sdc/SDC-platform.code-workspace`。它设置项目 Python、终端和调试所需的 SDK 环境。安装远端 **Python** 和 **Python Debugger** 扩展；调试选择 **平台容器：按 YAML 调试**。
 

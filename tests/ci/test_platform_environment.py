@@ -136,7 +136,8 @@ def test_cutlass_backend_uses_platform_snapshot_and_requires_its_interpreter(pro
 
 
 @pytest.mark.parametrize("preinstalled", [True, False])
-def test_setup_uses_locked_profile_and_preserves_personal_env(project, preinstalled):
+@pytest.mark.parametrize("python_mirror", ["", "https://mirror.example/python"])
+def test_setup_uses_locked_profile_and_preserves_personal_env(project, preinstalled, python_mirror):
     for relative in ("environment/setup-platform.sh", "environment/configure_platform.py", "environment/verify_environment.py", ".env.example"):
         shutil.copyfile(ROOT / relative, project / relative)
     (project / ".env").write_text("OPENAI_API_KEY=keep-personal-value\n")
@@ -149,7 +150,7 @@ set -eu
 echo "$*" >> "$TEST_LOG"
 case $1 in
   --version) echo 'uv {version} (x86_64-unknown-linux-gnu)' ;;
-  python) : ;;
+  python) printf 'python-mirror=%s\\npython-bin=%s\\n' "$UV_PYTHON_INSTALL_MIRROR" "$UV_PYTHON_BIN_DIR" >> "$TEST_LOG" ;;
   sync)
     mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
     cp "$TEST_PYTHON_WRAPPER" "$UV_PROJECT_ENVIRONMENT/bin/python"
@@ -189,10 +190,14 @@ exec {shlex.quote(sys.executable)} "$@"
     log = project / "commands.log"
     result = subprocess.run(["bash", str(project / "environment/setup-platform.sh"), "development"],
                             env={**os.environ, "PATH": f"{binary}:{os.environ['PATH']}", "TEST_LOG": str(log),
-                                 "TEST_PYTHON_WRAPPER": str(wrapper), "TEST_UV_WHEEL": str(uv)}, capture_output=True, text=True)
+                                 "TEST_PYTHON_WRAPPER": str(wrapper), "TEST_UV_WHEEL": str(uv),
+                                 "UV_PYTHON_INSTALL_MIRROR": python_mirror}, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "sync --locked --all-groups --extra development --no-build" in log.read_text()
     assert "verify environment/verify_environment.py --smoke" in log.read_text()
+    expected_mirror = python_mirror or "https://mirrors.nju.edu.cn/github-release/astral-sh/python-build-standalone"
+    assert f"python-mirror={expected_mirror}" in log.read_text()
+    assert f"python-bin={binary}" in log.read_text()
     assert (project / ".sdc/SDC-platform.code-workspace").is_file()
     assert (project / ".env").read_text() == "OPENAI_API_KEY=keep-personal-value\n"
     if preinstalled:

@@ -33,6 +33,8 @@ if [[ ! -x .sdc/bin/uv || $(.sdc/bin/uv --version | awk '{print $2}') != "$sdc_u
 fi
 export PATH="$sdc_project/.sdc/bin:$PATH"
 export UV_PYTHON_INSTALL_DIR="$sdc_project/.sdc/python"
+export UV_PYTHON_BIN_DIR="$sdc_project/.sdc/bin"
+export UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR:-https://mirrors.nju.edu.cn/github-release/astral-sh/python-build-standalone}"
 export UV_PROJECT_ENVIRONMENT="$sdc_project/.venv" UV_PYTHON_DOWNLOADS=automatic
 export PYTHONNOUSERSITE=1
 unset PYTHONHOME PYTHONPATH UV_PYTHON
