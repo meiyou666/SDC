@@ -19,11 +19,6 @@ sdc_docker() {
 
 sdc_install_docker() {
     local sdc_user=${1:-${SUDO_USER:-$(id -un)}}
-    local sdc_mode=${2:-normal}
-    if [[ $sdc_mode != normal && $sdc_mode != install-only ]]; then
-        printf '未知 Docker 安装模式：%s\n' "$sdc_mode" >&2
-        return 2
-    fi
     local sdc_key sdc_codename sdc_arch sdc_package sdc_status
     local -a sdc_packages=() sdc_conflicts=()
     SDC_DOCKER_GROUP_CHANGED=0
@@ -58,9 +53,6 @@ sdc_install_docker() {
     if ! docker buildx version >/dev/null 2>&1; then
         sdc_packages+=(docker-buildx-plugin)
     fi
-    if [[ $sdc_mode == install-only ]] && ! command -v rootlesskit >/dev/null; then
-        sdc_packages+=(docker-ce-rootless-extras)
-    fi
     if ((${#sdc_packages[@]})); then
         sdc_root apt-get update
         sdc_root apt-get install -y ca-certificates curl
@@ -85,11 +77,6 @@ EOF
         sdc_root apt-get install -y "${sdc_packages[@]}"
     fi
 
-    # The nested bootstrap inhibits package service starts around this call.
-    # It configures and starts its own daemon only after all tools are ready.
-    if [[ $sdc_mode == install-only ]]; then
-        return
-    fi
     if [[ $(id -un) == "$sdc_user" ]] && docker info >/dev/null 2>&1; then
         docker compose version
         docker buildx version

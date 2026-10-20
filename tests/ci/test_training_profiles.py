@@ -213,13 +213,6 @@ def test_compose_and_devcontainers_use_the_shared_build():
         dev = json.loads((ROOT / path).read_text())
         assert dev["build"]["target"] == profile
         assert dev["build"]["dockerfile"] == "../../environment/docker/Dockerfile"
-    base = json.loads((ROOT / ".devcontainer/nvidia/devcontainer.json").read_text())
-    nested = json.loads((ROOT / ".devcontainer/nvidia-nested/devcontainer.json").read_text())
-    for key in ("dockerfile", "context", "target"):
-        assert nested["build"][key] == base["build"][key]
-    for key in ("workspaceMount", "workspaceFolder", "customizations", "forwardPorts",
-                "portsAttributes", "postCreateCommand", "postStartCommand"):
-        assert nested[key] == base[key]
     assert services["nvidia"]["gpus"] == "all"
     assert "/dev/davinci0:/dev/davinci0" in services["ascend"]["devices"]
     assert not services["ascend"].get("privileged", False)
@@ -279,22 +272,12 @@ def test_git_distributions_have_no_policy_exception():
     ".devcontainer/devcontainer.json",
     ".devcontainer/nvidia/devcontainer.json",
     ".devcontainer/ascend/devcontainer.json",
-    ".devcontainer/nvidia-nested/devcontainer.json",
 ])
 def test_devcontainers_build_and_run_on_host_network(path):
     config = json.loads((ROOT / path).read_text())
     assert "--network=host" in config["runArgs"]
     assert "--network=host" in config["build"]["options"]
     assert "--allow=network.host" in config["build"]["options"]
-
-
-def test_nested_devcontainer_uses_remote_builder_without_proxy():
-    config = json.loads((ROOT / ".devcontainer/nvidia-nested/devcontainer.json").read_text())
-    assert "--builder=sdc-nested" in config["build"]["options"]
-    assert not any("proxy" in key.lower() for key in config["build"].get("args", {}))
-    for section in ("containerEnv", "remoteEnv"):
-        assert not any("proxy" in key.lower() for key in config.get(section, {}))
-    assert not any("proxy" in option.lower() for option in config["build"]["options"] + config["runArgs"])
 
 
 def test_all_compose_services_build_and_run_on_host_network():

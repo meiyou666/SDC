@@ -98,7 +98,7 @@ def test_shared_check_runner_keeps_locked_tests_and_lint(tmp_path):
     log = tmp_path / "checks.log"
     # Only replace accelerator initialization; run the actual launcher control flow.
     script = (ROOT / "scripts/check.sh").read_text().replace(
-        "source /opt/sdc/activate-accelerator.sh", ":"
+        "source environment/activate.sh", ":"
     )
     mock = '''
 python() { printf 'python %s\\n' "$*" >> "$TEST_LOG"; }

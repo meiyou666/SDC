@@ -8,6 +8,7 @@
 | --- | --- |
 | 环境、依赖与容器 | [baseline.json](../environment/baseline.json)、[pyproject.toml](../pyproject.toml)、[uv.lock](../uv.lock)、[Dockerfile](../environment/docker/Dockerfile)、[Compose](../compose.yaml)、[Dev Container](../.devcontainer/) |
 | 云端初始化 | [setup-cloud.sh](../environment/docker/setup-cloud.sh)、[configure-cloud.py](../environment/docker/configure-cloud.py) |
+| 平台容器虚拟环境 | [setup-platform.sh](../environment/setup-platform.sh)、[activate.sh](../environment/activate.sh)、[configure_platform.py](../environment/configure_platform.py) |
 | 训练与数据 | [训练配置](../configs/training/qwen3_06b.yaml)、[src/training](../src/training/)、[训练测试](../tests/training/) |
 | CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[src/cutlass_gemm](../src/cutlass_gemm/)、[算子测试](../tests/cutlass_gemm/) |
 | ABFT 与故障注入 | [调试配置](../configs/training/qwen3_abft_debug.yaml)、[src/abft](../src/abft/)、[使用与扩展方法](../docs/gemm.md#启用-abft) |
@@ -36,9 +37,9 @@ docker compose run --build --rm tools lock --check
 
 调整 Python 版本时同步检查 `.python-version`、Dockerfile 和 `baseline.json`。发行包名与导入名不同时，更新 `baseline.json` 的 `import_map`。
 
-平台容器的外层环境通过 `setup-cloud.sh nvidia --nested` 调用 `nested-docker.sh setup`。仓库保存完整的 Docker 及依赖安装、Supervisor 配置、FUSE ext4 存储、RootlessKit、CDI 和 BuildKit 启动逻辑；安装副本位于 `/usr/local/lib/sdc-docker/`，设置位于 `/etc/sdc-docker/settings.conf`。已有存储文件只验证并复用。CDI 使用扫描目录外的 YAML 临时文件原子更新，只备份本脚本的历史残留，不删除其他设备配置。
+租用的平台容器直接执行 `environment/setup-platform.sh nvidia`（或 `ascend`），在仓库 `.venv` 安装同一份锁定依赖。`.sdc/` 保存固定 uv、托管 Python、CUTLASS 源码、安装配置快照和 VS Code 工作区，均不提交 Git。安装脚本复用预装 CUDA/CANN；NVIDIA 检查 `nvcc` 和开发头文件，不依赖 `version.json`。系统允许 Ubuntu 22.04/24.04，实际版本保存在环境记录中。`environment/activate.sh` 为训练与检查脚本选择统一环境；快照、Python、依赖或 SDK 不匹配时停止实验。
 
-所有 Dev Container、Compose 和 CI 构建入口均使用 host 网络。嵌套路径中的 RootlessKit 也使用 `--net=host`；Docker 关闭 bridge、iptables 和 IP 转发配置，BuildKit 允许 `network.host`。setup 迁移时停止旧的 tinyproxy/socat 服务并备份配置，不再建立代理转发。`sdc-nested` 是指向独立 BuildKit socket 的 remote builder，嵌套 Dev Container 显式选择它；NVIDIA 仍使用共享 Dockerfile 与 `uv.lock`。完整入口与管理命令见[环境教程](../environment/README.md#容器内-docker)。服务管理测试使用隔离目录和命令替身；实际平台启动由维护人在 SSH 环境执行验证。
+完整服务器与本地继续使用共享 Dockerfile、Compose 和 Dev Container，构建与运行使用 host 网络。平台容器通过 Remote-SSH 打开 `.sdc/SDC-platform.code-workspace`，该工作区指定 `.venv` 和 SDK 环境，调试仍使用仓库的训练配置。平台安装与工作区生成测试在项目 Docker 中执行；远端命令交由用户运行。
 
 GitHub Actions 检查 Compose 配置、脚本语法、锁文件和环境策略，再执行测试与 Ruff。工作流缓存 Docker 的 `tooling` 和 `development` 构建层，同一 PR 更新时取消旧任务。GitHub runner 使用 Ubuntu 官方 APT 源，并设置 `SDC_INSTALL_AI_TOOLS=false`；本地构建默认使用清华 APT 源并安装 AI 工具。
 
@@ -174,7 +175,7 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 
 这四次短程运行用于验证统一训练链路。此前 BF16 运行了 1000 步，梯度累积步数为 16，与本轮训练配置不同，loss 不直接比较。
 
-当时在服务器保存镜像 `sdc-nvidia:py311-cutlass-official`，默认标签 `sdc-nvidia:py311` 指向同一镜像。从新镜像启动的容器使用默认 `sdc` 用户与入口脚本，通过加速器检查及全部 7 项低精度 GPU 测试。镜像标识、启动命令和日志保存在 `results/validation/5090/cutlass-official/image.json` 与 `fresh-container-gpu.log`。当时服务器的嵌套 Docker 配置为 `/tmp` 挂载可写目录，避免 uv 临时目录权限错误。
+当时在服务器保存镜像 `sdc-nvidia:py311-cutlass-official`，默认标签 `sdc-nvidia:py311` 指向同一镜像。从新镜像启动的容器使用默认 `sdc` 用户与入口脚本，通过加速器检查及全部 7 项低精度 GPU 测试。镜像标识、启动命令和日志保存在 `results/validation/5090/cutlass-official/image.json` 与 `fresh-container-gpu.log`。
 
 2026-10-15 用户已释放旧服务器，旧 SSH 连接不可用。上述历史验证日志保留在本地 `results/`；旧服务器镜像与 1000 步训练完整检查点的路径仅作为历史记录。
 

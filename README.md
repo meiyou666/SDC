@@ -7,7 +7,7 @@
 | 要做什么 | 阅读入口 |
 | --- | --- |
 | 在本地或云服务器搭建环境、选择和切换容器 | [搭建开发环境](environment/README.md) |
-| 在租用的平台容器内安装 Docker、配置 GPU 并进入开发环境 | [容器内 Docker](environment/README.md#容器内-docker) |
+| 在租用的平台容器中创建统一虚拟环境 | [云容器虚拟环境](environment/README.md#云容器虚拟环境) |
 | 准备数据、运行 Qwen FP32/BF16/FP8/NVFP4 训练、查看结果和恢复训练 | [运行训练](docs/training.md) |
 | 编译、检查和修改 CUTLASS GEMM，并接入训练 | [开发 GEMM](docs/gemm.md) |
 
@@ -16,7 +16,7 @@
 | 目录 | 用途 |
 | --- | --- |
 | `src/`、`tests/` | 实现与测试；公共训练在 `src/training/`，CUTLASS 在 `src/cutlass_gemm/`（含 FP32、BF16、FP8、NVFP4） |
-| `environment/`、`.devcontainer/` | Docker 环境与 VS Code 容器入口 |
+| `environment/`、`.devcontainer/` | 统一环境安装、检查与 VS Code 入口 |
 | `configs/`、`experiments/` | 公共配置与实验配置 |
 | `docs/` | 教程、论文精读及复现记录 |
 | `data/`、`results/` | 本地模型、数据与实验输出，不提交 Git |

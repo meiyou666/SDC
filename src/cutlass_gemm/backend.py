@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 
 import torch
 from torch.utils.cpp_extension import get_default_build_root, load
@@ -42,20 +43,28 @@ def _extension_key():
     return digest.hexdigest()[:16]
 
 
+def environment_settings_path():
+    if (ROOT / ".sdc/environment.json").is_file() and os.environ.get("SDC_DEPLOYMENT") != "docker":
+        if Path(sys.prefix).resolve() != (ROOT / ".venv").resolve():
+            raise RuntimeError("请激活项目 .venv 后编译和运行。")
+        return ROOT / ".sdc/project/environment/gemm.json"
+    if not Path("/.dockerenv").exists() and not Path("/run/.containerenv").exists():
+        raise RuntimeError("请使用项目 NVIDIA Docker 或配置好的平台虚拟环境。")
+    return Path("/opt/sdc/gemm.json")
+
+
 @lru_cache(maxsize=1)
 def load_extension():
-    if not Path("/.dockerenv").exists() and not Path("/run/.containerenv").exists():
-        raise RuntimeError("请在项目 NVIDIA 容器中编译和运行。")
+    baked = environment_settings_path()
     if torch.version.cuda != "12.8":
         raise RuntimeError("请使用项目的 PyTorch cu128 环境。")
     config = settings()
     cutlass = Path(os.environ.get("CUTLASS_PATH", "/opt/cutlass"))
     commit_file = cutlass / "SDC_COMMIT"
     if not commit_file.is_file() or commit_file.read_text().strip() != config["cutlass_commit"]:
-        raise RuntimeError("CUTLASS 版本不匹配，请重建 NVIDIA 镜像。")
-    baked = Path("/opt/sdc/gemm.json")
+        raise RuntimeError("CUTLASS 版本不匹配，请重新初始化平台环境或重建 NVIDIA 镜像。")
     if not baked.is_file() or json.loads(baked.read_text()) != config:
-        raise RuntimeError("编译配置已更新，请重建 NVIDIA 镜像。")
+        raise RuntimeError("编译配置已更新，请重新初始化平台环境或重建 NVIDIA 镜像。")
     os.environ.setdefault("MAX_JOBS", str(config["max_build_jobs"]))
     arch = config["cuda_arch"]
     from .legacy_adapter import generate_legacy_reference_headers

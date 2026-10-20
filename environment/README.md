@@ -6,11 +6,12 @@
 | --- | --- | --- |
 | [本地 Windows](#本地-windows) | Docker Desktop | Windows 中的仓库 |
 | [本地 WSL](#本地-wsl) | Ubuntu 中的 Docker Engine | WSL 文件系统中的仓库 |
-| [云服务器](#云服务器) | 服务器中的 Docker Engine | Remote-SSH 打开的服务器仓库 |
+| [完整云服务器](#云服务器) | 服务器中的 Docker Engine | Remote-SSH 打开的服务器仓库 |
+| [平台已分配容器](#云容器虚拟环境) | 无需安装 Docker | Remote-SSH 打开的项目虚拟环境工作区 |
 
-项目代码、依赖安装、测试与实验均在容器中执行。宿主机用于编辑、Git 操作和启动 Docker。训练步骤见[训练教程](../docs/training.md)，CUTLASS 构建与接入见[GEMM 教程](../docs/gemm.md)。
+项目代码、依赖安装、测试与实验使用共享 Docker 或云容器中的项目虚拟环境。训练步骤见[训练教程](../docs/training.md)，CUTLASS 构建与接入见[GEMM 教程](../docs/gemm.md)。
 
-所有入口的镜像构建和容器运行统一使用宿主机网络（`host`）。云端容器使用服务器网络；平台容器内的 Docker 使用外层容器网络，无需配置额外代理转发。
+Docker 入口的镜像构建和运行使用宿主机网络（`host`）。平台已分配容器时，直接使用下文的项目虚拟环境。
 
 ## 本地 Windows
 
@@ -87,7 +88,7 @@
 
 ### 初始化服务器环境
 
-普通云服务器按本节初始化。SSH 登录后本身就在平台容器内时，使用下文的[容器内 Docker 安装入口](#容器内-docker)。
+完整云服务器按本节初始化。SSH 登录后本身就在平台容器内时，使用下文的[云容器虚拟环境](#云容器虚拟环境)。
 
 在 **Remote-SSH 的服务器终端、仓库根目录**执行：
 
@@ -122,48 +123,53 @@ bash environment/docker/setup-cloud.sh ascend --soc 910b
 3. 执行 **Dev Containers: Reopen in Container**，选择刚生成的 **SDC 云端（…）**。VS Code 使用构建缓存启动容器。
 4. 左下角显示容器名称后，新建终端，按下一节确认环境可用。此后 Python、调试器和 Codex 均在服务器容器中运行。
 
-### 容器内 Docker
+### 云容器虚拟环境
 
-平台分配的环境本身是 Ubuntu 容器时，在外层 **SSH 终端、仓库根目录**以 root 执行：
+平台已分配 Ubuntu 容器时，通过 Remote-SSH 打开仓库，直接创建项目 `.venv`。系统可用 Ubuntu 22.04 或 24.04；CUDA/CANN 和驱动使用平台预装版本。NVIDIA 编译器版本必须与 `baseline.json` 中的 `nvcc` 一致，不能用 `nvidia-smi` 显示的 CUDA 版本代替。
 
-```bash
-bash environment/docker/setup-cloud.sh nvidia --nested
-```
-
-这个入口安装缺少的 Docker Engine、Compose、Buildx、RootlessKit、BuildKit、NVIDIA Container Toolkit 和 FUSE。已有安装会复用。平台需提供 GPU 驱动、可读写的 `/dev/fuse` 和用户命名空间；脚本会检查设备并配置本项目的服务。
-
-脚本依次挂载存储、生成 NVIDIA CDI 配置、启动 RootlessKit 中的 Docker 和 BuildKit，再检查 GPU 设备登记和构建器。RootlessKit、镜像构建和项目容器均使用外层容器的网络。迁移时自动停用旧的 tinyproxy、socat 转发服务，并备份原配置。CDI 临时文件在扫描目录外生成，成功后原子替换；此前的 `.sdc-nvidia.*` 残留配置会移到备份目录。
-
-Docker 数据默认存入仓库上一级目录的 `sdc-docker-storage.ext4`。新文件容量为 64 GiB；已有 ext4 文件直接复用，不重新格式化或扩容。首次安装需要指定其他位置时，改用下面的入口：
+在 **SSH 终端、仓库根目录**执行：
 
 ```bash
-bash environment/docker/nested-docker.sh setup --storage-file /root/shared-nvme/sdc-docker-storage.ext4 --storage-gib 64
+bash environment/setup-platform.sh nvidia
+source environment/activate.sh
 ```
 
-配置保存在 `/etc/sdc-docker/settings.conf`，源脚本安装到 `/usr/local/lib/sdc-docker/`。服务由 Supervisor 管理；检测到平台现有 Supervisor 时复用，否则配置独立实例。BuildKit 临时缓存使用上限 50 GiB 的 tmpfs，按实际使用占用内存；可在设置文件中调整 `SDC_NESTED_BUILDKIT_SIZE`，然后执行 restart。
-
-日常管理仍在外层 SSH 终端执行：
+昇腾使用 `bash environment/setup-platform.sh ascend`，平台需预装基线要求的 CANN。脚本检查现有 SDK，再安装固定版本的 uv、Python、锁定依赖和 CUTLASS；不替换系统 Python、GPU 驱动或 SDK。若提示缺少基础工具，在 Ubuntu 平台终端安装：
 
 ```bash
-bash environment/docker/nested-docker.sh status
-bash environment/docker/nested-docker.sh start
-bash environment/docker/nested-docker.sh stop
-bash environment/docker/nested-docker.sh restart
-bash environment/docker/nested-docker.sh logs docker
-bash environment/docker/nested-docker.sh logs buildkit
+apt-get update
+apt-get install -y python3 curl ca-certificates git tar xz-utils build-essential ninja-build
 ```
 
-安装后也可使用 `sdc-docker-service` 加上述子命令。`stop` 停止 Docker 和 BuildKit，保留存储挂载及其中的镜像、数据卷。更新服务脚本时，先停止项目容器，再执行 setup。
+非 root 用户在上述安装命令前加 `sudo`。
 
-启动完成后，在 VS Code 的 SSH 窗口打开仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA（容器内 Docker）**。入口为 [.devcontainer/nvidia-nested/devcontainer.json](../.devcontainer/nvidia-nested/devcontainer.json)，无需手工创建 `cloud-nvidia` 配置。
+安装完成后，在 VS Code 的 SSH 窗口通过 **文件 → 从文件打开工作区**，选择 `.sdc/SDC-platform.code-workspace`。它设置项目 Python、终端和调试所需的 SDK 环境。安装远端 **Python** 和 **Python Debugger** 扩展；调试选择 **平台容器：按 YAML 调试**。
 
-它与普通 NVIDIA 入口使用同一 Dockerfile、`nvidia` 构建目标、依赖锁文件和 VS Code 扩展。首次打开使用脚本配置的 `sdc-nested` BuildKit 构建器生成镜像，后续复用缓存。
+在新终端确认：
 
-嵌套入口共享 Docker 所在环境的 PID 和网络，挂载只读 `/sys`，并用独立卷提供可写 `/tmp`。容器以 root 运行，模型、编译缓存、SSH 和 Codex 配置保存在相应数据卷中；npm 工具仍使用 `/home/sdc/.local`。新入口使用自己的卷，旧容器缓存需要另行迁移。
+```bash
+source environment/activate.sh
+command -v python
+python environment/verify_environment.py --smoke
+python environment/verify_environment.py --accelerator
+```
+
+Python 应指向当前仓库的 `.venv/bin/python`。训练、测试与 GEMM 检查继续使用原入口：
+
+```bash
+bash scripts/train.sh prepare --config configs/training/qwen3_06b.yaml
+bash scripts/train.sh train --config configs/training/qwen3_06b.yaml
+bash scripts/check.sh
+bash scripts/gemm-accept.sh
+```
+
+每个新 SSH 终端执行一次 `source environment/activate.sh`；上述脚本也会自动选择项目环境。更新锁文件、SDK 配置或移动仓库后，重跑安装命令并重新打开生成的工作区。普通代码修改无需重新安装。
+
+`.venv/` 保存 Python 环境，`.sdc/` 保存工具、CUTLASS、版本记录和工作区，两者均不提交 Git。个人 AI 工具继续使用个人安装，不改项目 Python 依赖。后台训练可在 `tmux` 会话中激活环境后运行训练命令。
 
 ## 确认环境可用
 
-以下命令在 **VS Code 的容器终端、仓库根目录**执行：
+以下命令在 **VS Code 的项目 Docker 终端、仓库根目录**执行；平台虚拟环境按上一节检查：
 
 ```bash
 pwd
@@ -183,7 +189,7 @@ python environment/verify_environment.py --accelerator
 
 ## 选择、切换与重建容器
 
-执行 **Dev Containers: Reopen in Container** 时，可以看到以下四个公共入口。云端初始化后，还会显示 **SDC 云端（…）**。下图为原有三个入口的界面，新增入口以表格为准。
+执行 **Dev Containers: Reopen in Container** 时，可以看到以下三个公共入口。云端初始化后，还会显示 **SDC 云端（…）**。
 
 ![VS Code 容器选择列表：SDC、SDC Ascend、SDC NVIDIA](../docs/images/devcontainer-selection.png)
 
@@ -191,10 +197,9 @@ python environment/verify_environment.py --accelerator
 | --- | --- | --- |
 | **SDC** | 日常开发、调试和单元测试 | 普通开发机，不用于训练 |
 | **SDC NVIDIA** | NVIDIA 训练与实验，含 CUDA、CUTLASS 和 CUTLASS DSL | NVIDIA GPU 与可用驱动 |
-| **SDC NVIDIA（容器内 Docker）** | 平台容器内的 NVIDIA 开发与训练 | 外层容器已运行 Docker，GPU 已配置 |
 | **SDC Ascend** | 昇腾训练与实验，含 CANN | 昇腾 NPU 与可用驱动、固件 |
 
-本地日常开发选择 **SDC**；普通云服务器选择初始化脚本生成的入口；平台容器内的 Docker 选择 **SDC NVIDIA（容器内 Docker）**。
+本地日常开发选择 **SDC**；完整云服务器选择初始化脚本生成的入口。平台虚拟环境直接使用 Remote-SSH，无需选择 Dev Container。
 
 - **再次打开**：恢复之前的容器窗口，或打开同一仓库后执行 **Reopen in Container**。
 - **切换已有配置**：在容器窗口执行 **Dev Containers: Switch Container**，选择另一个配置。首次使用该配置时需要构建，之后使用已有镜像和构建缓存。
