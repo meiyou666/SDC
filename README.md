@@ -7,6 +7,7 @@
 | 要做什么 | 阅读入口 |
 | --- | --- |
 | 在本地或云服务器搭建环境、选择和切换容器 | [搭建开发环境](environment/README.md) |
+| 在租用的平台容器内进入 NVIDIA 开发环境 | [容器内 Docker](environment/README.md#容器内-docker) |
 | 准备数据、运行 Qwen FP32/BF16/FP8/NVFP4 训练、查看结果和恢复训练 | [运行训练](docs/training.md) |
 | 编译、检查和修改 CUTLASS GEMM，并接入训练 | [开发 GEMM](docs/gemm.md) |
 

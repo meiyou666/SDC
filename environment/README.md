@@ -85,6 +85,8 @@
 
 ### 初始化服务器环境
 
+普通云服务器按本节初始化。SSH 登录后本身就在平台容器内、且已配置好 Docker 的环境，使用下文的[容器内 Docker 入口](#容器内-docker)。
+
 在 **Remote-SSH 的服务器终端、仓库根目录**执行：
 
 ```bash
@@ -118,6 +120,21 @@ bash environment/docker/setup-cloud.sh ascend --soc 910b
 3. 执行 **Dev Containers: Reopen in Container**，选择刚生成的 **SDC 云端（…）**。VS Code 使用构建缓存启动容器。
 4. 左下角显示容器名称后，新建终端，按下一节确认环境可用。此后 Python、调试器和 Codex 均在服务器容器中运行。
 
+### 容器内 Docker
+
+平台分配的环境本身是 Linux 容器时，先在 SSH 终端确认 Docker 和 GPU 已就绪：
+
+```bash
+docker info
+nvidia-smi
+```
+
+在 VS Code 的 SSH 窗口打开仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA（容器内 Docker）**。入口为 [.devcontainer/nvidia-nested/devcontainer.json](../.devcontainer/nvidia-nested/devcontainer.json)，无需手工创建 `cloud-nvidia` 配置。
+
+它与普通 NVIDIA 入口使用同一 Dockerfile、`nvidia` 构建目标、依赖锁文件和 VS Code 扩展。首次打开按共享 Dockerfile 构建，后续复用构建缓存。嵌套入口额外共享 Docker 主机的 PID 和网络，挂载只读 `/sys`，并用独立数据卷提供可写 `/tmp`。
+
+此入口以 root 运行，代码直接写入挂载的仓库；模型、编译缓存、SSH 和 Codex 配置保存在 root 对应的数据卷中。npm 工具仍使用镜像原有的 `/home/sdc/.local`。新入口使用自己的卷，旧容器缓存需要另行迁移。Docker 服务及 NVIDIA 运行时由外层平台环境启动和管理。
+
 ## 确认环境可用
 
 以下命令在 **VS Code 的容器终端、仓库根目录**执行：
@@ -140,7 +157,7 @@ python environment/verify_environment.py --accelerator
 
 ## 选择、切换与重建容器
 
-执行 **Dev Containers: Reopen in Container** 时，可以看到以下三个公共入口。云端初始化后，还会显示 **SDC 云端（…）**。
+执行 **Dev Containers: Reopen in Container** 时，可以看到以下四个公共入口。云端初始化后，还会显示 **SDC 云端（…）**。下图为原有三个入口的界面，新增入口以表格为准。
 
 ![VS Code 容器选择列表：SDC、SDC Ascend、SDC NVIDIA](../docs/images/devcontainer-selection.png)
 
@@ -148,9 +165,10 @@ python environment/verify_environment.py --accelerator
 | --- | --- | --- |
 | **SDC** | 日常开发、调试和单元测试 | 普通开发机，不用于训练 |
 | **SDC NVIDIA** | NVIDIA 训练与实验，含 CUDA、CUTLASS 和 CUTLASS DSL | NVIDIA GPU 与可用驱动 |
+| **SDC NVIDIA（容器内 Docker）** | 平台容器内的 NVIDIA 开发与训练 | 外层容器已运行 Docker，GPU 已配置 |
 | **SDC Ascend** | 昇腾训练与实验，含 CANN | 昇腾 NPU 与可用驱动、固件 |
 
-本地日常开发选择 **SDC**；云端选择初始化脚本生成的入口。
+本地日常开发选择 **SDC**；普通云服务器选择初始化脚本生成的入口；平台容器内的 Docker 选择 **SDC NVIDIA（容器内 Docker）**。
 
 - **再次打开**：恢复之前的容器窗口，或打开同一仓库后执行 **Reopen in Container**。
 - **切换已有配置**：在容器窗口执行 **Dev Containers: Switch Container**，选择另一个配置。首次使用该配置时需要构建，之后使用已有镜像和构建缓存。

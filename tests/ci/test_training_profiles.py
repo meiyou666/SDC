@@ -20,7 +20,7 @@ def training_snapshot():
         policy.BASELINE, policy.PROJECT, policy.LOCKFILE, ".python-version", "compose.yaml", ".dockerignore", "environment/gemm.json",
         "environment/docker/Dockerfile", "environment/docker/install-python.sh",
         "environment/docker/entrypoint.sh", "environment/verify_environment.py", "dev.cmd", "dev.sh",
-        ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json",
+        ".devcontainer/devcontainer.json", *policy.TRAINING_DEVCONTAINERS,
     ]
     return Snapshot({path: (ROOT / path).read_text() for path in files})
 
@@ -38,6 +38,31 @@ def change_baseline(snapshot, change):
 def test_schema4_shared_configuration_passes(training_snapshot):
     assert json.loads(training_snapshot.read(policy.BASELINE))["schema_version"] == 4
     assert check_snapshot(training_snapshot)["state"] == "frozen"
+
+
+@pytest.mark.parametrize("path", policy.TRAINING_DEVCONTAINERS)
+def test_schema4_requires_training_devcontainers(training_snapshot, path):
+    training_snapshot.files.remove(path)
+    with pytest.raises(policy.PolicyError, match="Missing"):
+        check_snapshot(training_snapshot)
+
+
+@pytest.mark.parametrize("path", policy.TRAINING_DEVCONTAINERS)
+@pytest.mark.parametrize("change", ["image", "dockerfile", "context", "target"])
+def test_training_devcontainers_reject_separate_environments(training_snapshot, path, change):
+    config = json.loads(training_snapshot.read(path))
+    if change == "image":
+        config.pop("build")
+        config["image"] = "python:latest"
+    else:
+        config["build"][change] = {
+            "dockerfile": "../../experiments/Dockerfile",
+            "context": "../../experiments",
+            "target": "development",
+        }[change]
+    training_snapshot.content[path] = json.dumps(config)
+    with pytest.raises(policy.PolicyError, match="shared Dockerfile"):
+        check_snapshot(training_snapshot)
 
 
 @pytest.mark.parametrize("profile", ["nvidia", "ascend"])
@@ -184,9 +209,15 @@ def test_compose_and_devcontainers_use_the_shared_build():
     for profile in ("nvidia", "ascend"):
         assert services[profile]["build"]["dockerfile"] == "environment/docker/Dockerfile"
         assert services[profile]["build"]["target"] == profile
-        dev = json.loads((ROOT / f".devcontainer/{profile}/devcontainer.json").read_text())
+    for path, profile in policy.TRAINING_DEVCONTAINERS.items():
+        dev = json.loads((ROOT / path).read_text())
         assert dev["build"]["target"] == profile
         assert dev["build"]["dockerfile"] == "../../environment/docker/Dockerfile"
+    base = json.loads((ROOT / ".devcontainer/nvidia/devcontainer.json").read_text())
+    nested = json.loads((ROOT / ".devcontainer/nvidia-nested/devcontainer.json").read_text())
+    for key in ("build", "workspaceMount", "workspaceFolder", "customizations", "forwardPorts",
+                "portsAttributes", "postCreateCommand", "postStartCommand"):
+        assert nested[key] == base[key]
     assert services["nvidia"]["gpus"] == "all"
     assert "/dev/davinci0:/dev/davinci0" in services["ascend"]["devices"]
     assert not services["ascend"].get("privileged", False)
