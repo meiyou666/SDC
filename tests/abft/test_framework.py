@@ -93,6 +93,32 @@ def test_accumulator_detection_and_location():
     assert report.to_record()["fault_hit"] == [1]
 
 
+@pytest.mark.parametrize("precision", ["fp32", "bf16"])
+def test_fault_only_accumulator_uses_fp32_weights_with_float64_default(precision):
+    from abft import execute_prepared
+    original_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float64)
+        prepared = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+        def collector(operands, weights, fault):
+            assert weights.dtype == torch.float32
+            assert weights.device == operands.a.device
+            return collect(operands, weights, fault)
+        output, report = execute_prepared(
+            prepared, abft_config="none",
+            fault_config={"location": "accumulator", "row": 1, "col": 0, "bit": 31},
+            collector_fn=collector,
+        )
+        expected = torch.full((3, 2), 16., dtype=torch.float32)
+        expected[1, 0] = -16.
+        torch.testing.assert_close(output, expected)
+        assert report.to_record()["fault_hit"] == [1]
+        assert report.context["fault_selected"]
+        assert not report.detected
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
 def test_nonfinite_always_detected_never_located(value):
     method = Classic()

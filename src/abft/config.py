@@ -73,6 +73,8 @@ class FaultConfig:
         for name in ("layer", "role"):
             if getattr(self, name) is not None and not isinstance(getattr(self, name), str):
                 raise ValueError(f"fault {name} must be a string or None")
+        if self.role is not None and self.role not in {"forward", "dgrad", "wgrad"}:
+            raise ValueError("fault role must be forward, dgrad, wgrad, or None")
 
 
 def _parse(value, cls):

@@ -146,7 +146,7 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         injection = (fault.row, fault.col, fault.bit)
     end("fault_prepare", mark)
     fused = method is not None or injection[0] >= 0
-    weights = state["weights"] if state else torch.zeros((2, prepared.m), device=a.device)
+    weights = state["weights"] if state else torch.zeros((2, prepared.m), device=a.device, dtype=torch.float32)
     def collect(operands, fault_tuple):
         if collector_fn is not None:
             return collector_fn(operands, weights, fault_tuple)
