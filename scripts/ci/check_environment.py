@@ -18,7 +18,6 @@ PROJECT = "pyproject.toml"
 TRAINING_DEVCONTAINERS = {
     ".devcontainer/nvidia/devcontainer.json": "nvidia",
     ".devcontainer/ascend/devcontainer.json": "ascend",
-    ".devcontainer/nvidia-nested/devcontainer.json": "nvidia",
 }
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
 SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh", "ruff.toml", "pytest.ini", "scripts/check.sh", "scripts/train.sh"}

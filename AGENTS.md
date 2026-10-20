@@ -19,17 +19,17 @@
 
 ## 执行环境
 
-- **项目代码、依赖解析与安装、测试、实验、绘图和基准测量必须在项目 Docker 容器中执行。禁止使用 Agent 所在的本地 Python、pip、uv、Conda 或其他本地虚拟环境代跑。**
+- **项目代码、依赖安装、测试、实验和绘图须在项目 Docker 或通过统一检查的云容器项目 `.venv` 中执行。禁止使用 Agent 所在的本地 Python、系统 Python 或其他 Conda/虚拟环境代跑。** 云容器通过 `environment/setup-platform.sh` 初始化；系统 Python 仅用于该脚本的标准库引导检查。
 - Agent 已在 Dev Container 内时，直接运行容器中的命令；在容器外时，通过 Docker 调用项目容器。
-- 宿主机可运行 AI 工具、编辑器、Git/GitHub 和 Docker；项目代码与实验仍在项目容器中执行。
+- 宿主机可运行 AI 工具、编辑器、Git/GitHub 和 Docker。平台已分配容器时，直接通过 Remote-SSH 使用项目 `.venv`。
 - 环境文档按本地和云端组织。本地分 Windows、WSL；云端先用 Remote-SSH 连接服务器，再运行 `environment/docker/setup-cloud.sh`，通过生成的 VS Code 入口进入远端容器。服务器专用配置保存在 `.devcontainer/cloud-*/`，不提交 Git。
-- 容器不可用时，先修复 Docker，或在 GitHub Actions 中使用项目容器执行；不得回退到宿主机环境。
+- 完整服务器和本地保留 Docker；租用的平台容器使用 `.venv`，不部署嵌套 Docker。两种入口使用同一份 `pyproject.toml`、`uv.lock` 和 CUTLASS 固定提交。
 - 项目 Python 依赖由根目录 `pyproject.toml` 和 `uv.lock` 原生管理。使用 `uv sync --locked`、`uv run --locked`，不得另建实验 requirements 清单或自行升级项目依赖。环境维护使用 Compose 的 `tools` 服务。
 - AI 工具的版本、插件、MCP 和 skills 不做统一限制，可自行安装、升级和配置，不加入 AI 工具的 CI 检查或测试。AI 扩展依赖使用个人目录或独立虚拟环境，不改动项目的 `/opt/venv`、依赖锁文件和训练配置。
 - 团队共享 skills 放在 `.agent/skills/`，使用说明见 [.agent/README.md](.agent/README.md)。其中的工具依赖与项目实验依赖分开管理；实验实现仍放在 `src/`、`experiments/` 等项目目录。
 - Codex 每次安装使用 latest，初始模型和审查模型为 `gpt-6-astra`。首次启动写入初始配置，后续个人设置、插件、MCP 和 skills 自行维护，不覆盖已有配置。API 地址在 `.env.example` 中预填；个人密钥放在 `.env`，不得提交或输出密钥。
-- NVIDIA 与昇腾训练镜像共用根目录 `uv.lock` 和 Dockerfile。公共 Python 库必须保持同版本，硬件差异只放在 `nvidia`、`ascend` extra 和对应 SDK 中。本地开发检查使用 `development` extra，不设置 CPU 训练任务。
-- 容器内检查：`bash scripts/check.sh`。直接使用 uv 时，按 `SDC_RUNTIME` 指定 `--extra development`、`--extra nvidia` 或 `--extra ascend`。设备检查：`python environment/verify_environment.py --accelerator`。
+- NVIDIA 与昇腾环境共用根目录 `uv.lock`；Docker 入口共用 Dockerfile。平台入口复用已有 CUDA/CANN 并检查版本，不自动替换驱动或 SDK。公共 Python 库保持同版本，硬件差异放在对应 extra 和 SDK 中。平台 Ubuntu 可为 22.04 或 24.04，实际系统及工具版本记录在 `.sdc/`。本地开发检查使用 `development` extra，不设置 CPU 训练任务。
+- 检查：`bash scripts/check.sh`；训练：`bash scripts/train.sh ...`。平台终端先执行 `source environment/activate.sh`。直接使用 uv 时，按 `SDC_RUNTIME` 指定 extra；设备检查：`python environment/verify_environment.py --accelerator`。
 - 根据改动运行相关检查。公共环境和 CI 改动须通过 `Environment consistency`；没有执行的检查不得写成通过。
 
 ## 算法与实验

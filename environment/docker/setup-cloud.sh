@@ -6,14 +6,12 @@ source "$sdc_setup_dir/install-docker.sh"
 
 sdc_cloud_usage() {
     cat <<'EOF'
-用法：bash environment/docker/setup-cloud.sh [dev|nvidia|ascend] [--soc 910b|a3|950] [--nested]
+用法：bash environment/docker/setup-cloud.sh [dev|nvidia|ascend] [--soc 910b|a3|950]
 
-不带参数时选择环境。普通模式安装 Docker、构建镜像并生成云端入口；
---nested 安装并启动嵌套 Docker，项目镜像随后由 VS Code 构建。
+不带参数时，选择要构建的环境。脚本安装 Docker，构建所选镜像，并生成 VS Code 云端入口。
 示例：
   bash environment/docker/setup-cloud.sh dev
   bash environment/docker/setup-cloud.sh nvidia
-  bash environment/docker/setup-cloud.sh nvidia --nested
   bash environment/docker/setup-cloud.sh ascend --soc 910b
 EOF
 }
@@ -56,7 +54,7 @@ sdc_install_nvidia_runtime() {
 }
 
 sdc_setup_cloud() {
-    local sdc_profile='' sdc_soc='' sdc_choice sdc_platform sdc_target sdc_image sdc_nested=0
+    local sdc_profile='' sdc_soc='' sdc_choice sdc_platform sdc_target sdc_image
     local sdc_user=${SUDO_USER:-$(id -un)} sdc_uid sdc_gid sdc_device_gid=0
     local sdc_project sdc_device
     local -a sdc_build_args=()
@@ -68,7 +66,6 @@ sdc_setup_cloud() {
             --soc)
                 [[ $# -ge 2 ]] || { printf '%s\n' '--soc 需要芯片型号。' >&2; return 2; }
                 sdc_soc=$2; shift 2 ;;
-            --nested) sdc_nested=1; shift ;;
             -h|--help) sdc_cloud_usage; return ;;
             *) printf '未知参数：%s\n' "$1" >&2; return 2 ;;
         esac
@@ -78,14 +75,13 @@ sdc_setup_cloud() {
             sdc_cloud_usage >&2
             return 2
         fi
-        printf '%s\n' '选择服务器环境：1) 普通开发  2) NVIDIA GPU  3) 昇腾 NPU  4) NVIDIA 容器内 Docker'
+        printf '%s\n' '选择服务器环境：1) 普通开发  2) NVIDIA GPU  3) 昇腾 NPU'
         read -r -p '输入编号 [1]：' sdc_choice
         case ${sdc_choice:-1} in
             1) sdc_profile=dev ;;
             2) sdc_profile=nvidia ;;
             3) sdc_profile=ascend ;;
-            4) sdc_profile=nvidia; sdc_nested=1 ;;
-            *) printf '%s\n' '请输入 1、2、3 或 4。' >&2; return 2 ;;
+            *) printf '%s\n' '请输入 1、2 或 3。' >&2; return 2 ;;
         esac
     fi
     if [[ $sdc_profile == ascend && -z $sdc_soc && -t 0 ]]; then
@@ -100,10 +96,6 @@ sdc_setup_cloud() {
         printf '%s\n' '--soc 用于 ascend 环境。' >&2
         return 2
     fi
-    if [[ $sdc_nested == 1 && $sdc_profile != nvidia ]]; then
-        printf '%s\n' '--nested 仅用于 NVIDIA 平台容器。' >&2
-        return 2
-    fi
     case $(uname -m) in
         x86_64) sdc_platform=linux/amd64 ;;
         aarch64|arm64) sdc_platform=linux/arm64 ;;
@@ -113,13 +105,6 @@ sdc_setup_cloud() {
     cd "$sdc_project"
     sdc_uid=$(id -u "$sdc_user")
     sdc_gid=$(id -g "$sdc_user")
-
-    if [[ $sdc_nested == 1 ]]; then
-        bash "$sdc_setup_dir/nested-docker.sh" setup
-        if [[ ! -e .env ]]; then (umask 077; set -o noclobber; cat .env.example > .env); fi
-        printf '%s\n' '在 VS Code 执行 Reopen in Container，选择“SDC NVIDIA（容器内 Docker）”。首次打开将构建项目镜像。'
-        return
-    fi
 
     case $sdc_profile in
         nvidia)

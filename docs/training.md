@@ -2,7 +2,7 @@
 
 本教程使用 Qwen3-0.6B，在 WikiText-103 文本上进行单卡全参数继续预训练。NVIDIA 通过统一入口选择 FP32、BF16、FP8 或 NVFP4 CUTLASS 线性层，主权重保持 FP32。各精度共用数据、优化器和训练流程。
 
-先按[环境教程](../environment/README.md)进入 NVIDIA 或昇腾训练容器。除“后台运行”中的 Docker 调度命令外，以下命令均在容器内的仓库根目录执行。使用 CUTLASS 算子时，先完成[GEMM 教程](gemm.md)中的编译与检查。
+先按[环境教程](../environment/README.md)进入训练 Docker，或在平台容器中激活统一 `.venv`。除 Docker 调度命令外，以下命令均在已配置环境的仓库根目录执行。使用 CUTLASS 算子时，先完成[GEMM 教程](gemm.md)中的编译与检查。
 
 ## 准备数据
 
@@ -80,7 +80,7 @@ bash scripts/train.sh train --config experiments/my_training.yaml
 
 ## 在 VS Code 中调试
 
-先通过 Remote-SSH 连接服务器，再进入项目的 NVIDIA Dev Container。VS Code 终端中的仓库路径应为 `/workspace/SDC`，Python 为 `/opt/venv/bin/python`。在扩展面板确认 **Python Debugger** 已安装到当前容器。
+Docker 路线进入 NVIDIA Dev Container，Python 为 `/opt/venv/bin/python`。平台容器路线通过 Remote-SSH 打开 `.sdc/SDC-platform.code-workspace`，选择“平台容器：按 YAML 调试”，使用仓库 `.venv/bin/python`。在扩展面板确认 **Python Debugger** 已安装到对应远端环境。
 
 1. 打开 [qwen3_debug.yaml](../configs/training/qwen3_debug.yaml)。它复用公共模型与数据，运行两步 BF16 CUTLASS 训练，每步记录日志，不保存检查点。梯度累积设为 1，关闭梯度检查点，便于依次查看前向、反向与参数更新。
 2. 模型和数据已准备好时直接使用；首次准备仍执行前文的 `prepare` 命令。调试配置默认离线加载。
