@@ -3,7 +3,8 @@
   "build": {
     "dockerfile": "../../environment/docker/Dockerfile",
     "context": "../..",
-    "target": "nvidia"
+    "target": "nvidia",
+    "options": ["--network=host", "--allow=network.host"]
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
   "workspaceFolder": "/workspace/SDC",
@@ -13,7 +14,8 @@
   },
   "runArgs": [
     "--gpus=all",
-    "--shm-size=8g"
+    "--shm-size=8g",
+    "--network=host"
   ],
   "mounts": [
     "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",

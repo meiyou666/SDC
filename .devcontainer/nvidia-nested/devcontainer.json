@@ -3,7 +3,8 @@
   "build": {
     "dockerfile": "../../environment/docker/Dockerfile",
     "context": "../..",
-    "target": "nvidia"
+    "target": "nvidia",
+    "options": ["--network=host", "--allow=network.host", "--builder=sdc-nested"]
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
   "workspaceFolder": "/workspace/SDC",

@@ -36,6 +36,10 @@ docker compose run --build --rm tools lock --check
 
 调整 Python 版本时同步检查 `.python-version`、Dockerfile 和 `baseline.json`。发行包名与导入名不同时，更新 `baseline.json` 的 `import_map`。
 
+平台容器的外层环境通过 `setup-cloud.sh nvidia --nested` 调用 `nested-docker.sh setup`。仓库保存完整的 Docker 及依赖安装、Supervisor 配置、FUSE ext4 存储、RootlessKit、CDI 和 BuildKit 启动逻辑；安装副本位于 `/usr/local/lib/sdc-docker/`，设置位于 `/etc/sdc-docker/settings.conf`。已有存储文件只验证并复用。CDI 使用扫描目录外的 YAML 临时文件原子更新，只备份本脚本的历史残留，不删除其他设备配置。
+
+所有 Dev Container、Compose 和 CI 构建入口均使用 host 网络。嵌套路径中的 RootlessKit 也使用 `--net=host`；Docker 关闭 bridge、iptables 和 IP 转发配置，BuildKit 允许 `network.host`。setup 迁移时停止旧的 tinyproxy/socat 服务并备份配置，不再建立代理转发。`sdc-nested` 是指向独立 BuildKit socket 的 remote builder，嵌套 Dev Container 显式选择它；NVIDIA 仍使用共享 Dockerfile 与 `uv.lock`。完整入口与管理命令见[环境教程](../environment/README.md#容器内-docker)。服务管理测试使用隔离目录和命令替身；实际平台启动由维护人在 SSH 环境执行验证。
+
 GitHub Actions 检查 Compose 配置、脚本语法、锁文件和环境策略，再执行测试与 Ruff。工作流缓存 Docker 的 `tooling` 和 `development` 构建层，同一 PR 更新时取消旧任务。GitHub runner 使用 Ubuntu 官方 APT 源，并设置 `SDC_INSTALL_AI_TOOLS=false`；本地构建默认使用清华 APT 源并安装 AI 工具。
 
 维护人也可运行 **Update uv lock** 工作流，下载并提交生成的锁文件。改变依赖源时同步更新 `pyproject.toml`。

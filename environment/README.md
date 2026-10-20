@@ -10,6 +10,8 @@
 
 项目代码、依赖安装、测试与实验均在容器中执行。宿主机用于编辑、Git 操作和启动 Docker。训练步骤见[训练教程](../docs/training.md)，CUTLASS 构建与接入见[GEMM 教程](../docs/gemm.md)。
 
+所有入口的镜像构建和容器运行统一使用宿主机网络（`host`）。云端容器使用服务器网络；平台容器内的 Docker 使用外层容器网络，无需配置额外代理转发。
+
 ## 本地 Windows
 
 1. 安装 [Git for Windows](https://git-scm.com/downloads/win)，在准备保存项目的目录打开 **Windows PowerShell**，先克隆仓库：
@@ -25,7 +27,7 @@
    Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
    ```
 
-3. 启动 Docker Desktop。在 **Settings → Resources** 为虚拟机分配至少 4 GB 内存；在 **General → Virtual Machine Manager** 选择 **Docker VMM**。在 **Resources → File sharing** 添加仓库目录，点击 **Apply & restart**。设置说明见[官方 VMM 文档](https://docs.docker.com/desktop/features/vmm/)。
+3. 启动 Docker Desktop。在 **Settings → Resources** 为虚拟机分配至少 4 GB 内存；在 **General → Virtual Machine Manager** 选择 **Docker VMM**。在 **Resources → File sharing** 添加仓库目录，在 **Resources → Network** 开启 **Enable host networking**，点击 **Apply & restart**。设置说明见[官方 VMM 文档](https://docs.docker.com/desktop/features/vmm/)和[宿主机网络说明](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)。
 4. 重新打开终端和 VS Code。安装 **Dev Containers** 和 **Container Tools** 扩展，打开仓库中的 `SDC.code-workspace`。
 5. 按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**，选择 **SDC**。首次进入会构建镜像并安装 VS Code 扩展。
 6. 按[确认环境可用](#确认环境可用)检查容器。
@@ -85,7 +87,7 @@
 
 ### 初始化服务器环境
 
-普通云服务器按本节初始化。SSH 登录后本身就在平台容器内、且已配置好 Docker 的环境，使用下文的[容器内 Docker 入口](#容器内-docker)。
+普通云服务器按本节初始化。SSH 登录后本身就在平台容器内时，使用下文的[容器内 Docker 安装入口](#容器内-docker)。
 
 在 **Remote-SSH 的服务器终端、仓库根目录**执行：
 
@@ -122,18 +124,42 @@ bash environment/docker/setup-cloud.sh ascend --soc 910b
 
 ### 容器内 Docker
 
-平台分配的环境本身是 Linux 容器时，先在 SSH 终端确认 Docker 和 GPU 已就绪：
+平台分配的环境本身是 Ubuntu 容器时，在外层 **SSH 终端、仓库根目录**以 root 执行：
 
 ```bash
-docker info
-nvidia-smi
+bash environment/docker/setup-cloud.sh nvidia --nested
 ```
 
-在 VS Code 的 SSH 窗口打开仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA（容器内 Docker）**。入口为 [.devcontainer/nvidia-nested/devcontainer.json](../.devcontainer/nvidia-nested/devcontainer.json)，无需手工创建 `cloud-nvidia` 配置。
+这个入口安装缺少的 Docker Engine、Compose、Buildx、RootlessKit、BuildKit、NVIDIA Container Toolkit 和 FUSE。已有安装会复用。平台需提供 GPU 驱动、可读写的 `/dev/fuse` 和用户命名空间；脚本会检查设备并配置本项目的服务。
 
-它与普通 NVIDIA 入口使用同一 Dockerfile、`nvidia` 构建目标、依赖锁文件和 VS Code 扩展。首次打开按共享 Dockerfile 构建，后续复用构建缓存。嵌套入口额外共享 Docker 主机的 PID 和网络，挂载只读 `/sys`，并用独立数据卷提供可写 `/tmp`。
+脚本依次挂载存储、生成 NVIDIA CDI 配置、启动 RootlessKit 中的 Docker 和 BuildKit，再检查 GPU 设备登记和构建器。RootlessKit、镜像构建和项目容器均使用外层容器的网络。迁移时自动停用旧的 tinyproxy、socat 转发服务，并备份原配置。CDI 临时文件在扫描目录外生成，成功后原子替换；此前的 `.sdc-nvidia.*` 残留配置会移到备份目录。
 
-此入口以 root 运行，代码直接写入挂载的仓库；模型、编译缓存、SSH 和 Codex 配置保存在 root 对应的数据卷中。npm 工具仍使用镜像原有的 `/home/sdc/.local`。新入口使用自己的卷，旧容器缓存需要另行迁移。Docker 服务及 NVIDIA 运行时由外层平台环境启动和管理。
+Docker 数据默认存入仓库上一级目录的 `sdc-docker-storage.ext4`。新文件容量为 64 GiB；已有 ext4 文件直接复用，不重新格式化或扩容。首次安装需要指定其他位置时，改用下面的入口：
+
+```bash
+bash environment/docker/nested-docker.sh setup --storage-file /root/shared-nvme/sdc-docker-storage.ext4 --storage-gib 64
+```
+
+配置保存在 `/etc/sdc-docker/settings.conf`，源脚本安装到 `/usr/local/lib/sdc-docker/`。服务由 Supervisor 管理；检测到平台现有 Supervisor 时复用，否则配置独立实例。BuildKit 临时缓存使用上限 50 GiB 的 tmpfs，按实际使用占用内存；可在设置文件中调整 `SDC_NESTED_BUILDKIT_SIZE`，然后执行 restart。
+
+日常管理仍在外层 SSH 终端执行：
+
+```bash
+bash environment/docker/nested-docker.sh status
+bash environment/docker/nested-docker.sh start
+bash environment/docker/nested-docker.sh stop
+bash environment/docker/nested-docker.sh restart
+bash environment/docker/nested-docker.sh logs docker
+bash environment/docker/nested-docker.sh logs buildkit
+```
+
+安装后也可使用 `sdc-docker-service` 加上述子命令。`stop` 停止 Docker 和 BuildKit，保留存储挂载及其中的镜像、数据卷。更新服务脚本时，先停止项目容器，再执行 setup。
+
+启动完成后，在 VS Code 的 SSH 窗口打开仓库，执行 **Dev Containers: Reopen in Container**，选择 **SDC NVIDIA（容器内 Docker）**。入口为 [.devcontainer/nvidia-nested/devcontainer.json](../.devcontainer/nvidia-nested/devcontainer.json)，无需手工创建 `cloud-nvidia` 配置。
+
+它与普通 NVIDIA 入口使用同一 Dockerfile、`nvidia` 构建目标、依赖锁文件和 VS Code 扩展。首次打开使用脚本配置的 `sdc-nested` BuildKit 构建器生成镜像，后续复用缓存。
+
+嵌套入口共享 Docker 所在环境的 PID 和网络，挂载只读 `/sys`，并用独立卷提供可写 `/tmp`。容器以 root 运行，模型、编译缓存、SSH 和 Codex 配置保存在相应数据卷中；npm 工具仍使用 `/home/sdc/.local`。新入口使用自己的卷，旧容器缓存需要另行迁移。
 
 ## 确认环境可用
 
