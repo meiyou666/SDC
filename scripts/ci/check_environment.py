@@ -15,6 +15,11 @@ import tomllib
 BASELINE = "environment/baseline.json"
 LOCKFILE = "uv.lock"
 PROJECT = "pyproject.toml"
+TRAINING_DEVCONTAINERS = {
+    ".devcontainer/nvidia/devcontainer.json": "nvidia",
+    ".devcontainer/ascend/devcontainer.json": "ascend",
+    ".devcontainer/nvidia-nested/devcontainer.json": "nvidia",
+}
 INFRA = (".github/", "scripts/ci/", "tests/ci/")
 SHARED_FILES = {"compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", ".dockerignore", ".gitattributes", ".python-version", ".env.example", "AGENTS.md", "dev.cmd", "dev.sh", "ruff.toml", "pytest.ini", "scripts/check.sh", "scripts/train.sh"}
 CODE_SUFFIXES = {
@@ -246,8 +251,7 @@ def check_cpu_container(snapshot, baseline, locked):
         or any(dev["build"].get(key) != value for key, value in expected_build.items())
     ):
         raise PolicyError("Dev Container must build the development target from the shared Dockerfile.")
-    for profile in profiles:
-        config_path = f".devcontainer/{profile}/devcontainer.json"
+    for config_path, profile in (TRAINING_DEVCONTAINERS.items() if profiles else ()):
         if config_path not in snapshot.files:
             raise PolicyError(f"Missing {config_path}.")
         config = json.loads(snapshot.read(config_path))
@@ -301,7 +305,7 @@ def check(snapshot, changed, author, owner):
     extra = sorted(
         path for path in snapshot.files
         if not path.startswith(("archive/", ".agent/", *INFRA))
-        and path not in {PROJECT, LOCKFILE, "compose.yaml", ".devcontainer/devcontainer.json", ".devcontainer/nvidia/devcontainer.json", ".devcontainer/ascend/devcontainer.json", "environment/docker/Dockerfile"}
+        and path not in {PROJECT, LOCKFILE, "compose.yaml", ".devcontainer/devcontainer.json", *TRAINING_DEVCONTAINERS, "environment/docker/Dockerfile"}
         and dependency_file(path)
     )
     if extra:

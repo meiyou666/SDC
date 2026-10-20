@@ -1,0 +1,73 @@
+{
+  "name": "SDC NVIDIA（容器内 Docker）",
+  "build": {
+    "dockerfile": "../../environment/docker/Dockerfile",
+    "context": "../..",
+    "target": "nvidia"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
+  "workspaceFolder": "/workspace/SDC",
+  "containerEnv": {
+    "PYTHONPATH": "/workspace/SDC/src",
+    "CUDA_VISIBLE_DEVICES": "${localEnv:SDC_CUDA_VISIBLE_DEVICES:0}",
+    "NPM_CONFIG_CACHE": "/root/.cache/npm",
+    "HF_HOME": "/root/.cache/huggingface",
+    "TORCH_EXTENSIONS_DIR": "/root/.cache/torch_extensions"
+  },
+  "runArgs": [
+    "--gpus=all",
+    "--shm-size=8g",
+    "--pid=host",
+    "--network=host"
+  ],
+  "mounts": [
+    "source=sdc-codex-${devcontainerId},target=/root/.codex,type=volume",
+    "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume",
+    "source=sdc-ssh-${devcontainerId},target=/root/.ssh,type=volume",
+    "source=sdc-cache-${devcontainerId},target=/root/.cache,type=volume",
+    "type=bind,source=/sys,target=/sys,readonly",
+    "source=sdc-tmp-${devcontainerId},target=/tmp,type=volume"
+  ],
+  "forwardPorts": [
+    6006,
+    8888
+  ],
+  "portsAttributes": {
+    "6006": {
+      "label": "TensorBoard",
+      "onAutoForward": "silent"
+    },
+    "8888": {
+      "label": "Jupyter",
+      "onAutoForward": "silent"
+    }
+  },
+  "init": true,
+  "containerUser": "root",
+  "remoteUser": "root",
+  "updateRemoteUserUID": false,
+  "overrideCommand": true,
+  "shutdownAction": "stopContainer",
+  "postCreateCommand": "python /opt/sdc/project/environment/verify_environment.py --project /workspace/SDC --smoke",
+  "postStartCommand": "sh /opt/sdc/setup-codex.sh || true",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "openai.chatgpt"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": [
+          "tests"
+        ],
+        "ruff.path": [
+          "/opt/venv/bin/ruff"
+        ]
+      }
+    }
+  }
+}
