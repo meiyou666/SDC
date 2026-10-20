@@ -135,19 +135,20 @@ def test_cutlass_backend_uses_platform_snapshot_and_requires_its_interpreter(pro
     assert backend.environment_settings_path() == Path("/opt/sdc/gemm.json")
 
 
-def test_setup_uses_locked_profile_and_preserves_personal_env(project):
+@pytest.mark.parametrize("preinstalled", [True, False])
+def test_setup_uses_locked_profile_and_preserves_personal_env(project, preinstalled):
     for relative in ("environment/setup-platform.sh", "environment/configure_platform.py", "environment/verify_environment.py", ".env.example"):
         shutil.copyfile(ROOT / relative, project / relative)
     (project / ".env").write_text("OPENAI_API_KEY=keep-personal-value\n")
     binary = project / ".sdc/bin"
     binary.mkdir(parents=True)
-    uv = binary / "uv"
+    uv = binary / "uv" if preinstalled else project / "uv-wheel-executable"
     version = json.loads((project / "environment/baseline.json").read_text())["uv"]
     uv.write_text(f'''#!/usr/bin/env bash
 set -eu
 echo "$*" >> "$TEST_LOG"
 case $1 in
-  --version) echo 'uv {version}' ;;
+  --version) echo 'uv {version} (x86_64-unknown-linux-gnu)' ;;
   python) : ;;
   sync)
     mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"
@@ -158,6 +159,23 @@ case $1 in
 esac
 ''')
     uv.chmod(0o755)
+    bootstrap = binary / "python3"
+    bootstrap.write_text(f'''#!/usr/bin/env bash
+set -eu
+if [[ ${{1:-}} == -m && ${{2:-}} == pip ]]; then
+    echo "pip $*" >> "$TEST_LOG"
+    if [[ ${{3:-}} == --version ]]; then echo 'pip fixture'; exit 0; fi
+    while (($#)); do
+        if [[ $1 == --target ]]; then target=$2; shift 2; else shift; fi
+    done
+    mkdir -p "$target/bin"
+    cp "$TEST_UV_WHEEL" "$target/bin/uv"
+    cp "$TEST_UV_WHEEL" "$target/bin/uvx"
+    exit 0
+fi
+exec {shlex.quote(sys.executable)} "$@"
+''')
+    bootstrap.chmod(0o755)
     wrapper = project / "python-wrapper"
     # Run the actual configurator, but replace library/device validation since this
     # test deliberately avoids downloading a second PyTorch environment.
@@ -170,12 +188,22 @@ exec {shlex.quote(sys.executable)} "$@"
 ''')
     log = project / "commands.log"
     result = subprocess.run(["bash", str(project / "environment/setup-platform.sh"), "development"],
-                            env={**os.environ, "TEST_LOG": str(log), "TEST_PYTHON_WRAPPER": str(wrapper)}, capture_output=True, text=True)
+                            env={**os.environ, "PATH": f"{binary}:{os.environ['PATH']}", "TEST_LOG": str(log),
+                                 "TEST_PYTHON_WRAPPER": str(wrapper), "TEST_UV_WHEEL": str(uv)}, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "sync --locked --all-groups --extra development --no-build" in log.read_text()
     assert "verify environment/verify_environment.py --smoke" in log.read_text()
     assert (project / ".sdc/SDC-platform.code-workspace").is_file()
     assert (project / ".env").read_text() == "OPENAI_API_KEY=keep-personal-value\n"
+    if preinstalled:
+        assert "pip " not in log.read_text()
+    else:
+        assert "--index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" in log.read_text()
+        assert "--no-deps --only-binary=:all:" in log.read_text()
+        assert f"uv=={version}" in log.read_text()
+        assert (binary / "uv").is_file()
+        assert (binary / "uvx").is_file()
+        assert not list((project / ".sdc").glob("uv-download.*"))
 
 
 def test_cutlass_install_is_repeatable_and_rejects_modified_sources(tmp_path):

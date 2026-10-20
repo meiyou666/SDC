@@ -19,7 +19,7 @@
 
 ## 执行环境
 
-- **项目代码、依赖安装、测试、实验和绘图须在项目 Docker 或通过统一检查的云容器项目 `.venv` 中执行。禁止使用 Agent 所在的本地 Python、系统 Python 或其他 Conda/虚拟环境代跑。** 云容器通过 `environment/setup-platform.sh` 初始化；系统 Python 仅用于该脚本的标准库引导检查。
+- **项目代码、依赖安装、测试、实验和绘图须在项目 Docker 或通过统一检查的云容器项目 `.venv` 中执行。禁止使用 Agent 所在的本地 Python、系统 Python 或其他 Conda/虚拟环境代跑。** 云容器通过 `environment/setup-platform.sh` 初始化；系统 Python 仅用于引导检查，以及通过 `pip --target` 向 `.sdc/` 安装固定版本的 uv，不向系统环境安装项目依赖。
 - Agent 已在 Dev Container 内时，直接运行容器中的命令；在容器外时，通过 Docker 调用项目容器。
 - 宿主机可运行 AI 工具、编辑器、Git/GitHub 和 Docker。平台已分配容器时，直接通过 Remote-SSH 使用项目 `.venv`。
 - 环境文档按本地和云端组织。本地分 Windows、WSL；云端先用 Remote-SSH 连接服务器，再运行 `environment/docker/setup-cloud.sh`，通过生成的 VS Code 入口进入远端容器。服务器专用配置保存在 `.devcontainer/cloud-*/`，不提交 Git。
