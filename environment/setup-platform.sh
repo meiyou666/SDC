@@ -10,18 +10,26 @@ sdc_runtime=${1:-nvidia}
 case "$sdc_runtime" in nvidia|ascend|development) ;; *) echo '请选择 nvidia、ascend 或 development。' >&2; exit 2 ;; esac
 [[ $# -le 1 ]] || exit 2
 cd "$sdc_project"
-for sdc_tool in python3 curl git tar gcc g++ make ninja; do
+for sdc_tool in python3 git gcc g++ make ninja; do
     command -v "$sdc_tool" >/dev/null || { echo "缺少 $sdc_tool，请在平台环境安装对应系统工具。" >&2; exit 1; }
 done
 python3 environment/configure_platform.py check --profile "$sdc_runtime"
 # Bootstrap uses only the platform Python standard library to read shared versions.
 read -r sdc_python sdc_uv < <(python3 -c 'import json; b=json.load(open("environment/baseline.json")); print(b["python"], b["uv"])')
 mkdir -p .sdc/bin
-if [[ ! -x .sdc/bin/uv || $(.sdc/bin/uv --version) != "uv $sdc_uv" ]]; then
-    sdc_download=$(mktemp)
-    trap 'rm -f -- "$sdc_download"' EXIT
-    curl -fsSL --retry 3 --connect-timeout 15 "https://astral.sh/uv/$sdc_uv/install.sh" -o "$sdc_download"
-    UV_UNMANAGED_INSTALL="$sdc_project/.sdc/bin" sh "$sdc_download"
+if [[ ! -x .sdc/bin/uv || $(.sdc/bin/uv --version | awk '{print $2}') != "$sdc_uv" ]]; then
+    python3 -m pip --version >/dev/null 2>&1 || {
+        echo '缺少引导工具 pip，请执行 apt-get install -y python3-pip 后重试。' >&2
+        exit 1
+    }
+    sdc_download=$(mktemp -d "$sdc_project/.sdc/uv-download.XXXXXXXX")
+    trap 'rm -rf -- "$sdc_download"' EXIT
+    python3 -m pip --isolated install --disable-pip-version-check --no-deps --only-binary=:all: \
+        --index-url https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+        --timeout 30 --retries 3 --target "$sdc_download" "uv==$sdc_uv"
+    [[ $("$sdc_download/bin/uv" --version | awk '{print $2}') == "$sdc_uv" ]]
+    install -m 0755 "$sdc_download/bin/uv" .sdc/bin/uv
+    install -m 0755 "$sdc_download/bin/uvx" .sdc/bin/uvx
 fi
 export PATH="$sdc_project/.sdc/bin:$PATH"
 export UV_PYTHON_INSTALL_DIR="$sdc_project/.sdc/python"
