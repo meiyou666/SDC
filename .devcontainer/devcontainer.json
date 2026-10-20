@@ -3,14 +3,15 @@
   "build": {
     "dockerfile": "../environment/docker/Dockerfile",
     "context": "..",
-    "target": "development"
+    "target": "development",
+    "options": ["--network=host", "--allow=network.host"]
   },
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/SDC,type=bind",
   "workspaceFolder": "/workspace/SDC",
   "containerEnv": {
     "PYTHONPATH": "/workspace/SDC/src"
   },
-  "runArgs": ["--shm-size=2g"],
+  "runArgs": ["--shm-size=2g", "--network=host"],
   "mounts": [
     "source=sdc-codex-${devcontainerId},target=/home/sdc/.codex,type=volume",
     "source=sdc-ai-tools-${devcontainerId},target=/home/sdc/.local,type=volume",

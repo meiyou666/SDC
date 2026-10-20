@@ -84,7 +84,7 @@ def shell(body, *args, script=SETUP):
     return subprocess.run(["bash", "-c", 'source "$1"\nshift\n' + identity + body, "cloud-test", str(script), *args], text=True, capture_output=True, env={**os.environ, "SUDO_USER": ""})
 
 
-@pytest.mark.parametrize("args", [("invalid",), ("dev", "nvidia"), ("ascend",), ("dev", "--soc", "a3"), ("ascend", "--soc", "bad"), ("ascend", "--soc")])
+@pytest.mark.parametrize("args", [("invalid",), ("dev", "nvidia"), ("ascend",), ("dev", "--soc", "a3"), ("ascend", "--soc", "bad"), ("ascend", "--soc"), ("dev", "--nested"), ("ascend", "--soc", "910b", "--nested")])
 def test_invalid_selection_stops_before_installation(args):
     result = shell('sdc_install_docker() { echo UNEXPECTED_INSTALL; exit 91; }\nsdc_setup_cloud "$@"', *args)
     assert result.returncode == 2
@@ -118,6 +118,26 @@ def test_missing_gpu_driver_stops_before_installation():
     assert result.returncode == 1
     assert "NVIDIA 驱动" in result.stderr
     assert "UNEXPECTED_INSTALL" not in result.stdout
+
+
+def test_nested_setup_uses_bootstrap_and_preserves_personal_env(project):
+    directory = project / "environment/docker"
+    directory.mkdir(parents=True)
+    for filename in ("setup-cloud.sh", "install-docker.sh"):
+        shutil.copyfile(ROOT / "environment/docker" / filename, directory / filename)
+    (project / ".env").write_text("OPENAI_API_KEY=local-placeholder\n")
+    result = shell('''
+bash() { printf 'BOOTSTRAP'; printf ' <%s>' "$@"; printf '\\n'; }
+sdc_install_docker() { echo UNEXPECTED_INSTALL; exit 91; }
+sdc_install_nvidia_runtime() { echo UNEXPECTED_RUNTIME; exit 92; }
+sdc_docker() { echo UNEXPECTED_BUILD; exit 93; }
+sdc_setup_cloud nvidia --nested
+''', script=directory / "setup-cloud.sh")
+    assert result.returncode == 0, result.stderr
+    assert f"BOOTSTRAP <{directory}/nested-docker.sh> <setup>" in result.stdout
+    assert "UNEXPECTED" not in result.stdout
+    assert "容器内 Docker" in result.stdout
+    assert (project / ".env").read_text() == "OPENAI_API_KEY=local-placeholder\n"
 
 
 def test_failed_installation_does_not_start_build():
