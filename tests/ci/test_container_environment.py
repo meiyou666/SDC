@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -130,20 +129,19 @@ class RuntimeEnvironmentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "2.9.0"):
                 runtime.check_torch_version(baseline, "development")
 
-    def test_workspace_verifier_compares_against_image(self):
+    def test_workspace_verifier_compares_against_snapshot(self):
         with tempfile.TemporaryDirectory() as directory:
-            project = Path(directory)
-            (project / "environment").mkdir()
-            for name in ["environment/baseline.json", "uv.lock", "pyproject.toml", ".python-version"]:
-                (project / name).write_bytes((ROOT / name).read_bytes())
+            project = Path(directory) / "workspace"
+            installed = Path(directory) / "installed"
+            for root in (project, installed):
+                (root / "environment").mkdir(parents=True)
+                for name in ["environment/baseline.json", "uv.lock", "pyproject.toml", ".python-version"]:
+                    (root / name).write_bytes((ROOT / name).read_bytes())
+            runtime.verify_baked_files(project, installed)
             with (project / "pyproject.toml").open("a") as handle:
-                handle.write("\n# Different from image\n")
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "environment/verify_environment.py"), "--project", str(project)],
-                capture_output=True, text=True,
-            )
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("files used to build this image", result.stderr)
+                handle.write("\n# Different from installed snapshot\n")
+            with self.assertRaisesRegex(ValueError, "pyproject.toml differs"):
+                runtime.verify_baked_files(project, installed)
 
     def test_nvidia_package_versions_match_baseline(self):
         baseline = json.loads((ROOT / "environment/baseline.json").read_text())
