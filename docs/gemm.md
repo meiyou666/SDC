@@ -131,7 +131,7 @@ gemm:
 python -m abft.benchmark --config configs/gemm/abft_benchmark.yaml
 ```
 
-只跑 BF16 小矩阵并查看调试输出时，使用 `configs/gemm/my_gemm.yaml`。该配置不加载模型或训练数据。
+只跑 BF16 增广矩阵 ABFT 并查看调试输出时，使用 `configs/gemm/my_gemm.yaml`。该配置不加载模型或训练数据。
 
 ```bash
 python -m abft.benchmark --config configs/gemm/my_gemm.yaml
@@ -139,11 +139,23 @@ python -m abft.benchmark --config configs/gemm/my_gemm.yaml
 
 `progress: true` 打印当前精度、矩阵尺寸、测量进度、耗时、输出差异和 ABFT 报警。`preview_size: 4` 显示输入矩阵及首组测量输出的左上角 4×4，设为 0 关闭，最大为 16。生成输入的预览位于类型转换和量化之前；FP32/BF16 另显示实际 GEMM 输入。所有预览、比较和打印都在计时区间之外，量化与算子实现不变。正式计时时可关闭进度与预览，减少两次测量之间的主机活动。
 
+### BF16 增广矩阵路径
+
+`abft.reference_mode: augmented` 保留完整的官方 `128×128×64` 数据 tile，额外附加 2 行校验，逻辑输出为 `130×128`。从已加载的共享 A 计算 `W×A`，将编码写成额外共享缓冲中的 BF16 校验行，再用附加的官方 MMA fragment 与同一共享 B 相乘。原 128 行数据的主 MMA、分块坐标和流水不变；附加 2 行使用额外 MMA 片段承载，并非一条 130 行 MMA 指令。所有编码和矩阵乘法均为 BF16 输入、官方 FP32 累加，不再执行 FP32 标量的 `q×B` 参考传播。两侧校验在主结果转换为 BF16 之前取数。
+
+当前增广路径支持 BF16，A、B 均可为 packed 行主序或列主序，遵循原官方 GEMM 的对齐要求。编码按每个 128 行数据 tile 独立进行，不复制整份 A，也不重新从显存遍历 A/B。其他精度继续使用原路径，不会静默回退。
+
+此模式需显式设置 `abft.threshold_scale: output`，其阈值为 `atol + rtol × Σ|w*C_acc|`；旧 `input_fused/separate` 使用默认 `threshold_scale: input`，对应 `|W||A||B|`。输出幅值是可校准的尺度，不是旧输入误差上界。校验行写为 BF16 引入的舍入误差属于正常残差；示例保留原调试容差并如实记录报警，正式误报率和检出率实验须在独立正常样本上校准。
+
+增广路径支持计算结果注入和一次重算复检。BF16 行号权重可能重复，原 FP32 的比值定位规则不适用，因此当前报告 `located: false`，不声称可定位单行。完整 FP32 标量参考仍可通过 `reference_mode: input_fused` 与 `threshold_scale: input` 选择作对照。
+
 配置指定精度、矩阵形状 `[M,N,K]`、输入种子、阈值、预热和测量次数。两条路径使用同一份已准备好的码值、scale 与布局，量化和布局转换在计时之前完成。保护路径从参考校验开始计时，到输出与设备端判定完成结束；参考解码和校验传播仍计入保护开销。
 
 输出 JSON 包含无保护与保护时延、配对比例、逐位输出一致性和正常调用报警结果。测量顺序交替，报告在计时外读取。CUDA Event 的完整调用时延可能包含 CPU 提交间隙，不等于 GPU 内核执行时间之和。正常重复调用使用同一输入，报警比例用于检查当前配置，不替代独立正常样本上的阈值校准。
 
 `profile_repeats` 大于 0 时，额外使用 PyTorch profiler/CUPTI 测量各阶段，打印汇总并保存到 JSON 的 `stage_profile`；它不计入主测量样本。阶段包括校验权重/参考准备、融合 GEMM、参考与输出 checksum 合并、检测、候选定位和报告状态张量。GPU 列累计关联的内核与拷贝时间，不包含 CPU 发射间隙；CPU 列包含提交、等待和 profiler 自身开销，两列不能相加。ABFT 完整调用是父范围，不能再与子阶段相加。其他方法若没有细分标记，则合并显示检测与定位。
+
+原生 GEMM 调用还包含校验缓冲初始化。识别到 CUPTI 的 CUTLASS 内核记录时，输出会进一步区分 `cutlass_kernel_ms` 和 `other_gpu_activity_ms`，避免将缓冲初始化混称为单个内核耗时。
 
 编译、输入准备与量化均先完成；主测量和分阶段采集分别预热。测量期间不打印矩阵或结果；分阶段采集结束后才读取报告并输出各阶段的中位数、均值。融合内核内部的主乘法和 checksum 作为整体测量，未拆成独立内核。平台无法提供 CUDA 活动时间时会明确报错，不以零时间代替。
 

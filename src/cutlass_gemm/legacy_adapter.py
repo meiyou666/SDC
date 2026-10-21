@@ -40,3 +40,35 @@ def generate_legacy_reference_headers(cutlass, destination):
             target.write_text(text, encoding="utf-8")
         targets.append(target)
     return targets
+
+
+def generate_augmented_header(cutlass, destination):
+    """Append checksum MMA fragments while preserving the original data tile.
+
+    The callback only reads the existing A/B shared stage. It neither overwrites
+    that stage nor changes the already-prefetched official main MMA fragments.
+    """
+    source = (Path(cutlass) / "include/cutlass/gemm/threadblock/mma_multistage.h").read_bytes()
+    if hashlib.sha256(source).hexdigest() != SOURCES["mma_multistage"]:
+        raise RuntimeError("Augmented mainloop differs from pinned CUTLASS: mma_multistage")
+    text = source.decode("utf-8").replace("MmaMultistage", "AugmentedMmaMultistage")
+    replacements = {
+        "  using Shape = Shape_;": (
+            "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
+            "  Encoding* encoding = nullptr;\n"
+            "  using Shape = Shape_;"
+        ),
+        "    for (; gemm_k_iterations > (-Base::kStages + 1);) {": (
+            "    for (; gemm_k_iterations > (-Base::kStages + 1);) {\n"
+            "      if (encoding) encoding->consume(smem_read_stage_idx_);"
+        ),
+    }
+    for anchor, replacement in replacements.items():
+        if text.count(anchor) != 1:
+            raise RuntimeError("Augmented mainloop insertion site changed: " + anchor.strip())
+        text = text.replace(anchor, replacement, 1)
+    target = Path(destination) / "abft_augmented_mma_multistage.h"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.is_file() or target.read_text(encoding="utf-8") != text:
+        target.write_text(text, encoding="utf-8")
+    return target

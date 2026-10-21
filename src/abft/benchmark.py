@@ -76,6 +76,8 @@ def load_config(path):
             raise ValueError("Each format declares precision, scaling, global_scale")
         if fmt["precision"] not in SCALES or fmt["scaling"] != SCALES[fmt["precision"]]:
             raise ValueError("Incompatible precision/scaling")
+        if cfg.abft.reference_mode == "augmented" and fmt["precision"] != "bf16":
+            raise ValueError("augmented currently requires BF16 GEMM")
         scale = fmt["global_scale"]
         if scale != "amax" and (isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale <= 0):
             raise ValueError("global_scale must be amax or finite positive")
@@ -195,7 +197,7 @@ def run(cfg):
         for fmt in cfg.formats:
             for m, n, k in cfg.shapes:
                 for seed in cfg.seeds:
-                    log(f"组 {len(results) + 1}/{total}：{fmt['precision']}，"
+                    log(f"组 {len(results) + 1}/{total}：{fmt['precision']}，{cfg.abft.reference_mode}，"
                         f"A[{m},{k}] × B[{k},{n}]，seed={seed}；生成并准备输入")
                     generator = torch.Generator(device=device).manual_seed(seed)
                     a = torch.randn((m, k), device=device, dtype=torch.float32, generator=generator) * cfg.input_std

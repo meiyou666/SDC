@@ -18,6 +18,10 @@ class AbftMethod(ABC):
         """Prepare projection metadata for native input-side reference generation."""
         raise NotImplementedError("Method does not support input_fused reference")
 
+    def prepare_augmented(self, operands, config):
+        """Choose same-precision encoding weights for a native augmented GEMM."""
+        raise NotImplementedError("Method does not support augmented GEMM")
+
     def bind_reference(self, predicted_partials, magnitude_partials, state):
         """Return state bound to the first execution's native reference."""
         raise NotImplementedError("Method does not support input_fused reference")
@@ -76,6 +80,13 @@ class Classic(AbftMethod):
                                torch.arange(1, operands.m+1, device=operands.a.device, dtype=torch.float32)))
         return {"weights": weights, "m": operands.m, "n": operands.n}
 
+    def prepare_augmented(self, operands, config):
+        if operands.precision != "bf16":
+            raise ValueError("augmented currently requires BF16 GEMM")
+        state = self.prepare_fused(operands, config)
+        # Encoding weights, checksum rows and A use the same BF16 input format.
+        return {**state, "weights": state["weights"].to(torch.bfloat16), "augmented": True}
+
     def bind_reference(self, predicted_partials, magnitude_partials, state):
         return {**state, "expected": self.propagate(predicted_partials, state),
                 "magnitude": self.propagate(magnitude_partials, state)}
@@ -111,6 +122,13 @@ class Classic(AbftMethod):
             failed = residual.abs() > threshold
             detected = failed.any() | nonfinite
         with self._profile_scope("abft.locate"):
+            if state.get("augmented", False):
+                # BF16 row-number weights can collide and encoding adds rounding.
+                # The FP32 ratio-based row locator is not valid for this path.
+                return {"detected": detected, "nonfinite": nonfinite,
+                        "located": torch.zeros((), device=output.device, dtype=torch.bool),
+                        "location": torch.full((2,), -1, device=output.device, dtype=torch.int64),
+                        "residual": residual, "threshold": threshold}
             columns = failed.any(dim=0)
             col = columns.to(torch.int64).argmax()
             d0, d1 = residual[:, col].unbind()

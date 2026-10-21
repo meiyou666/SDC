@@ -1,4 +1,4 @@
-# 独立 BF16 GEMM 实验：不加载模型、训练数据或优化器。
+# 独立 BF16 增广 GEMM：校验行与数据使用相同 BF16 输入格式。
 # 运行：python -m abft.benchmark --config configs/gemm/my_gemm.yaml
 device: cuda:0
 formats:
@@ -11,14 +11,16 @@ seeds: [2026]
 input_std: 1.0
 abft:
   method: classic
-  reference_mode: input_fused
-  # 调试阈值；正式误报率实验需使用独立正常样本校准。
+  reference_mode: augmented
+  # 显式使用输出幅值作为阈值尺度，不沿用旧输入乘积上界。
+  threshold_scale: output
+  # 保留原调试容差。BF16 校验编码新增舍入误差，需独立校准；报警如实记录。
   atol: 0.0001
   rtol: 0.0001
   recovery: none
   on_error: report
   reference_block_k: 256
-  diagnostics: false
+  diagnostics: true  # 将校验残差和阈值写入 JSON，便于检查 BF16 编码误差。
   timing: false
 warmup: 3
 repeats: 20
