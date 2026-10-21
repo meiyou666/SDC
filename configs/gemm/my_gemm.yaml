@@ -1,0 +1,26 @@
+# 独立 BF16 GEMM 实验：不加载模型、训练数据或优化器。
+# 运行：python -m abft.benchmark --config configs/gemm/my_gemm.yaml
+device: cuda:0
+formats:
+  - {precision: bf16, scaling: none, global_scale: amax}
+# [M, N, K]：A[M,K] × B[K,N] → C[M,N]；输入为随机矩阵。
+shapes:
+  - [128, 128, 128]
+  - [512, 1024, 1024]
+seeds: [2026]
+input_std: 1.0
+abft:
+  method: classic
+  reference_mode: input_fused
+  # 调试阈值；正式误报率实验需使用独立正常样本校准。
+  atol: 0.0001
+  rtol: 0.0001
+  recovery: none
+  on_error: report
+  reference_block_k: 256
+  diagnostics: false
+  timing: false
+warmup: 3
+repeats: 20
+profile_repeats: 0
+output: results/gemm/my_gemm.json
