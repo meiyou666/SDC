@@ -1,6 +1,7 @@
 """Build an isolated, runtime-masked copy of the BF16 augmented GEMM.
 
-This is a diagnostic kernel, never a training backend. All masks use one CUDA
+This is a diagnostic kernel, never a training backend. N/K select the same
+full-tile specialization as production; all masks for that shape use one CUDA
 entry point with identical static resources. A common q sink keeps encoding
 observable even when propagation is disabled; it also perturbs production timing.
 """
@@ -20,7 +21,7 @@ from cutlass_gemm.legacy_adapter import generate_augmented_header
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/cutlass_gemm/abft_augmented.h"
-SOURCE_SHA256 = "9248c5308c8710a533024a65995e23c76a5dde8886c47b80b70d8075fb89a512"
+SOURCE_SHA256 = "8e64ed1eb175e249a60b5edb0205c564d2d6de86b369a8c4352d824928f5a6b2"
 
 
 def _replace_once(text, anchor, replacement):
@@ -57,7 +58,9 @@ def generate_headers(cutlass, destination):
       }
     }
     const int q_slot = reuse_pipeline_barriers ? k_tile % 2 : 0;""")
-    text = _replace_once(text, """        scratch.q[q_slot][p][k] = k < valid_k ? convert(q_fragment(i)) : Element(0.f);""", """        const Element encoded = k < valid_k ? convert(q_fragment(i)) : Element(0.f);
+    text = _replace_once(text, """        scratch.q[q_slot][p][k] = full_kn || k < valid_k
+            ? convert(q_fragment(i)) : Element(0.f);""", """        const Element encoded = full_kn || k < valid_k
+            ? convert(q_fragment(i)) : Element(0.f);
         scratch.q[q_slot][p][k] = encoded;
         // Every mode consumes all valid BF16 q elements, not just the last K tile.
         diagnostic_q_sink += float(encoded);""")
@@ -71,15 +74,24 @@ def generate_headers(cutlass, destination):
     const int64_t cta = int64_t(tile_m) * (projection.padded_n / 128) + tile_n;
     projection.diagnostic_sink[cta * Threads + thread] = diagnostic_q_sink;
     ChecksumMma mma;""")
-    text = _replace_once(text, """      row_weights[0] = valid_row ? float(params_.weights[row]) : 0.f;
-      row_weights[1] = valid_row ? float(params_.weights[int64_t(params_.rows) + row]) : 0.f;""", """      row_weights[0] = row_weights[1] = 0.f;
-      if (params_.diagnostic_mask & 4) {
-        row_weights[0] = valid_row ? float(params_.weights[row]) : 0.f;
-        row_weights[1] = valid_row ? float(params_.weights[int64_t(params_.rows) + row]) : 0.f;
-      }""")
-    text = _replace_once(text, """          for (int p = 0; p < 2; ++p) {
-            const float weight""", """          if (params_.diagnostic_mask & 4) for (int p = 0; p < 2; ++p) {
-            const float weight""")
+    # The native visitor has its own helper. Mask its actual projection work,
+    # leaving data conversion, injection, and nonfinite checks in every mode.
+    text = _replace_once(text, """      const float row_weights[2] = {
+          float(params_.weights[row]),""", """      if (params_.diagnostic_mask & 4) {
+      const float row_weights[2] = {
+          float(params_.weights[row]),""")
+    text = _replace_once(text, """            magnitude_[p][slot] += fabsf(term);
+          }
+        }
+      }
+    }
+    OutputVector& output""", """            magnitude_[p][slot] += fabsf(term);
+          }
+        }
+      }
+      }
+    }
+    OutputVector& output""")
     text = _replace_once(text, """      for (int p = 0; p < 2; ++p) {
         shared_.sums[p][index] = sums_[p][c];
         shared_.magnitude[p][index] = magnitude_[p][c];

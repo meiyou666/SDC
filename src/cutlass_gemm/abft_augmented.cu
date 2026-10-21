@@ -17,7 +17,7 @@ using CompactResult = std::tuple<at::Tensor, at::Tensor, at::Tensor>;
 template<bool Compact>
 using LaunchResult = std::conditional_t<Compact, CompactResult, Result>;
 
-template<bool Compact, class LayoutA, class LayoutB>
+template<bool Compact, class LayoutA, class LayoutB, bool FullKN = false>
 LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
                             const at::Tensor& weights, int row, int col, int bit) {
   // Same SM80 official BF16 main MMA, warp tile and three-stage schedule as
@@ -26,7 +26,7 @@ LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
   using Gemm = cutlass::gemm::device::Gemm<Element, LayoutA, Element, LayoutB,
       Element, Row, float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
       cutlass::gemm::GemmShape<128,128,64>>;
-  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel, Compact>;
+  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel, Compact, FullKN>;
   const int m = a.size(0), n = b.size(1), k = a.size(1);
   const int lda = a.stride(std::is_same_v<LayoutA, Row> ? 0 : 1);
   const int ldb = b.stride(std::is_same_v<LayoutB, Row> ? 0 : 1);
@@ -82,6 +82,19 @@ LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
   else return {d, observed, hit, predicted, magnitude};
 }
 
+template<bool Compact, class LayoutA, class LayoutB>
+LaunchResult<Compact> launch_selected(const at::Tensor& a, const at::Tensor& b,
+                                    const at::Tensor& weights, int row, int col, int bit) {
+  if constexpr (Compact) {
+    // Only remove K/N masks for complete native tiles. M tails continue to
+    // use the same masks, checksum weights, and output footprint as before.
+    if (b.size(1) % 128 == 0 && a.size(1) % 64 == 0) {
+      return launch<Compact, LayoutA, LayoutB, true>(a, b, weights, row, col, bit);
+    }
+  }
+  return launch<Compact, LayoutA, LayoutB, false>(a, b, weights, row, col, bit);
+}
+
 template<bool Compact>
 LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
     const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
@@ -118,11 +131,11 @@ LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
   TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
               "Augmented ABFT GEMM requires SM80 or newer");
   if (row_a) {
-    if (row_b) return launch<Compact, Row, Row>(a, b, weights, row, col, bit);
-    return launch<Compact, Row, Col>(a, b, weights, row, col, bit);
+    if (row_b) return launch_selected<Compact, Row, Row>(a, b, weights, row, col, bit);
+    return launch_selected<Compact, Row, Col>(a, b, weights, row, col, bit);
   }
-  if (row_b) return launch<Compact, Col, Row>(a, b, weights, row, col, bit);
-  return launch<Compact, Col, Col>(a, b, weights, row, col, bit);
+  if (row_b) return launch_selected<Compact, Col, Row>(a, b, weights, row, col, bit);
+  return launch_selected<Compact, Col, Col>(a, b, weights, row, col, bit);
 }
 }  // namespace
 

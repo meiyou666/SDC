@@ -77,11 +77,20 @@ def _assert_against_legacy(compact, legacy, m, n):
         (136, 144, 8, True, False),
         (129, 144, 72, False, False),
         (136, 144, 72, True, False),
+        (136, 144, 3, True, False),
+        (136, 144, 65, True, False),
+        (1, 128, 64, False, False),
+        (136, 128, 128, False, True),
+        (136, 128, 64, True, False),
+        (136, 128, 128, True, True),
     ],
     ids=["one-row-residue", "full-tile-B-column", "A-column-tail-residue",
          "both-column-three-stages", "partial-M-N-seven-stages",
          "half-atom-RR-one-row", "half-atom-A-column-tail",
-         "half-atom-residue-RR-tail", "half-atom-residue-A-column-tail"],
+         "half-atom-residue-RR-tail", "half-atom-residue-A-column-tail",
+         "odd-K3-A-column", "odd-K65-A-column",
+         "full-KN-RR-one-row", "full-KN-RC-M-tail",
+         "full-KN-CR-M-tail", "full-KN-CC-M-tail"],
 )
 def test_compact_bitwise_layouts_tails_stage_wrap_and_nondefault_stream(
     m, n, k, column_a, column_b,
@@ -101,6 +110,60 @@ def test_compact_bitwise_layouts_tails_stage_wrap_and_nondefault_stream(
     assert not compact[2].any().item()
     for actual, before in zip((a, b, weights), snapshots, strict=True):
         _assert_bits(actual, before)
+
+
+@pytest.mark.parametrize("n,k", [(128, 64), (144, 72)], ids=["full-KN", "KN-residue"])
+def test_compact_output_rounds_bf16_midpoints_and_neighbors_bitwise(n, k):
+    m = 136
+    a = torch.zeros(m, k, dtype=torch.bfloat16, device="cuda")
+    b = torch.zeros(k, n, dtype=torch.bfloat16, device="cuda")
+    a[:, 0], a[:, 1], a[:, 2] = 1, 2**-8, 2**-16
+    # Exact BF16 factors produce both even/odd BF16 midpoints in FP32,
+    # then adjacent columns move one exact 2**-16 step above/below a midpoint.
+    b[0] = torch.tensor([1, 1 + 2**-7, -1, -1 - 2**-7, 1, 1, -1, -1],
+                        dtype=torch.bfloat16, device="cuda").repeat(n // 8)
+    b[1] = torch.tensor([1, 1, -1, -1, 1, 1, -1, -1],
+                        dtype=torch.bfloat16, device="cuda").repeat(n // 8)
+    b[2] = torch.tensor([0, 0, 0, 0, 1, -1, 1, -1],
+                        dtype=torch.bfloat16, device="cuda").repeat(n // 8)
+    weights = torch.ones(2, m, dtype=torch.bfloat16, device="cuda")
+    compact = torch.ops.sdc_cutlass.abft_augmented_compact(a, b, weights, -1, -1, -1)
+    legacy = torch.ops.sdc_cutlass.abft_augmented_mm(a, b, weights, -1, -1, -1)
+    unprotected = torch.ops.sdc_cutlass.mm(a, b)
+    expected = torch.tensor([1, 1 + 2**-6, -1, -1 - 2**-6, 1 + 2**-7, 1, -1, -1 - 2**-7],
+                            dtype=torch.bfloat16, device="cuda").repeat(m, n // 8)
+    _assert_bits(compact[0], expected)
+    _assert_bits(compact[0], unprotected)
+    _assert_against_legacy(compact, legacy, m, n)
+    assert not compact[2].any().item()
+
+
+@pytest.mark.parametrize("n,k", [(128, 64), (144, 72)], ids=["full-KN", "KN-residue"])
+def test_compact_output_preserves_inf_signs_and_canonicalizes_nan_bitwise(n, k):
+    m = 136
+    a = torch.zeros(m, k, dtype=torch.bfloat16, device="cuda")
+    b = torch.zeros(k, n, dtype=torch.bfloat16, device="cuda")
+    a[:, 0] = 1
+    # Explicit positive/negative NaN payloads test conversion rather than
+    # relying on torch's chosen NaN bits. All rows multiply these by nonzero A.
+    source_bits = [0x7F80, -128, 0x7FC1, -63, 0x3F80, -16512, 0, 0x4000]
+    b[0] = torch.tensor(source_bits, dtype=torch.int16, device="cuda").view(
+        torch.bfloat16,
+    ).repeat(n // 8)
+    weights = torch.ones(2, m, dtype=torch.bfloat16, device="cuda")
+    compact = torch.ops.sdc_cutlass.abft_augmented_compact(a, b, weights, -1, -1, -1)
+    legacy = torch.ops.sdc_cutlass.abft_augmented_mm(a, b, weights, -1, -1, -1)
+    unprotected = torch.ops.sdc_cutlass.mm(a, b)
+    # Official SM80+ scalar/packed RN conversions produce canonical 0x7fff
+    # NaNs and preserve infinity signs; NaNs are compared as raw bits.
+    expected_bits = [0x7F80, -128, 0x7FFF, 0x7FFF, 0x3F80, -16512, 0, 0x4000]
+    expected = torch.tensor(expected_bits, dtype=torch.int16, device="cuda").view(
+        torch.bfloat16,
+    ).repeat(m, n // 8)
+    _assert_bits(compact[0], expected)
+    _assert_bits(compact[0], unprotected)
+    _assert_against_legacy(compact, legacy, m, n)
+    assert torch.equal(compact[2], torch.full_like(compact[2], 2))
 
 
 @pytest.mark.parametrize(
@@ -141,9 +204,13 @@ def test_compact_flags_finite_accumulator_overflowing_only_at_bf16_conversion():
     precast = (a.cpu().double() @ b.cpu().double()).float()
     assert torch.isfinite(precast).all().item()
     assert torch.isinf(precast.bfloat16()).all().item()
-    output, partials, flags = torch.ops.sdc_cutlass.abft_augmented_compact(
+    compact = torch.ops.sdc_cutlass.abft_augmented_compact(
         a, b, weights, -1, -1, -1,
     )
+    output, partials, flags = compact
+    legacy = torch.ops.sdc_cutlass.abft_augmented_mm(a, b, weights, -1, -1, -1)
+    _assert_against_legacy(compact, legacy, 1, 8)
+    _assert_bits(output, torch.ops.sdc_cutlass.mm(a, b))
     assert torch.isinf(output).all().item()
     # This specifically requires inspecting the converted output, not merely
     # accumulators, inputs or checksum residuals. There was no injected fault.

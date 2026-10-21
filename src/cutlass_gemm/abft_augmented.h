@@ -65,12 +65,15 @@ struct AugmentedTileEncoding {
   // slots let a fast warp encode the next tile without overwriting q still
   // being read by another warp's last group. The next q-publication barrier
   // completes those readers before this slot can be reused two tiles later.
-  struct Storage { Element weights[2][128]; Element q[2][2][64]; };
+  struct Storage { alignas(4) Element weights[2][128]; Element q[2][2][64]; };
   typename Base::SharedStorage& operands;
   Storage& scratch;
   AugmentedParams projection;
   int columns, inner, tile_m, tile_n, thread, k_tile = 0;
   bool reuse_pipeline_barriers = false;
+  // Set only by the host-selected native FullKN kernel instantiation. All
+  // K64 stages and N128 tiles then contain valid K/N coordinates; M may tail.
+  bool full_kn = false;
   ChecksumFragment predicted;
 
   // A native B atom is N8xK16; the appended MMA reads B^T as N16xK16.
@@ -100,6 +103,41 @@ struct AugmentedTileEncoding {
   }
   static_assert(register_mapping_is_lane_local(),
                 "Official B-to-A transpose must preserve every lane's coordinates");
+
+  // Official SM80 A/B layouts place consecutive K coordinates in a single
+  // packed BF16 register. Check every lane before using a uint32 copy/view;
+  // this is a layout-preserving bit copy, never a numeric conversion.
+  CUTLASS_HOST_DEVICE static constexpr bool propagation_pairs_are_contiguous() {
+    for (int lane = 0; lane < 32; ++lane) {
+      for (int value = 0; value < 16; value += 2) {
+        const int a0 = AtomALayout{}(cute::make_coord(lane, value % 8));
+        const int a1 = AtomALayout{}(cute::make_coord(lane, (value + 1) % 8));
+        if (a1 != a0 + 16 || source_b_register(value) % 2 ||
+            source_b_register(value + 1) != source_b_register(value) + 1) return false;
+      }
+      for (int value = 0; value < 4; value += 2) {
+        const int b0 = AtomBLayout{}(cute::make_coord(lane, value));
+        const int b1 = AtomBLayout{}(cute::make_coord(lane, value + 1));
+        if (b1 != b0 + 8 || (b0 / 8) % 2) return false;
+      }
+    }
+    return true;
+  }
+  static_assert(propagation_pairs_are_contiguous(),
+                "Packed qB copies require aligned consecutive BF16 pairs");
+  using PropagationPairCopy = cute::Copy_Atom<cute::UniversalCopy<uint32_t>, Element>;
+
+  CUTLASS_HOST_DEVICE static constexpr bool weights_pairs_are_contiguous() {
+    for (int lane = 0; lane < 32; ++lane) {
+      for (int value = 0; value < 4; value += 2) {
+        const int first = AtomBLayout{}(cute::make_coord(lane,value));
+        const int second = AtomBLayout{}(cute::make_coord(lane,value+1));
+        if (second != first + 8 || (first / 8) % 2 != 0) return false;
+      }
+    }
+    return true;
+  }
+  static_assert(weights_pairs_are_contiguous());
 
   // For native WA encoding, the official LDSM copy atom
   // supplies the register fragment required by the official BF16 MMA atom.
@@ -186,11 +224,27 @@ struct AugmentedTileEncoding {
 
     CUTLASS_PRAGMA_UNROLL
     for (int reduction = 0; reduction < 128; reduction += 16) {
-      CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < cute::size(w_fragment); ++i) {
-        const int p = cute::get<0>(w_coordinates(i));
-        const int local_row = reduction + cute::get<1>(w_coordinates(i));
-        w_fragment(i) = p < 2 ? scratch.weights[p][local_row] : Element(0.f);
+      if (reuse_pipeline_barriers) {
+        cute::for_each(cute::make_seq<2>{}, [&](auto pair) {
+          constexpr int i = 2 * decltype(pair)::value;
+          const int p = cute::get<0>(w_coordinates(i));
+          const int local_row = reduction + cute::get<1>(w_coordinates(i));
+          if (p < 2) {
+            auto source = cute::make_tensor(cute::make_smem_ptr(&scratch.weights[p][local_row]),
+                                            cute::Layout<cute::_2>{});
+            auto target = cute::make_tensor(w_fragment.data() + i, cute::Layout<cute::_2>{});
+            cute::Copy_Atom<cute::UniversalCopy<uint32_t>, Element>{}.call(source,target);
+          } else {
+            w_fragment(i) = w_fragment(i+1) = Element(0.f);
+          }
+        });
+      } else {
+        CUTLASS_PRAGMA_UNROLL
+        for (int i = 0; i < cute::size(w_fragment); ++i) {
+          const int p = cute::get<0>(w_coordinates(i));
+          const int local_row = reduction + cute::get<1>(w_coordinates(i));
+          w_fragment(i) = p < 2 ? scratch.weights[p][local_row] : Element(0.f);
+        }
       }
       if (reuse_pipeline_barriers) {
         // The source coordinate comes from official copy/MMA composition,
@@ -209,7 +263,9 @@ struct AugmentedTileEncoding {
           const int k = warp * 16 + cute::get<0>(a_coordinates(i));
           const int local_row = reduction + cute::get<1>(a_coordinates(i));
           const int row = tile_m * kAugmentedDataRows + local_row;
-          if (!(row < projection.rows && k < valid_k)) a_fragment(i) = Element(0.f);
+          if (!(row < projection.rows && (full_kn || k < valid_k))) {
+            a_fragment(i) = Element(0.f);
+          }
         }
       } else {
         // Keep the reference implementation unchanged for paired comparison.
@@ -232,7 +288,8 @@ struct AugmentedTileEncoding {
       const int k = warp * 16 + cute::get<0>(q_coordinates(i));
       const int p = cute::get<1>(q_coordinates(i));
       if (p < 2) {
-        scratch.q[q_slot][p][k] = k < valid_k ? convert(q_fragment(i)) : Element(0.f);
+        scratch.q[q_slot][p][k] = full_kn || k < valid_k
+            ? convert(q_fragment(i)) : Element(0.f);
       }
     }
     // The two BF16 rows live beside A, not in its original 128 data rows.
@@ -299,19 +356,39 @@ struct AugmentedTileEncoding {
     auto b_fragment = cute::make_tensor<Element>(cute::shape(b_coordinates));
     auto encoded_fragment = mma.make_fragment_B(encoded_coordinates);
     static_assert(decltype(cute::size(b_fragment))::value == 16);
-    cute::for_each(cute::make_seq<16>{}, [&](auto index) {
-      constexpr int source = Half * 16 + source_b_register(decltype(index)::value);
-      const int n = warp * 32 + cute::get<0>(b_coordinates(index));
-      const int k = warp_k * 16 + cute::get<1>(b_coordinates(index));
-      b_fragment(index) = k < valid_k && tile_n * 128 + n < columns
-          ? main_b[source] : Element(0.f);
+    auto packed_main_b = cute::recast<uint32_t>(cute::make_tensor(
+        cute::make_rmem_ptr(main_b.data()), cute::Layout<cute::_32>{}));
+    auto packed_b = cute::recast<uint32_t>(cute::make_tensor(
+        b_fragment.data(), cute::Layout<cute::_16>{}));
+    cute::for_each(cute::make_seq<8>{}, [&](auto pair) {
+      constexpr int index = decltype(pair)::value * 2;
+      constexpr int source = (Half * 16 + source_b_register(index)) / 2;
+      if (full_kn) {
+        packed_b(pair) = packed_main_b(cute::Int<source>{});
+      } else {
+        const int n = warp * 32 + cute::get<0>(b_coordinates(index));
+        const int k = warp_k * 16 + cute::get<1>(b_coordinates(index));
+        const bool valid_n = tile_n * 128 + n < columns;
+        // Keep the two halfword predicates separate for odd K residues. This
+        // preserves the scalar mask exactly, including valid nonfinite values.
+        const uint32_t mask = (valid_n && k < valid_k ? 0x0000ffffu : 0u) |
+                              (valid_n && k + 1 < valid_k ? 0xffff0000u : 0u);
+        packed_b(pair) = packed_main_b(cute::Int<source>{}) & mask;
+      }
     });
-    CUTLASS_PRAGMA_UNROLL
-    for (int i = 0; i < cute::size(encoded_fragment); ++i) {
-      const int p = cute::get<0>(encoded_coordinates(i));
-      const int k = warp_k * 16 + cute::get<1>(encoded_coordinates(i));
-      encoded_fragment(i) = p < 2 ? scratch.q[q_slot][p][k] : Element(0.f);
-    }
+    cute::clear(encoded_fragment);
+    cute::for_each(cute::make_seq<2>{}, [&](auto pair) {
+      constexpr int index = decltype(pair)::value * 2;
+      const int p = cute::get<0>(encoded_coordinates(index));
+      const int k = warp_k * 16 + cute::get<1>(encoded_coordinates(index));
+      if (p < 2) {
+        auto source = cute::make_tensor(cute::make_smem_ptr(&scratch.q[q_slot][p][k]),
+                                       cute::Layout<cute::_2>{});
+        auto destination = cute::make_tensor(encoded_fragment.data() + index,
+                                            cute::Layout<cute::_2>{});
+        PropagationPairCopy{}.call(source, destination);
+      }
+    });
     cute::gemm(mma, b_fragment, encoded_fragment, predicted);
   }
 
@@ -401,39 +478,78 @@ class AugmentedVisitor {
   CUTLASS_DEVICE void begin_step(int) { fragment_.clear(); }
   CUTLASS_DEVICE void begin_row(int) {}
   CUTLASS_DEVICE void end_row(int) {}
+  CUTLASS_DEVICE void visit_compact(int column, int frag,
+                                   AccumulatorFragment const& accum) {
+    const auto coord = iterator_.thread_start() + ThreadMap::iteration_offset(frag);
+    const int row = coord.row(), local_row = row - offset_.row();
+    const bool valid_row = local_row >= 0 && local_row < kAugmentedDataRows &&
+                           row < extent_.row();
+    AccumulatorFragment adjusted = accum;
+    if (valid_row) {
+      // The row is common to all eight values in this vector. Keep each
+      // column check explicit so masked columns cannot inject or contribute.
+      if (row == params_.fault_row) {
+        CUTLASS_PRAGMA_UNROLL
+        for (int e = 0; e < kElementsPerAccess; ++e) {
+          const int col = coord.column() + e;
+          if (col < extent_.column() && col == params_.fault_col) {
+            adjusted[e] = __uint_as_float(
+                __float_as_uint(adjusted[e]) ^ (1u << params_.fault_bit));
+            flags_ |= 1;
+          }
+        }
+      }
+      const float row_weights[2] = {
+          float(params_.weights[row]),
+          float(params_.weights[int64_t(params_.rows) + row])};
+      CUTLASS_PRAGMA_UNROLL
+      for (int e = 0; e < kElementsPerAccess; ++e) {
+        const int col = coord.column() + e;
+        const int slot = column * kElementsPerAccess + e;
+        if (col < extent_.column()) {
+          CUTLASS_PRAGMA_UNROLL
+          for (int p = 0; p < 2; ++p) {
+            const float term = row_weights[p] * adjusted[e];
+            sums_[p][slot] += term;
+            magnitude_[p][slot] += fabsf(term);
+          }
+        }
+      }
+    }
+    OutputVector& output = reinterpret_cast<OutputVector*>(&fragment_)[frag];
+    output = cutlass::NumericArrayConverter<ElementOutput, float,
+        kElementsPerAccess>{}(adjusted);
+    if (valid_row) {
+      CUTLASS_PRAGMA_UNROLL
+      for (int e = 0; e < kElementsPerAccess; ++e) {
+        const int col = coord.column() + e;
+        if (col < extent_.column() && !cutlass::isfinite(output[e])) flags_ |= 2;
+      }
+    }
+  }
   CUTLASS_DEVICE void visit(int, int, int column, int frag, AccumulatorFragment const& accum) {
+    if constexpr (Compact) {
+      visit_compact(column, frag, accum);
+      return;
+    }
     const auto coord = iterator_.thread_start() + ThreadMap::iteration_offset(frag);
     OutputVector& output = reinterpret_cast<OutputVector*>(&fragment_)[frag];
     cutlass::NumericConverter<ElementOutput, float> convert;
-    float row_weights[2];
-    if constexpr (Compact) {
-      // All elements in this output vector share a row. Fetch its two weights
-      // once instead of repeating the same global loads for all eight values.
-      const int row = coord.row(), local_row = row - offset_.row();
-      const bool valid_row = local_row >= 0 && local_row < kAugmentedDataRows &&
-                             row < extent_.row();
-      row_weights[0] = valid_row ? float(params_.weights[row]) : 0.f;
-      row_weights[1] = valid_row ? float(params_.weights[int64_t(params_.rows) + row]) : 0.f;
-    }
     CUTLASS_PRAGMA_UNROLL
     for (int e = 0; e < kElementsPerAccess; ++e) {
       const int row = coord.row(), col = coord.column() + e;
       const int local_row = row - offset_.row();
       const int slot = column * kElementsPerAccess + e;
-      if constexpr (!Compact) columns_[slot] = col;
+      columns_[slot] = col;
       float value = accum[e];
-      const bool valid = col < extent_.column() && local_row >= 0 &&
-                         local_row < kAugmentedDataRows && row < extent_.row();
       if (col < extent_.column()) {
         if (local_row >= 0 && local_row < kAugmentedDataRows && row < extent_.row()) {
           if (row == params_.fault_row && col == params_.fault_col) {
             value = __uint_as_float(__float_as_uint(value) ^ (1u << params_.fault_bit));
-            if constexpr (Compact) flags_ |= 1;
-            else *params_.hit = 1;
+            *params_.hit = 1;
           }
           for (int p = 0; p < 2; ++p) {
-            const float weight = Compact ? row_weights[p] :
-                float(params_.weights[int64_t(p) * params_.rows + row]);
+            const float weight = float(params_.weights[int64_t(p) * params_.rows + row]);
             const float term = weight * value;
             sums_[p][slot] += term;
             // This is sum |w*C_acc|, not the old input absolute-product bound.
@@ -444,11 +560,6 @@ class AugmentedVisitor {
         }
       }
       output[e] = convert(value);
-      if constexpr (Compact) {
-        // Inspect the exact BF16 value written to C, including conversion
-        // overflow. Masked rows/columns do not contribute to this flag.
-        if (valid && !isfinite(float(output[e]))) flags_ |= 2;
-      }
     }
   }
   CUTLASS_DEVICE void end_step(int) {
@@ -549,7 +660,7 @@ class AugmentedVisitor {
   int flags_ = 0;
 };
 
-template<class BaseKernel, bool Compact = false>
+template<class BaseKernel, bool Compact = false, bool FullKN = false>
 struct AugmentedKernel {
   using Mma = typename AugmentedMma<typename BaseKernel::Mma>::Type;
   using OriginalEpilogue = typename BaseKernel::Epilogue;
@@ -593,6 +704,7 @@ struct AugmentedKernel {
                       params.projection, params.shape.n(), params.shape.k(),
                       int(blockIdx.x), int(blockIdx.y), thread};
     encoding.reuse_pipeline_barriers = Compact;
+    encoding.full_kn = Compact && FullKN;
     encoding.initialize();
     Mma mma(shared.main_loop.operands, thread, warp, lane);
     mma.encoding = &encoding;

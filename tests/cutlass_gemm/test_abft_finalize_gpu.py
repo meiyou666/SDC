@@ -53,8 +53,15 @@ def _assert_state(outputs, *, detected=False, nonfinite=False, hit=0):
     assert location.tolist() == [-1, -1]
 
 
-@pytest.mark.parametrize("tiles", [1, 2, 17])
-@pytest.mark.parametrize("n", [16, 144, 1024])
+def _assert_bits(actual, expected):
+    assert actual.shape == expected.shape and actual.dtype == expected.dtype
+    assert torch.equal(actual.cpu().contiguous().view(torch.uint8),
+                       expected.cpu().contiguous().view(torch.uint8))
+
+
+@pytest.mark.parametrize("tiles,n", [
+    (tiles, n) for tiles in (1, 2, 17) for n in (16, 144, 1024)
+] + [(1, 8191), (1, 8192), (1, 8193), (33, 257)])
 def test_finalize_exact_dyadic_global_columns_and_current_stream(tiles, n):
     stream = torch.cuda.Stream()
     with torch.cuda.stream(stream):
@@ -72,7 +79,7 @@ def test_finalize_exact_dyadic_global_columns_and_current_stream(tiles, n):
     _assert_state(outputs)
 
 
-@pytest.mark.parametrize("tiles,n", [(1, 16), (2, 144), (17, 1024)])
+@pytest.mark.parametrize("tiles,n", [(1, 16), (2, 144), (17, 1024), (33, 257)])
 def test_finalize_random_values_allow_only_fp32_reduction_error(tiles, n):
     partials, tile_flags = _inputs(tiles, n, random=True)
     # Dyadic tolerances eliminate host scalar-conversion ambiguity.
@@ -95,6 +102,15 @@ def test_finalize_random_values_allow_only_fp32_reduction_error(tiles, n):
     threshold_error = rtol * sum_error[2]
     threshold_error += unit * (exact_threshold.abs() + threshold_error)
     assert torch.all((threshold - exact_threshold).abs() <= threshold_error)
+    # Parallel ownership of columns must not reorder each column's FP32 sum.
+    # CPU tensor additions retain the explicitly specified ascending tile order.
+    sequential = torch.zeros(3, 2, n, dtype=torch.float32)
+    source = partials.cpu()[..., :n]
+    for tile in range(tiles):
+        sequential.add_(source[:, :, tile])
+    _assert_bits(outputs[0], sequential[1:])
+    _assert_bits(outputs[1], sequential[0] - sequential[1])
+    _assert_bits(outputs[2], sequential[2].mul(rtol).add(atol))
     assert bool((residual.abs() > threshold).any())
     _assert_state(outputs, detected=True)
 
@@ -150,44 +166,71 @@ def test_finalize_reduces_flags_from_different_threads_and_tiles():
     _assert_state(_finalize(partials, tile_flags, n=1024), detected=True, nonfinite=True, hit=1)
 
 
-def test_finalize_diagnostics_disabled_keeps_complete_device_state():
-    partials, tile_flags = _inputs()
-    partials[0, 1, -1, 143] += 1
+@pytest.mark.parametrize("tiles,n", [(2, 144), (33, 257)])
+def test_finalize_diagnostics_disabled_keeps_complete_device_state(tiles, n):
+    partials, tile_flags = _inputs(tiles, n)
+    partials[0, 1, -1, n - 1] += 1
     tile_flags[-1, -1] = 1
-    outputs = _finalize(partials, tile_flags, diagnostics=False)
+    outputs = _finalize(partials, tile_flags, n=n, diagnostics=False)
     assert outputs[1].shape == outputs[2].shape == (0,)
-    assert outputs[0].shape == (2, 2, 144)
+    assert outputs[0].shape == (2, 2, n)
     _assert_state(outputs, detected=True, hit=1)
 
 
-def test_finalize_retry_uses_original_reference_and_preserves_its_alias():
-    partials, tile_flags = _inputs()
-    first = _finalize(partials, tile_flags, rtol=0.25)
+@pytest.mark.parametrize("tiles,n", [(2, 144), (33, 257)])
+def test_finalize_retry_uses_original_reference_and_preserves_its_alias(tiles, n):
+    partials, tile_flags = _inputs(tiles, n)
+    first = _finalize(partials, tile_flags, n=n, rtol=0.25)
     original = first[0]
     saved = original.clone()
     retry = partials.clone()
     # A co-varying erroneous retry would pass if its new prediction were accepted.
-    retry[0, 1, 0, 143] += 8
-    retry[1, 1, 0, 143] += 8
-    retry[2, 1, 0, 143] += 1e10
-    outputs = _finalize(retry, tile_flags, rtol=0.25, reference=original)
+    retry[0, 1, 0, n - 1] += 32
+    retry[1, 1, 0, n - 1] += 32
+    retry[2, 1, 0, n - 1] += 1e10
+    outputs = _finalize(retry, tile_flags, n=n, rtol=0.25, reference=original)
     assert outputs[0].data_ptr() == original.data_ptr()
-    torch.testing.assert_close(original, saved, rtol=0, atol=0)
-    torch.testing.assert_close(outputs[2], first[2], rtol=0, atol=0)
-    assert outputs[1][1, 143].item() == 8
+    _assert_bits(original, saved)
+    _assert_bits(outputs[2], first[2])
+    assert outputs[1][1, n - 1].item() == 32
     _assert_state(outputs, detected=True)
 
 
-def test_finalize_retry_does_not_consume_new_prediction_or_magnitude():
-    partials, tile_flags = _inputs()
-    original = _finalize(partials, tile_flags)[0]
+@pytest.mark.parametrize("tiles,n", [(2, 144), (33, 257)])
+def test_finalize_retry_does_not_consume_new_prediction_or_magnitude(tiles, n):
+    partials, tile_flags = _inputs(tiles, n)
+    original = _finalize(partials, tile_flags, n=n)[0]
     saved = original.clone()
     partials[1].fill_(float("nan"))
     partials[2].fill_(float("inf"))
-    outputs = _finalize(partials, tile_flags, reference=original)
+    outputs = _finalize(partials, tile_flags, n=n, reference=original)
     assert outputs[0].data_ptr() == original.data_ptr()
-    torch.testing.assert_close(original, saved, rtol=0, atol=0)
+    _assert_bits(original, saved)
     _assert_state(outputs)
+
+
+def test_finalize_retained_outputs_survive_later_calls_on_nondefault_stream():
+    n = 257
+    stream = torch.cuda.Stream()
+    with torch.cuda.stream(stream):
+        partials, tile_flags = _inputs(33, n)
+        first = _finalize(partials, tile_flags, n=n)
+        snapshots = [tensor.clone() for tensor in first]
+        changed = partials.clone()
+        changed[0, 1, -1, n - 1] += 1
+        later_flags = tile_flags.clone()
+        later_flags[-1, -1] = 1
+        second = _finalize(changed, later_flags, n=n)
+        third = _finalize(partials, tile_flags, n=n, diagnostics=False)
+    stream.synchronize()
+    for actual, snapshot, later in zip(first, snapshots, second, strict=True):
+        _assert_bits(actual, snapshot)
+        assert actual.data_ptr() != later.data_ptr()
+    _assert_state(first)
+    _assert_state(second, detected=True, hit=1)
+    _assert_state(third)
+    assert second[1][1, n - 1].item() == 1
+    assert third[1].numel() == third[2].numel() == 0
 
 
 @pytest.mark.parametrize("field", [0, 1], ids=["original_prediction", "original_magnitude"])
