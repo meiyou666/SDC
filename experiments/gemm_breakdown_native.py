@@ -20,7 +20,7 @@ from cutlass_gemm.legacy_adapter import generate_augmented_header
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/cutlass_gemm/abft_augmented.h"
-SOURCE_SHA256 = "58c3c9fff9a9ba1e586ffdf61224e3b696decbcbde8cbbb784a8ca802cba6bec"
+SOURCE_SHA256 = "9248c5308c8710a533024a65995e23c76a5dde8886c47b80b70d8075fb89a512"
 
 
 def _replace_once(text, anchor, replacement):

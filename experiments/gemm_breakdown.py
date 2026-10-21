@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 
+from gemm_breakdown_native import load_diagnostic
 import torch
 import yaml
 
@@ -18,7 +19,6 @@ from abft.benchmark import compare_outputs, summarize
 from abft.native import classic_weights
 from abft.profiling import _cutlass_kernel_us
 from cutlass_gemm import backend
-from gemm_breakdown_native import load_diagnostic
 
 
 MASKS = {"core": 0, "barrier": 8, "encode": 9, "propagate": 11,

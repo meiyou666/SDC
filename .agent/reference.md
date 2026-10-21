@@ -108,13 +108,14 @@ BF16 `reference_mode: augmented` 由 `abft_augmented.cu/.h` 实现。保留官�
 
 `native` 的数据流与资源约定如下：
 
-1. `legacy_adapter.generate_augmented_header()` 保留官方主循环原语句顺序。在共享 A 就绪后调用 `consume()` 计算 `WA`；在官方 B transform 后、原主 MMA 前调用 `propagate()`，复用 `warp_transformed_frag_B_`。B 到附加 MMA A 操作数的寄存器映射由官方 CuTe 布局推导，每个 warp 负责的 N32 半片在编译期选择，避免再次读取共享 B 或动态寄存器索引。原 `reference` 仍从共享 B 执行附加传播。
-2. q 使用双缓冲，按 K tile 交替。保留发布 q 的 CTA barrier，并结合官方 `gmem_wait` 保护缓冲生命周期，去除多余的初始化/consume 尾部同步。编码次序、BF16 cast 位置与主 MMA 顺序保留。源码去除新增 hook 后与官方一致，只能证明原语句未被重排；新增寄存器、共享内存、指令和同步仍可能改变占用率及流水性能。
-3. epilogue 按固定 ThreadMap 找到每列的 8 个贡献槽，替代遍历 1024 槽及动态列索引表，保持贡献槽升序累加；每个输出向量的 8 个值共享一行，只加载该行的两个权重。直接检查 cast 后 BF16 输出的有限性，不重新扫描 C。每次写满局部校验、padding 与标记，使用 `at::empty` 而无预清零内核。
-4. `abft_augmented_compact(a,b,weights,row,col,bit)` 返回 `output`、FP32 `partials[3,2,m_tiles,padded_N]` 和 int32 `tile_flags[m_tiles,n_tiles]`。`partials` 第一维依次为 observed、predicted、magnitude；flags bit0 表示注入命中，bit1 表示实际 BF16 输出非有限。
-5. `abft_finalize(partials,tile_flags,n,atol,rtol,reference,diagnostics)` 用一个 CTA256 内核与官方 CUB BlockReduce，合并全局列校验、比较阈值并生成设备报告；不重读 C。返回 `reference[2,2,N]`（predicted、magnitude）、可选 residual/threshold、五个 bool 标记、hit、location。阈值乘加明确分开舍入；沿 M tile 的累加次序可能与 Torch `sum` 不同，不能无条件声称校验逐位一致，边界样本须核对判定。
-6. `native.py` 只缓存不可变 BF16 classic 权重，键为设备和 M，最多 32 条/16 MiB；CUDA Event、流等待和 `record_stream` 保证跨流使用顺序。每次调用独立拥有 output、partials、flags 与报告张量，不缓存共享可变 scratch。`report/none` 不通过 `.item()` 读取设备判定；`raise/recompute` 按已有策略同步。
-7. 报警重算使用同一份干净输入，不重复量化。首次 finalize 的 reference 留存；第二次 finalize 只用首次 reference 复检，不能以重算产生的新预测替代。失败不替换原输出，成功才采用重算结果。`located` 始终为 false，location 为 `[-1,-1]`。
+1. `legacy_adapter.generate_augmented_header()` 保留官方主循环原语句顺序。在共享 A 就绪后调用 `consume()` 计算 `WA`。`native` 通过官方 CuTe `make_tiled_copy_A` 将共享 A 加载到编码 MMA 的寄存器片段：行主序 A 使用 `SM75_U16x8_LDSM_T`，列主序 A 使用 `SM75_U32x4_LDSM_N`；静态检查覆盖 copy/MMA 坐标对应与连续对齐向量。加载后仍按有效 M/K 掩码清零，包含首个 K 余数块。8 次编码 MMA 的顺序与 BF16 cast 位置保留，`reference` 保留原逐元素加载。
+2. 在官方 B transform 后、原主 MMA 前调用 `propagate()`，复用 `warp_transformed_frag_B_`。B 到附加 MMA A 操作数的寄存器映射由官方 CuTe 布局推导，每个 warp 负责的 N32 半片在编译期选择，避免再次读取共享 B 或动态寄存器索引。原 `reference` 仍从共享 B 执行附加传播。
+3. q 使用双缓冲，按 K tile 交替。保留发布 q 的 CTA barrier，并结合官方 `gmem_wait` 保护缓冲生命周期，去除多余的初始化/consume 尾部同步。编码次序、BF16 cast 位置与主 MMA 顺序保留。源码去除新增 hook 后与官方一致，只能证明原语句未被重排；新增寄存器、共享内存、指令和同步仍可能改变占用率及流水性能。
+4. epilogue 按固定 ThreadMap 找到每列的 8 个贡献槽，替代遍历 1024 槽及动态列索引表，保持贡献槽升序累加；每个输出向量的 8 个值共享一行，只加载该行的两个权重。直接检查 cast 后 BF16 输出的有限性，不重新扫描 C。每次写满局部校验、padding 与标记，使用 `at::empty` 而无预清零内核。
+5. `abft_augmented_compact(a,b,weights,row,col,bit)` 返回 `output`、FP32 `partials[3,2,m_tiles,padded_N]` 和 int32 `tile_flags[m_tiles,n_tiles]`。`partials` 第一维依次为 observed、predicted、magnitude；flags bit0 表示注入命中，bit1 表示实际 BF16 输出非有限。
+6. `abft_finalize(partials,tile_flags,n,atol,rtol,reference,diagnostics)` 用一个 CTA256 内核与官方 CUB BlockReduce，合并全局列校验、比较阈值并生成设备报告；不重读 C。返回 `reference[2,2,N]`（predicted、magnitude）、可选 residual/threshold、五个 bool 标记、hit、location。阈值乘加明确分开舍入；沿 M tile 的累加次序可能与 Torch `sum` 不同，不能无条件声称校验逐位一致，边界样本须核对判定。
+7. `native.py` 只缓存不可变 BF16 classic 权重，键为设备和 M，最多 32 条/16 MiB；CUDA Event、流等待和 `record_stream` 保证跨流使用顺序。每次调用独立拥有 output、partials、flags 与报告张量，不缓存共享可变 scratch。`report/none` 不通过 `.item()` 读取设备判定；`raise/recompute` 按已有策略同步。
+8. 报警重算使用同一份干净输入，不重复量化。首次 finalize 的 reference 留存；第二次 finalize 只用首次 reference 复检，不能以重算产生的新预测替代。失败不替换原输出，成功才采用重算结果。`located` 始终为 false，location 为 `[-1,-1]`。
 
 当前注入与保护证据仅限 `accumulator`：epilogue 中主 MMA 结束、输出 cast 之前的 FP32 值。复用 B 寄存器可能使数据与参考共同使用受损 B，不能声称检测这类共模错误，也不能将现有注入结果推广为 MMA 内任意时刻、任意寄存器的故障覆盖。报告通过 `reference_operand_reuse: main_B_register_fragments` 记录该数据流。
 
@@ -237,3 +238,33 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 300 组配对调用的数据输出逐位一致、报告标记一致；原生局部校验 partials 对照也一致。三个固定正常输入在旧调试容差下均报警，重复调用不构成独立样本误报率。2048³ 的最终 FP32 合并因求和次序不同，reference/native 残差最大差值为 1.5、阈值最大差值为 0.001953125；相对同一份 partials 的 FP64 合并，两者残差最大误差分别为 0.9541015625 与 1.162109375。因此不能声称所有最终 checksum 逐位一致，也不能从这些样本的相同标记推断临界阈值判定完全等价。
 
 ptxas 显示各增广实例使用 255 个寄存器，部分实例存在 spill；这提示仍需测量寄存器压力，但当前未完成成功的 Compute Sanitizer 检查或 Nsight 瓶颈定位，不能据此给出运行时归因结论。配置、原始数据、分阶段结果在 `results/gemm/native-comparison/`，本地验证备份在 `results/validation/native-simplify-20261021/`。
+
+### WA 共享加载优化（2026-10-21）
+
+粗粒度内核对照显示，启用 `WA` 编码带来的增量最大。随后仅替换 `native` 编码的共享 A 取数方式，使用官方 CuTe LDSM copy atom；权重、编码 MMA、BF16 转换、qB 传播及校验规则不变。修改已集成到生产扩展，并通过下述正式回归；候选配对性能与正式版本验证分别记录。
+
+候选验证已通过 21 项 GPU 检查与 33 项 CPU 合约检查。在 3 个形状 × 4 种 A/B 布局的 12 组配对对照中，输出 C、局部校验 partials 和 tile flags 均逐位一致。共享内存仍为 99,328 字节。候选 compact 实例的 ptxas 输出为 252—254 个寄存器、0 spill；旧 RR 实例为 255 个寄存器、24 字节 stack frame。寄存器数及编译输出只说明生成代码的资源变化，未测得硬件 bank conflict 或 warp stall 计数。
+
+候选实验使用同一台 8 GiB 配额 RTX 5090、seed 2026、预热 5 次、每项 60 次采样。`comparison-variants.json` 记录四种布局的纯内核时间，以下列出 RR 中位数，单位 μs。旧版指提交 `7b72f59` 的 `native`，不同于前表的 `implementation: reference`。
+
+| `[M,N,K]` | 旧 native 内核 | LDSM 候选内核 | 内核时延减少 |
+| --- | ---: | ---: | ---: |
+| `[128,128,128]` | 17.119 | 14.176 | 17.2% |
+| `[512,1024,1024]` | 68.543 | 46.272 | 32.5% |
+| `[2048,2048,2048]` | 257.295 | 167.743 | 34.8% |
+
+另在同一进程采集完整 GPU 活动，包含 GEMM 与 finalize；每项仍为 60 次采样，保留 `atol=rtol=1e-4`、`diagnostics: true`、`recovery: none`。下表来自独立的 `engine-comparison.json`，不能与上一张表混算组件增量。编译、输入转换、预热、打印和报告读取均在计时之外。
+
+| `[M,N,K]` | 无保护 | 旧 native 全部 GPU 活动 | LDSM 候选全部 GPU 活动 | 候选 / 无保护 |
+| --- | ---: | ---: | ---: | ---: |
+| `[128,128,128]` | 5.472 | 18.544 | 15.584 | 2.848 |
+| `[512,1024,1024]` | 25.584 | 72.352 | 50.128 | 1.959 |
+| `[2048,2048,2048]` | 98.559 | 278.366 | 188.832 | 1.916 |
+
+完整 GPU 活动分别减少约 16.0%、30.7%、32.2%。三种形状的报告标记一致；固定正常输入仍在原调试容差下报警，没有放宽阈值。较大矩阵的额外开销仍约 92%—96%，尚未降至约 10%。原始结果位于服务器 `results/gemm/wa-optimization/{comparison-variants.json,engine-comparison.json}`。
+
+正式生产扩展 `sdc_cutlass_badccdedfbeda24f` 编译、链接及加载通过，metadata build 为 `ff7014975f62aec1`。GPU 回归通过 226 项，2 项多设备检查因没有第二张 GPU 跳过，用时 15.14 秒；覆盖四种布局、余数块、CUDA 流、故障、重算恢复及线性层前反向，包含新增的 K8/K72 四项边界用例。CPU/训练组 249 项检查及 Ruff 通过；这些分组可能与候选检查重叠，不相加为总覆盖数。`cuobjdump` 显示正式 compact 四种布局分别使用 254/252/252/254 个寄存器，STACK 和 LOCAL 均为 0，与候选一致。
+
+公开入口的正式版本复测已完成。`gemm_breakdown.py` 三种形状的完整诊断版与生产版在 C、partials、flags 上逐位一致；诊断版时延比生产版低约 2.1%—4.3%，继续保留该扰动提示。`abft.benchmark` 原示例的两种形状通过，全部 GPU 活动中位数为 15.647/50.015 μs。2048³ 另用忽略目录下的临时 YAML 复测，仅改原示例的 shape/output，预热 3 次、测量 20 次、profile 20 次：无保护 98.575 μs、GEMM 167.758 μs、finalize 20.927 μs、全部 GPU 活动 188.702 μs，为无保护的 1.91 倍；各项分别取中位数。三种形状均输出逐位一致，固定正常输入仍报警 20/20。上表仍为候选扩展的配对性能记录；正式复测用于确认公开入口与集成后的行为。日志与结果备份目录为 `results/validation/wa-ldsm-20261021/`，其下保留服务器的 `results/gemm/...` 相对目录。
+
+本轮没有采纳的试验：权重共享 stride 从 128 改为 136 收益很小；增加完整 tile 的 mask 快路反而变慢；以 operand hash 防止编译器删除操作的细分诊断使内核时延扰动约 60%，不用于组件归因，现已恢复原粗粒度诊断。Nsight 在该共享 GPU 平台仍不可可靠采集，本轮停止排查其注入兼容问题，继续使用无打印的配对内核测量。粗粒度开关增量包含编译资源、流水线及同步变化，不能当作独立组件耗时。
