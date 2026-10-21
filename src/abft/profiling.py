@@ -10,7 +10,7 @@ import statistics
 STAGES = {
     "baseline.gemm": "无保护 GEMM",
     "abft.reference": "校验权重/参考准备",
-    "abft.execute": "融合 GEMM（含片内 checksum）",
+    "abft.execute": "融合 GEMM 调用（含校验和缓冲初始化）",
     "abft.merge_reference": "参考 checksum 与幅值合并",
     "abft.merge_observed": "输出 checksum 合并",
     "abft.detect": "阈值比较与非有限值检测",
@@ -26,6 +26,14 @@ def _statistics(values):
         raise ValueError("Profile timings must be finite and nonnegative")
     return {"median": statistics.median(values), "mean": statistics.mean(values),
             "min": min(values), "max": max(values), "samples": values}
+
+
+def _cutlass_kernel_us(event):
+    """Only correlated CUTLASS kernel activities, not their enclosing CPU scope."""
+    own = sum(kernel.duration for kernel in getattr(event, "kernels", ())
+              if "cutlass::Kernel<" in kernel.name or "cutlass::device_kernel<" in kernel.name
+              or kernel.name.startswith(("_ZN7cutlass6KernelI", "_ZN7cutlass13device_kernelI")))
+    return own + sum(_cutlass_kernel_us(child) for child in getattr(event, "cpu_children", ()))
 
 
 def summarize_profile(events, repeats, *, input_fused):
@@ -51,9 +59,18 @@ def summarize_profile(events, repeats, *, input_fused):
             continue
         if len(samples) != repeats:
             raise RuntimeError(f"Incomplete profile: {name}, expected {repeats} samples")
-        rows.append({"stage": name, "label": label,
-                     "gpu_active_ms": _statistics([e.device_time_total / 1000 for e in samples]),
-                     "cpu_scope_ms": _statistics([e.cpu_time_total / 1000 for e in samples])})
+        row = {"stage": name, "label": label,
+               "gpu_active_ms": _statistics([e.device_time_total / 1000 for e in samples]),
+               "cpu_scope_ms": _statistics([e.cpu_time_total / 1000 for e in samples])}
+        if name in {"baseline.gemm", "abft.execute"}:
+            kernel_times = [_cutlass_kernel_us(e) for e in samples]
+            if all(value > 0 for value in kernel_times):
+                row["cutlass_kernel_ms"] = _statistics([value / 1000 for value in kernel_times])
+                row["other_gpu_activity_ms"] = _statistics([
+                    max(0.0, e.device_time_total - value) / 1000
+                    for e, value in zip(samples, kernel_times, strict=True)
+                ])
+        rows.append(row)
     return {"repeats": repeats, "stages": rows,
             "gpu_scope": "sum of correlated GPU kernel/copy activities; excludes CPU launch gaps",
             "cpu_scope": "instrumented CPU scope, including submission, waits and profiler overhead; overlaps GPU work",
@@ -87,7 +104,14 @@ def profile_prepared(prepared, config, *, warmup, repeats):
                     with record("abft.total"):
                         output, report = execute_prepared(prepared, abft_config=config, profile_scope=record)
         torch.cuda.synchronize(prepared.a.device)
-    result = summarize_profile(profiler.events(), repeats, input_fused=config.reference_mode == "input_fused")
+    result = summarize_profile(profiler.events(), repeats, input_fused=config.reference_mode in {"input_fused", "augmented"})
+    if config.reference_mode == "augmented":
+        for row in result["stages"]:
+            if row["stage"] == "abft.execute":
+                row["label"] = "BF16 编码与增广 GEMM 调用（含缓冲初始化）"
+            elif row["stage"] == "abft.locate":
+                row["label"] = "定位状态（低精度编码路径未启用定位）"
+        result["fused_scope"] = "BF16 tile encoding and augmented GEMM share one kernel; native call additionally initializes buffers; no independent FP32 reference GEMM"
     # Synchronizing diagnostics are deliberately after the profiler has stopped.
     from .benchmark import compare_outputs
 
@@ -103,4 +127,7 @@ def print_profile(result):
         gpu, cpu = row["gpu_active_ms"], row["cpu_scope_ms"]
         print(f"  {row['label']}：GPU 中位={gpu['median']:.6f}，均值={gpu['mean']:.6f}；"
               f"CPU 中位={cpu['median']:.6f}，均值={cpu['mean']:.6f}", flush=True)
+        if "cutlass_kernel_ms" in row:
+            print(f"    其中 CUTLASS 内核中位={row['cutlass_kernel_ms']['median']:.6f}，"
+                  f"初始化等其他 GPU 活动中位={row['other_gpu_activity_ms']['median']:.6f}", flush=True)
     print("[分阶段] 融合内核中的主乘法与 checksum 合并计时；编译、预热、量化和打印均已排除", flush=True)

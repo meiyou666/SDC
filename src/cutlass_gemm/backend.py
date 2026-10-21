@@ -67,12 +67,13 @@ def load_extension():
         raise RuntimeError("编译配置已更新，请重新初始化平台环境或重建 NVIDIA 镜像。")
     os.environ.setdefault("MAX_JOBS", str(config["max_build_jobs"]))
     arch = config["cuda_arch"]
-    from .legacy_adapter import generate_legacy_reference_headers
+    from .legacy_adapter import generate_augmented_header, generate_legacy_reference_headers
     from .official_adapter import generate_reference_kernel
 
     generated = Path(os.environ.get("TORCH_EXTENSIONS_DIR", get_default_build_root())) / "sdc_generated" / _extension_key()
     generate_reference_kernel(cutlass, generated)
     generate_legacy_reference_headers(cutlass, generated)
+    generate_augmented_header(cutlass, generated)
     return load(
         name=f"sdc_cutlass_{_extension_key()}",
         sources=[str(SOURCE / name) for name in (
@@ -80,6 +81,7 @@ def load_extension():
             "abft_legacy.cu", "abft_fp8.cu", "abft_nvfp4.cu",
             "abft_fp8_reference.cu",
             "abft_legacy_reference.cu",
+            "abft_augmented.cu",
             "abft_nvfp4_reference.cu",
         )],
         extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],

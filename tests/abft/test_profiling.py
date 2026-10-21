@@ -34,6 +34,24 @@ def test_generic_plugin_and_separate_reference_remain_profileable():
     assert "abft.verify" in {row["stage"] for row in result["stages"]}
 
 
+@pytest.mark.parametrize("kernel_name", [
+    "void cutlass::Kernel<sdc_abft::AugmentedKernel>()",
+    "_ZN7cutlass6KernelIN8sdc_abft15AugmentedKernelExampleEEEvT_",
+])
+def test_native_scope_separates_kernel_from_initialization(kernel_name):
+    values = samples()
+    for e in values:
+        if e.name == "abft.execute":
+            e.cpu_children = [SimpleNamespace(kernels=[
+                SimpleNamespace(name=kernel_name, duration=7.0),
+                SimpleNamespace(name="Memset", duration=3.0),
+            ])]
+    result = summarize_profile(values, 2, input_fused=True)
+    row = next(row for row in result["stages"] if row["stage"] == "abft.execute")
+    assert row["cutlass_kernel_ms"]["samples"] == [.007, .007]
+    assert row["other_gpu_activity_ms"]["samples"] == [.003, .003]
+
+
 def test_missing_samples_or_gpu_activity_fail_explicitly():
     with pytest.raises(RuntimeError, match="Incomplete profile"):
         summarize_profile(samples()[1:], 2, input_fused=True)

@@ -107,7 +107,10 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     """
     cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
     scope = profile_scope or nullcontext
-    input_fused = cfg.reference_mode == "input_fused"
+    augmented = cfg.reference_mode == "augmented"
+    input_fused = cfg.reference_mode in {"input_fused", "augmented"}
+    if augmented and prepared.precision != "bf16":
+        raise ValueError("augmented currently requires BF16 GEMM")
     if input_fused:
         if prepared.precision not in INPUT_REFERENCE_PRECISIONS:
             raise NotImplementedError(f"input_fused reference is not implemented for {prepared.precision}")
@@ -139,8 +142,14 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         method.validate_config(cfg)
         method._profile_scope = scope
     with scope("abft.reference"):
-        state = (method.prepare_fused(prepared, cfg) if input_fused
-                 else method.prepare(prepared, cfg, reference_mm)) if method else None
+        if method is None:
+            state = None
+        elif augmented:
+            state = method.prepare_augmented(prepared, cfg)
+        elif input_fused:
+            state = method.prepare_fused(prepared, cfg)
+        else:
+            state = method.prepare(prepared, cfg, reference_mm)
     end("reference", mark)
     mark = begin()
     active = prepared.injected(fault) if selected and fault.location in {"a", "b"} else prepared
@@ -159,6 +168,8 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     def collect_reference(operands, fault_tuple):
         if reference_collector_fn is not None:
             return reference_collector_fn(operands, weights, fault_tuple)
+        if augmented:
+            return operands.augmented_native(weights, fault_tuple)
         return operands.collected_reference_native(weights, fault_tuple)
     mark = begin()
     with scope("abft.execute"):
@@ -192,6 +203,10 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     report_context = {**context, "fault": asdict(fault), "fault_selected": selected,
                       "precision": precision, "scaling": scaling,
                       "reference_mode": cfg.reference_mode,
+                      "threshold_scale": cfg.threshold_scale,
+                      "checksum_input_precision": "bf16" if augmented else "fp32",
+                      "reference_algorithm": "augmented_gemm" if augmented else "separate_projection_arithmetic",
+                      "augmented_rows_per_data_tile": 2 if augmented else 0,
                       "protection_scope": "computation_after_input_load" if input_fused else "prepared_inputs_and_computation",
                       "m": prepared.m, "n": prepared.n, "k": prepared.k,
                       "input_precision": precision, "accumulator_precision": "fp32",
@@ -200,7 +215,7 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
                                           "post_alpha_fp32_epilogue_before_output_cast"
                                           if fault.location == "accumulator" else "prepared_input_codes"),
                       "fault_hit_meaning": "injection_executed_not_output_damage",
-                      "location_assumption": "single_output_element"}
+                      "location_assumption": "disabled_for_low_precision_encoding" if augmented else "single_output_element"}
     report = AbftReport(result, report_context, cfg.method, "instrumented" if fused else "raw", events)
     if method and cfg.recovery == "recompute" and bool(result["detected"].item()):
         mark = begin()

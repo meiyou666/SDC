@@ -82,6 +82,13 @@ class PreparedGemm:
             self.alpha, weights, *fault,
         )
 
+    def augmented_native(self, weights, fault=(-1, -1, -1)):
+        """BF16 tile encoding and augmented main MMA, without global A re-reads."""
+        if self.precision != "bf16":
+            raise ValueError("augmented currently requires BF16 GEMM")
+        backend.require_device(self.a.device)
+        return torch.ops.sdc_cutlass.abft_augmented_mm(self.a, self.b, weights, *fault)
+
     def decode_block(self, start, end):
         if not 0 <= start < end <= self.k:
             raise ValueError("Invalid K block")

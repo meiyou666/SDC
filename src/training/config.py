@@ -214,6 +214,8 @@ def validate(config: Config) -> Config:
     if g.precision not in scales or g.scaling != scales[g.precision]:
         raise ValueError("gemm.precision/scaling 必须是 fp32/none、bf16/none、fp8/tensorwise 或 nvfp4/block16。")
     abft = parse_abft_config(g.abft)
+    if abft.reference_mode == "augmented" and g.precision != "bf16":
+        raise ValueError("augmented 当前只支持 BF16 GEMM。")
     fault = parse_fault_config(g.fault)
     if fault.location != "none" and t.resume is not None:
         raise ValueError("故障注入调用计数尚未写入检查点，gemm.fault 不支持 resume。")

@@ -100,6 +100,14 @@ train(
 
 ### ABFT 调用关系
 
+BF16 新增 `reference_mode: augmented`，由 `abft_augmented.cu/.h` 实现。保留官方128数据行tile，额外2条校验行形成逻辑130行。片内 `W×A` 使用官方 CuTe BF16 MMA，结果cast BF16保存在额外共享缓冲；校验行与同一共享B通过附加官方MMA fragment相乘，原128行数据主MMA、A/B存储和分块均不变。`legacy_adapter.generate_augmented_header` 在原循环头增加只读consume hook，新增同步保护Q与原stage复用。A/B均支持packed行/列主序，明确拒绝其他精度，不作额外整矩阵重读。输入权重、数据和校验行均BF16，编码及主/附加MMA累加均FP32；输出C为BF16，两侧校验取precast FP32累加结果。
+
+新模式需显式 `threshold_scale: output`，magnitude为输出幅值 `Σ|w*C_acc|`，不是旧 `|W||A||B|` 上界；报告记录实际口径。BF16编码舍入进入正常残差，不能沿用FP32阈值宣称误报率不变。全局行号权重转BF16会重复，当前关闭比值定位并返回located=false；检测和重算复检仍可用。保留旧两条参考路径作为对照，独立示例 `configs/gemm/my_gemm.yaml` 选择增广路径。
+
+2026-10-21 在8GB配额的RTX5090上完成128数据行+2附加行版本的87项GPU测试，覆盖四布局、尾块、BF16编码舍入、故障注入、恢复和线性层前反向。无保护与增广的数据输出逐位一致；官方主循环去除新增类型名和hook后逐字一致。Compute Sanitizer未能附加目标进程，不能记作内存检查通过。
+
+相同输入按旧参考/增广/增广/旧参考顺序测量，512×1024×1024的原生调用阶段约0.221→0.119ms，2048³约0.838→0.411ms；这些数值包含缓冲初始化，不是纯内核时延。两种路径的参考精度、幅值尺度和定位支持不同，不代表相同保护效果下的加速。原调试容差下，新增广路径的三个固定正常输入均报警；每组重复100次不是100个独立样本，需另做阈值校准。服务器记录位于 `results/gemm/augmented-comparison/`，本地备份在 `results/validation/augmented-128-20261021/`。最新profiler可从CUPTI关联记录进一步区分CUTLASS内核与初始化活动。
+
 线性层通过 `abft.engine.execute()` 准备一次输入，再交给 `execute_prepared()` 完成保护。关闭保护与注入时直接调用原有 GEMM。`classic` 使用全 1 与递增行权重，两路 FP32 列投影从 epilogue 中乘 alpha 后、输出转换前的值生成。`reference_mode: input_fused` 在主循环内复用已经加载的 A、B 及 NVFP4 block16 scale，生成预测和 magnitude；`separate` 保留按 K 分块解码及独立 FP32 GEMM 的参考路径。
 
 | 文件 | 职责 |

@@ -43,3 +43,35 @@ def test_changed_legacy_source_is_rejected(tmp_path):
     with pytest.raises(RuntimeError, match="pinned CUTLASS"):
         adapter.generate_legacy_reference_headers(tmp_path, tmp_path / "generated")
     assert not (tmp_path / "generated").exists()
+
+
+def test_augmented_append_keeps_original_data_mainloop(tmp_path, monkeypatch):
+    text = ("class MmaMultistage {\n  using Shape = Shape_;\n"
+            "    PipeState pipe_state;\n    first_warp_load();\n"
+            "    for (; gemm_k_iterations > (-Base::kStages + 1);) {\n"
+            "      original_data_mma();\n        advance_smem_read_stage();\n"
+            "        next_warp_load();\n    }\n};\n")
+    source = tmp_path / "include/cutlass/gemm/threadblock/mma_multistage.h"
+    source.parent.mkdir(parents=True)
+    source.write_text(text)
+    monkeypatch.setitem(adapter.SOURCES, "mma_multistage", hashlib.sha256(text.encode()).hexdigest())
+    target = adapter.generate_augmented_header(tmp_path, tmp_path / "generated")
+    adapted = target.read_text()
+    assert "consume(smem_read_stage_idx_);\n      original_data_mma();" in adapted
+    restored = adapted.replace("AugmentedMmaMultistage", "MmaMultistage").replace(
+        "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
+        "  Encoding* encoding = nullptr;\n", "", 1,
+    ).replace("\n      if (encoding) encoding->consume(smem_read_stage_idx_);", "", 1)
+    assert restored == text
+    mtime = target.stat().st_mtime_ns
+    adapter.generate_augmented_header(tmp_path, target.parent)
+    assert target.stat().st_mtime_ns == mtime
+
+
+def test_augmented_rejects_unknown_upstream_before_writing(tmp_path):
+    source = tmp_path / "include/cutlass/gemm/threadblock/mma_multistage.h"
+    source.parent.mkdir(parents=True)
+    source.write_text("unknown upstream")
+    with pytest.raises(RuntimeError, match="pinned CUTLASS"):
+        adapter.generate_augmented_header(tmp_path, tmp_path / "generated")
+    assert not (tmp_path / "generated").exists()
