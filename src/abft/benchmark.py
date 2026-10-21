@@ -147,8 +147,6 @@ def show_matrix(name, tensor, size):
 
 def run(cfg):
     """Execute only on the repository's configured native CUDA architecture."""
-    from dataclasses import replace
-
     import torch
 
     from cutlass_gemm import backend
@@ -178,17 +176,16 @@ def run(cfg):
             return value, start.elapsed_time(end)
 
         def observe(native, protected):
-            nonlocal preview_pending
+            nonlocal preview_pending, preview_outputs
             output, report = protected
             record = report.to_record()
             if preview_pending:
-                show_matrix("普通 GEMM 输出 C", native, cfg.preview_size)
-                show_matrix("ABFT GEMM 输出 C", output, cfg.preview_size)
+                preview_outputs = (native, output)
                 preview_pending = False
             return {"detected": bool(record["detected"]), "report": record,
                     **compare_outputs(native, output)}
 
-        def on_pair(index, baseline_ms, protected_ms, observation):
+        def log_pair(index, baseline_ms, protected_ms, observation):
             log(f"测量 {index}/{cfg.repeats}：普通={baseline_ms:.6f} ms，"
                 f"ABFT={protected_ms:.6f} ms，报警={observation['detected']}，"
                 f"逐位一致={observation['output_bits_equal']}，"
@@ -215,10 +212,12 @@ def run(cfg):
                         return execute_prepared(prepared, abft_config=cfg.abft,
                                                 context={"execution_kind": "benchmark", "retry": False})
                     preview_pending = bool(cfg.preview_size)
+                    preview_outputs = None
+                    pair_logs = []
                     log(f"输入准备完成；预热 {cfg.warmup} 组，然后测量 {cfg.repeats} 组")
                     measured = measure_pairs(prepared.raw_native, protected, warmup=cfg.warmup,
                                              repeats=cfg.repeats, measure=measure, observe=observe,
-                                             on_pair=on_pair if cfg.progress else None)
+                                             on_pair=lambda *entry: pair_logs.append(entry) if cfg.progress else None)
                     observations = measured.pop("observations")
                     alarms = sum(item["detected"] for item in observations)
                     measured.update(format=fmt, shape=[m, n, k], seed=seed,
@@ -226,18 +225,26 @@ def run(cfg):
                                     observed_normal_alarm_rate=alarms / cfg.repeats,
                                     observations=observations)
                     if cfg.profile_repeats:
+                        from .profiling import print_profile, profile_prepared
+
                         log(f"单独测量各阶段：{cfg.profile_repeats} 次")
-                        profile = []
-                        for _ in range(cfg.profile_repeats):
-                            _, report = execute_prepared(prepared, abft_config=replace(cfg.abft, timing=True))
-                            profile.append(report.to_record())
-                        measured["separate_stage_profile"] = profile
+                        measured["stage_profile"] = profile_prepared(
+                            prepared, cfg.abft, warmup=cfg.warmup, repeats=cfg.profile_repeats,
+                        )
+                    # All printing/readback of previews follows both measurement passes.
+                    if preview_outputs is not None:
+                        show_matrix("普通 GEMM 输出 C", preview_outputs[0], cfg.preview_size)
+                        show_matrix("ABFT GEMM 输出 C", preview_outputs[1], cfg.preview_size)
+                    for entry in pair_logs:
+                        log_pair(*entry)
+                    if cfg.profile_repeats:
+                        print_profile(measured["stage_profile"])
                     log(f"本组完成：普通中位耗时={measured['baseline_ms']['median']:.6f} ms，"
                         f"ABFT中位耗时={measured['protected_ms']['median']:.6f} ms，"
                         f"配对耗时比例中位数={measured['paired_ratio']['median']:.3f}，"
                         f"正常调用报警={alarms}/{cfg.repeats}")
                     results.append(measured)
-    return {"config": asdict(cfg), "timing_scope": "prepared operands to native output and ABFT device decision; excludes quantization, logging and optional stage profiling",
+    return {"config": asdict(cfg), "timing_scope": "CUDA event interval around full calls, including possible host launch gaps; excludes quantization, logging, compilation, warmup and separate CUPTI profiling",
             "alarm_denominator": "repeated normal calls per fixed operand pair; not independent production samples",
             "environment": {"device": str(device), "name": torch.cuda.get_device_name(device),
                             "capability": list(torch.cuda.get_device_capability(device)),
