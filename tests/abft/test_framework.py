@@ -1,4 +1,5 @@
 """CPU contract tests; no substitute GPU-performance or kernel evidence."""
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -359,6 +360,34 @@ def test_stage_events_are_opt_in_and_reference_is_in_timed_boundary(monkeypatch,
         assert "event" not in actions
         assert report.timing_events == []
     assert report.host_seconds >= 0
+
+
+@pytest.mark.parametrize("reference_mode", ["separate", "input_fused"])
+@pytest.mark.parametrize("fault", [None, {"location": "accumulator", "row": 1, "col": 0, "bit": 31}])
+def test_profiling_scopes_preserve_outputs_and_detection(monkeypatch, reference_mode, fault):
+    from abft import engine
+
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    # A custom factory may reuse an instance: scopes must not leak to later calls.
+    method = Classic()
+    monkeypatch.setattr(engine, "get_method", lambda name: method)
+    config = {"method": "classic", "reference_mode": reference_mode, "on_error": "report"}
+    kwargs = dict(reference_mm=torch.mm, collector_fn=collect, reference_collector_fn=fused_cpu_collector)
+    output, report = engine.execute_prepared(p, config, fault, **kwargs)
+    scopes = []
+    @contextmanager
+    def scope(name):
+        scopes.append(name)
+        yield
+    profiled, profiled_report = engine.execute_prepared(p, config, fault, profile_scope=scope, **kwargs)
+    torch.testing.assert_close(profiled, output)
+    for key, tensor in report.tensors.items():
+        torch.testing.assert_close(profiled_report.tensors[key], tensor)
+    assert {"abft.reference", "abft.execute", "abft.merge_observed", "abft.detect", "abft.locate"} <= set(scopes)
+    assert ("abft.merge_reference" in scopes) == (reference_mode == "input_fused")
+    scopes.clear()
+    engine.execute_prepared(p, config, fault, **kwargs)
+    assert not scopes
 
 
 def test_invalid_timing_config():

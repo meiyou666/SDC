@@ -1,5 +1,6 @@
 """Method registry. Classic is a two-projection, single-output-error example."""
 from abc import ABC, abstractmethod
+from contextlib import nullcontext
 
 import torch
 
@@ -7,6 +8,9 @@ from cutlass_gemm import backend
 
 
 class AbftMethod(ABC):
+    # Enabled only for the separate profiling run; no timing or I/O by default.
+    _profile_scope = staticmethod(nullcontext)
+
     def validate_config(self, config):
         """Validate method-specific parameters before preparing evidence."""
 
@@ -98,31 +102,33 @@ class Classic(AbftMethod):
         return partials.sum(dim=1)[:, :state["n"]]
 
     def verify(self, observed, output, state, config):
-        residual = observed - state["expected"]
-        threshold = config.atol + config.rtol * state["magnitude"]
-        nonfinite = (~torch.isfinite(observed)).any() | (~torch.isfinite(state["expected"])).any()
-        nonfinite |= (~torch.isfinite(threshold)).any() | (~torch.isfinite(output)).any()
-        nonfinite |= (~torch.isfinite(residual)).any()
-        failed = residual.abs() > threshold
-        detected = failed.any() | nonfinite
-        columns = failed.any(dim=0)
-        col = columns.to(torch.int64).argmax()
-        d0, d1 = residual[:, col].unbind()
-        # A candidate location under the single-output-error assumption, not a
-        # certificate excluding structured/multiple errors in the nullspace.
-        ratio = d1 / torch.where(d0 == 0, torch.ones_like(d0), d0)
-        row = ratio.round().to(torch.int64) - 1
-        consistency = (d1 - (row+1).float()*d0).abs()
-        allowance = threshold[1, col] + (row+1).abs().float()*threshold[0, col]
-        located = detected & ~nonfinite & (columns.sum() == 1) & (d0.abs() > threshold[0, col])
-        located &= (row >= 0) & (row < state["m"]) & (consistency <= allowance)
-        # Reject an ambiguous row: both projection errors have independent
-        # bounds. Their ratio interval must lie inside one rounding cell.
-        uncertainty = (threshold[1, col] + ratio.abs() * threshold[0, col]) / (
-            d0.abs() - threshold[0, col]
-        ).clamp_min(torch.finfo(torch.float32).tiny)
-        located &= (ratio - (row + 1)).abs() + uncertainty < 0.5
-        location = torch.stack((torch.where(located, row, -1), torch.where(located, col, -1)))
+        with self._profile_scope("abft.detect"):
+            residual = observed - state["expected"]
+            threshold = config.atol + config.rtol * state["magnitude"]
+            nonfinite = (~torch.isfinite(observed)).any() | (~torch.isfinite(state["expected"])).any()
+            nonfinite |= (~torch.isfinite(threshold)).any() | (~torch.isfinite(output)).any()
+            nonfinite |= (~torch.isfinite(residual)).any()
+            failed = residual.abs() > threshold
+            detected = failed.any() | nonfinite
+        with self._profile_scope("abft.locate"):
+            columns = failed.any(dim=0)
+            col = columns.to(torch.int64).argmax()
+            d0, d1 = residual[:, col].unbind()
+            # A candidate location under the single-output-error assumption, not a
+            # certificate excluding structured/multiple errors in the nullspace.
+            ratio = d1 / torch.where(d0 == 0, torch.ones_like(d0), d0)
+            row = ratio.round().to(torch.int64) - 1
+            consistency = (d1 - (row+1).float()*d0).abs()
+            allowance = threshold[1, col] + (row+1).abs().float()*threshold[0, col]
+            located = detected & ~nonfinite & (columns.sum() == 1) & (d0.abs() > threshold[0, col])
+            located &= (row >= 0) & (row < state["m"]) & (consistency <= allowance)
+            # Reject an ambiguous row: both projection errors have independent
+            # bounds. Their ratio interval must lie inside one rounding cell.
+            uncertainty = (threshold[1, col] + ratio.abs() * threshold[0, col]) / (
+                d0.abs() - threshold[0, col]
+            ).clamp_min(torch.finfo(torch.float32).tiny)
+            located &= (ratio - (row + 1)).abs() + uncertainty < 0.5
+            location = torch.stack((torch.where(located, row, -1), torch.where(located, col, -1)))
         return {"detected": detected, "nonfinite": nonfinite, "located": located,
                 "location": location, "residual": residual, "threshold": threshold}
 

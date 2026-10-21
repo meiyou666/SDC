@@ -1,4 +1,5 @@
 """One preparation, optional fault, fused evidence, and clean-operand retry."""
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 import math
 import time
@@ -88,7 +89,8 @@ def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
 
 @torch.no_grad()
 def execute_prepared(prepared, abft_config=None, fault_config=None, context=None,
-                     *, raw_fn=None, reference_mm=None, collector_fn=None, reference_collector_fn=None):
+                     *, raw_fn=None, reference_mm=None, collector_fn=None, reference_collector_fn=None,
+                     profile_scope=None):
     """Execute existing native operands without preparing or quantizing again.
 
     Reference decoding and construction are protection costs inside this call.
@@ -104,6 +106,7 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     including policy-required synchronization but not asynchronous GPU work.
     """
     cfg, fault = parse_abft_config(abft_config), parse_fault_config(fault_config)
+    scope = profile_scope or nullcontext
     input_fused = cfg.reference_mode == "input_fused"
     if input_fused:
         if prepared.precision not in INPUT_REFERENCE_PRECISIONS:
@@ -134,8 +137,10 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     method = get_method(cfg.method) if cfg.method != "none" else None
     if method:
         method.validate_config(cfg)
-    state = (method.prepare_fused(prepared, cfg) if input_fused
-             else method.prepare(prepared, cfg, reference_mm)) if method else None
+        method._profile_scope = scope
+    with scope("abft.reference"):
+        state = (method.prepare_fused(prepared, cfg) if input_fused
+                 else method.prepare(prepared, cfg, reference_mm)) if method else None
     end("reference", mark)
     mark = begin()
     active = prepared.injected(fault) if selected and fault.location in {"a", "b"} else prepared
@@ -156,27 +161,33 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
             return reference_collector_fn(operands, weights, fault_tuple)
         return operands.collected_reference_native(weights, fault_tuple)
     mark = begin()
-    if input_fused:
-        output, partials, hit, predicted, magnitude = collect_reference(active, injection)
-    elif fused:
-        output, partials, hit = collect(active, injection)
-    else:
-        output = raw_fn(active) if raw_fn else active.raw_native()
-        hit = torch.zeros(1, device=a.device, dtype=torch.int32)
+    with scope("abft.execute"):
+        if input_fused:
+            output, partials, hit, predicted, magnitude = collect_reference(active, injection)
+        elif fused:
+            output, partials, hit = collect(active, injection)
+        else:
+            output = raw_fn(active) if raw_fn else active.raw_native()
+            hit = torch.zeros(1, device=a.device, dtype=torch.int32)
     if selected and fault.location in {"a", "b"}:
         hit = torch.ones(1, device=a.device, dtype=torch.int32)
     end("execute", mark)
     mark = begin()
     if input_fused:
-        state = method.bind_reference(predicted, magnitude, state)
+        with scope("abft.merge_reference"):
+            state = method.bind_reference(predicted, magnitude, state)
     if method:
-        result = method.verify(method.propagate(partials, state), output, state, cfg)
+        with scope("abft.merge_observed"):
+            observed = method.propagate(partials, state)
+        with scope("abft.verify"):
+            result = method.verify(observed, output, state, cfg)
     else:
         false = torch.zeros((), device=a.device, dtype=torch.bool)
         result = {"detected": false, "nonfinite": (~torch.isfinite(output)).any(),
                   "located": false, "location": torch.full((2,), -1, device=a.device, dtype=torch.int64)}
-    result.update(fault_hit=hit, recovered=torch.zeros((), device=a.device, dtype=torch.bool),
-                  recheck_failed=torch.zeros((), device=a.device, dtype=torch.bool))
+    with scope("abft.report_flags"):
+        result.update(fault_hit=hit, recovered=torch.zeros((), device=a.device, dtype=torch.bool),
+                      recheck_failed=torch.zeros((), device=a.device, dtype=torch.bool))
     end("verify", mark)
     report_context = {**context, "fault": asdict(fault), "fault_selected": selected,
                       "precision": precision, "scaling": scaling,

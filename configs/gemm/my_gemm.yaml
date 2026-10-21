@@ -22,7 +22,8 @@ abft:
   timing: false
 warmup: 3
 repeats: 20
-profile_repeats: 0
+# 单独采集各阶段 GPU 活动时间与 CPU 范围时间；0 表示关闭。
+profile_repeats: 20
 progress: true
 # 每个矩阵只显示左上角 4×4；设为 0 关闭，最大为 16。
 preview_size: 4
