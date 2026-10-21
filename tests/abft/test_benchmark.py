@@ -26,6 +26,7 @@ def test_all_native_formats_and_explicit_parameters(tmp_path, benchmark_yaml):
     assert config.abft.on_error == "report" and config.abft.recovery == "none"
     assert config.abft.timing is False
     assert config.profile_repeats == 0
+    assert config.progress is False and config.preview_size == 0
 
 
 @pytest.mark.parametrize(("field", "value"), [
@@ -33,6 +34,8 @@ def test_all_native_formats_and_explicit_parameters(tmp_path, benchmark_yaml):
     ("profile_repeats", -1), ("input_std", float("nan")), ("input_std", True),
     ("seeds", [-1]), ("shapes", [[128, 128, 15]]), ("output", ""),
     ("shapes", [[128, 128, 16]]),
+    ("progress", "true"), ("preview_size", -1), ("preview_size", 17),
+    ("preview_size", True), ("preview_size", 1.5),
 ])
 def test_reject_invalid_experiments(tmp_path, benchmark_yaml, field, value):
     benchmark_yaml[field] = value
@@ -60,7 +63,8 @@ def test_format_validation_and_unknown_config(tmp_path, benchmark_yaml):
         load_config(write_config(tmp_path, benchmark_yaml))
 
 
-def test_paired_schedule_and_observation_boundary():
+@pytest.mark.parametrize("progress", [False, True])
+def test_paired_schedule_and_observation_boundary(progress):
     history = []
     active = False
     shared_prepared = object()
@@ -85,13 +89,36 @@ def test_paired_schedule_and_observation_boundary():
         history.append("observe")
         return {"detected": False}
 
+    notifications = []
+
+    def on_pair(index, baseline_ms, protected_ms, observation):
+        assert not active
+        assert history[-1] == "observe"
+        assert observation == {"detected": False}
+        notifications.append((index, baseline_ms, protected_ms))
+
     result = measure_pairs(operation("baseline"), operation("protected"), warmup=2, repeats=3,
-                           measure=measure, observe=observe)
+                           measure=measure, observe=observe, on_pair=on_pair if progress else None)
     assert history == ["baseline", "protected", "protected", "baseline",
                        "baseline", "protected", "observe", "protected", "baseline", "observe",
                        "baseline", "protected", "observe"]
     assert result["paired_ratio"]["samples"] == [3.0, 3.0, 3.0]
     assert len(result["observations"]) == 3
+    assert notifications == ([(1, 2.0, 6.0), (2, 2.0, 6.0), (3, 2.0, 6.0)] if progress else [])
+
+
+def test_matrix_preview_is_bounded_and_optional(capsys):
+    import torch
+
+    from abft.benchmark import show_matrix
+
+    matrix = torch.arange(20, dtype=torch.float32).reshape(4, 5)
+    show_matrix("A", matrix, 0)
+    assert capsys.readouterr().out == ""
+    show_matrix("A", matrix, 2)
+    lines = capsys.readouterr().out.splitlines()
+    assert "shape=(4, 5)" in lines[0]
+    assert [[float(value) for value in line.split()] for line in lines[1:]] == [[0, 1], [5, 6]]
 
 
 def test_statistics_reject_invalid_measurements():
