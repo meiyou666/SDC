@@ -82,6 +82,7 @@ def load_extension():
             "abft_fp8_reference.cu",
             "abft_legacy_reference.cu",
             "abft_augmented.cu",
+            "abft_finalize.cu",
             "abft_nvfp4_reference.cu",
         )],
         extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],
@@ -89,7 +90,7 @@ def load_extension():
         extra_cuda_cflags=["-O2", f"-std={config['cxx_standard']}",
                           f"-gencode=arch=compute_{arch},code=sm_{arch}",
                           "--expt-relaxed-constexpr", "--ftz=false"],
-        verbose=True,
+        verbose=__name__ == "__main__",
     )
 
 

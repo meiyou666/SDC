@@ -100,9 +100,23 @@ train(
 
 ### ABFT 调用关系
 
-BF16 新增 `reference_mode: augmented`，由 `abft_augmented.cu/.h` 实现。保留官方128数据行tile，额外2条校验行形成逻辑130行。片内 `W×A` 使用官方 CuTe BF16 MMA，结果cast BF16保存在额外共享缓冲；校验行与同一共享B通过附加官方MMA fragment相乘，原128行数据主MMA、A/B存储和分块均不变。`legacy_adapter.generate_augmented_header` 在原循环头增加只读consume hook，新增同步保护Q与原stage复用。A/B均支持packed行/列主序，明确拒绝其他精度，不作额外整矩阵重读。输入权重、数据和校验行均BF16，编码及主/附加MMA累加均FP32；输出C为BF16，两侧校验取precast FP32累加结果。
+BF16 `reference_mode: augmented` 由 `abft_augmented.cu/.h` 实现。保留官方 128 数据行 tile，额外 2 条校验行形成逻辑 130 行；输出仍为原形状的 BF16 矩阵。片内 `W×A` 使用官方 CuTe BF16 MMA，结果 cast BF16 后保存在额外共享缓冲；附加官方 MMA fragment 计算 `q×B`，原 128 行数据主 MMA、A/B 存储和分块坐标保留。A/B 均支持 packed 行/列主序，明确拒绝其他精度，不作额外整矩阵重读。输入权重、数据和校验行均为 BF16，编码及主/附加 MMA 累加均为 FP32；两侧校验取 precast FP32 累加结果。
 
-新模式需显式 `threshold_scale: output`，magnitude为输出幅值 `Σ|w*C_acc|`，不是旧 `|W||A||B|` 上界；报告记录实际口径。BF16编码舍入进入正常残差，不能沿用FP32阈值宣称误报率不变。全局行号权重转BF16会重复，当前关闭比值定位并返回located=false；检测和重算复检仍可用。保留旧两条参考路径作为对照，独立示例 `configs/gemm/my_gemm.yaml` 选择增广路径。
+新模式需显式 `threshold_scale: output`，magnitude为输出幅值 `Σ|w*C_acc|`，不是旧 `|W||A||B|` 上界；报告记录实际口径。BF16编码舍入进入正常残差，不能沿用FP32阈值宣称误报率不变。全局行号权重转BF16会重复，当前关闭比值定位并返回located=false；检测和重算复检仍可用。保留旧两条参考路径作为对照，独立示例 `configs/gemm/my_gemm.yaml` 显式选择 `augmented` 与 `implementation: native`。
+
+`abft.implementation` 默认为 `reference`，保留五张量入口和 Python 方法接口。`native` 仅接受 BF16、`reference_mode: augmented`、`method: classic`、空 `parameters`；由 `engine.execute_prepared()` 分派到 `native.execute_augmented()`，不经过插件方法工厂和可替换的参考收集 hook。两种实现使用相同的全局全 1/递增权重与两路完整列关系，没有改为 strided 编码。
+
+`native` 的数据流与资源约定如下：
+
+1. `legacy_adapter.generate_augmented_header()` 保留官方主循环原语句顺序。在共享 A 就绪后调用 `consume()` 计算 `WA`；在官方 B transform 后、原主 MMA 前调用 `propagate()`，复用 `warp_transformed_frag_B_`。B 到附加 MMA A 操作数的寄存器映射由官方 CuTe 布局推导，每个 warp 负责的 N32 半片在编译期选择，避免再次读取共享 B 或动态寄存器索引。原 `reference` 仍从共享 B 执行附加传播。
+2. q 使用双缓冲，按 K tile 交替。保留发布 q 的 CTA barrier，并结合官方 `gmem_wait` 保护缓冲生命周期，去除多余的初始化/consume 尾部同步。编码次序、BF16 cast 位置与主 MMA 顺序保留。源码去除新增 hook 后与官方一致，只能证明原语句未被重排；新增寄存器、共享内存、指令和同步仍可能改变占用率及流水性能。
+3. epilogue 按固定 ThreadMap 找到每列的 8 个贡献槽，替代遍历 1024 槽及动态列索引表，保持贡献槽升序累加；每个输出向量的 8 个值共享一行，只加载该行的两个权重。直接检查 cast 后 BF16 输出的有限性，不重新扫描 C。每次写满局部校验、padding 与标记，使用 `at::empty` 而无预清零内核。
+4. `abft_augmented_compact(a,b,weights,row,col,bit)` 返回 `output`、FP32 `partials[3,2,m_tiles,padded_N]` 和 int32 `tile_flags[m_tiles,n_tiles]`。`partials` 第一维依次为 observed、predicted、magnitude；flags bit0 表示注入命中，bit1 表示实际 BF16 输出非有限。
+5. `abft_finalize(partials,tile_flags,n,atol,rtol,reference,diagnostics)` 用一个 CTA256 内核与官方 CUB BlockReduce，合并全局列校验、比较阈值并生成设备报告；不重读 C。返回 `reference[2,2,N]`（predicted、magnitude）、可选 residual/threshold、五个 bool 标记、hit、location。阈值乘加明确分开舍入；沿 M tile 的累加次序可能与 Torch `sum` 不同，不能无条件声称校验逐位一致，边界样本须核对判定。
+6. `native.py` 只缓存不可变 BF16 classic 权重，键为设备和 M，最多 32 条/16 MiB；CUDA Event、流等待和 `record_stream` 保证跨流使用顺序。每次调用独立拥有 output、partials、flags 与报告张量，不缓存共享可变 scratch。`report/none` 不通过 `.item()` 读取设备判定；`raise/recompute` 按已有策略同步。
+7. 报警重算使用同一份干净输入，不重复量化。首次 finalize 的 reference 留存；第二次 finalize 只用首次 reference 复检，不能以重算产生的新预测替代。失败不替换原输出，成功才采用重算结果。`located` 始终为 false，location 为 `[-1,-1]`。
+
+当前注入与保护证据仅限 `accumulator`：epilogue 中主 MMA 结束、输出 cast 之前的 FP32 值。复用 B 寄存器可能使数据与参考共同使用受损 B，不能声称检测这类共模错误，也不能将现有注入结果推广为 MMA 内任意时刻、任意寄存器的故障覆盖。报告通过 `reference_operand_reuse: main_B_register_fragments` 记录该数据流。
 
 2026-10-21 在8GB配额的RTX5090上完成128数据行+2附加行版本的87项GPU测试，覆盖四布局、尾块、BF16编码舍入、故障注入、恢复和线性层前反向。无保护与增广的数据输出逐位一致；官方主循环去除新增类型名和hook后逐字一致。Compute Sanitizer未能附加目标进程，不能记作内存检查通过。
 
@@ -116,10 +130,15 @@ BF16 新增 `reference_mode: augmented`，由 `abft_augmented.cu/.h` 实现。�
 | [operands.py](../src/abft/operands.py) | 准备操作数、分块解码、码值注入与原生调用 |
 | [methods.py](../src/abft/methods.py) | 方法注册、`prepare/propagate/verify/recover` 接口和 `classic` 示例 |
 | [engine.py](../src/abft/engine.py) | 调用编排、一次干净重算与复检、设备报告和显式序列化 |
+| [native.py](../src/abft/native.py) | BF16 增广专用编排、不可变权重缓存、首次参考复检 |
+| [abft_augmented.cu](../src/cutlass_gemm/abft_augmented.cu)、[abft_augmented.h](../src/cutlass_gemm/abft_augmented.h) | BF16 附加校验 MMA、B 寄存器复用与静态输出归约 |
+| [abft_finalize.cu](../src/cutlass_gemm/abft_finalize.cu) | 单设备内核合并、比较、非有限值与报告标记 |
 | [abft_legacy.cu](../src/cutlass_gemm/abft_legacy.cu)、[abft_legacy_kernel.h](../src/cutlass_gemm/abft_legacy_kernel.h) | FP32/BF16 epilogue visitor 与分块投影 |
 | [abft_fp8.cu](../src/cutlass_gemm/abft_fp8.cu)、[abft_nvfp4.cu](../src/cutlass_gemm/abft_nvfp4.cu)、[abft_sm120.cuh](../src/cutlass_gemm/abft_sm120.cuh) | FP8/NVFP4 epilogue 注入与两路 reduction |
 
-原生路径保留官方 mainloop，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。每次受保护 GEMM 调用均执行方法工厂，当前未接入插件历史状态的检查点保存。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
+`benchmark.py` 的控制台按形状汇总，不输出逐次测量日志。`profile_repeats > 0` 时显示 GPU 阶段中位数表（μs）及输出逐位一致性/正常报警计数；CPU 范围、均值和完整 samples 只保留在 JSON，内部计时存储单位仍为 ms。关闭分阶段采集时显示 CUDA Event 调用时延，明确其可能包含 CPU 提交间隙。`progress` 只控制加载和设备信息，`preview_size` 独立控制矩阵预览，示例默认 0；FP32/BF16 只预览实际输入，FP8/NVFP4 的预览明确为转换前输入。汇总、报告读取与打印都在测量区间外，不能将缩减控制台输出当作内核优化收益。
+
+原生路径保留官方 mainloop 的原语句，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；独立参考路径的输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。`implementation: reference` 每次受保护 GEMM 调用均执行方法工厂，当前未接入插件历史状态的检查点保存。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
 
 输入融合的原生入口为 `abft_reference_mm`（FP32/BF16）、`abft_fp8_reference_mm`、`abft_nvfp4_reference_mm`，返回 `(output, observed_partials, hit, predicted_partials, magnitude_partials)`。局部数组均为 `[2,ceil(M/tileM),padded_N]`，保持全局行权重，最终沿 M tile 合并。融合模式只接受计算故障，重算复检继续使用首次参考。`parameters` 提供方法专用 YAML 参数，`validate_config/prepare_fused/bind_reference` 用于扩展方法；默认 `classic` 不接受额外参数。
 
@@ -202,3 +221,19 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 随后在本机 RTX 4070（SM89）补充 legacy 原生正确性诊断。独立容器 `sdc-abft-sm89-check` 使用同一项目锁文件，环境与 CUDA 检查通过；仅将相同 FP32/BF16 源文件编译为 SM89，正式 `gemm.json` 和生产设备检查保持 SM120。隔离进程复用原测试，只选 FP32/BF16，并显式使用真实 SM89 能力检查。源码基于 `167b55b`。
 
 实际运行 96 项通过：输入融合 44 项、输出校验 48 项、完整执行与线性层前反向 4 项；FP8/NVFP4 的 43 项被排除。Compute Sanitizer 的 memcheck 对 BF16 K80、FP32 K33 两项通过，0 errors；racecheck 对 BF16 K448 四种布局通过，0 hazards、0 errors、0 warnings。原始日志、逐项结果、源码哈希及诊断脚本在 `results/validation/sm89/`。这些结果补充 FP32/BF16 的真实执行证据，未测时延，也不替代 SM120 或 FP8/NVFP4 验证。
+
+2026-10-21 在 8 GiB 配额的 RTX 5090 项目 `.venv` 中完成增广 `implementation: native` 简化的扩展编译、GPU 验证及配对测量。该次测量的扩展标识为 `0e1408d5bcdfe926`，构建标识为 `c9de0e915d97ba0a`。目标检查通过 222 项：186 项 GPU 用例、33 项 CPU 合约检查、3 项源码检查；2 项多设备用例因没有第二张 GPU 跳过。另行运行的 246 项 CPU/训练回归、5 项源码检查及 Ruff 均通过；这些检查存在重叠，不相加为总覆盖数。上文的 87 项 GPU 测试与旧增广时延属于简化前的 `reference` 实现。
+
+三种形状均使用 seed 2026、BF16 输入、相同权重、`atol=rtol=1e-4`、`diagnostics: true` 和无故障配置。每种形状预热 5 组，按 reference/native/native/reference 顺序执行 50 组，共记录每种实现 100 个调用样本；另外独立采集 20 次 CUPTI 分阶段数据。下表为 GPU 活动时间的中位数，单位 ms；无保护列取 native 分阶段采集中的同源基线。完整 GPU 活动不含 CPU 提交间隙，编译、量化、预热、打印与报告读取均在计时外，权重缓存测量的是预热后的稳态。
+
+| `[M,N,K]` | 无保护内核 | reference 全部 GPU 活动 | native 增广内核 | native finalize | native 全部 GPU 活动 | 较 reference 减少 | native / 无保护 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `[128,128,128]` | 0.005472 | 0.093810 | 0.016864 | 0.001664 | 0.018528 | 80.25% | 3.386 |
+| `[512,1024,1024]` | 0.025664 | 0.172223 | 0.068768 | 0.003648 | 0.072432 | 57.94% | 2.822 |
+| `[2048,2048,2048]` | 0.099136 | 0.480575 | 0.258478 | 0.021056 | 0.279503 | 41.84% | 2.819 |
+
+各列分别取中位数，子阶段中位数之和不必严格等于总活动中位数。改动降低了该实现的测量开销，但保护路径仍为无保护的约 2.8—3.4 倍，尚未达到论文中约 10% 额外开销的量级。不同算法、保护范围与计时口径的论文数字不能直接作为本表的同条件比较。
+
+300 组配对调用的数据输出逐位一致、报告标记一致；原生局部校验 partials 对照也一致。三个固定正常输入在旧调试容差下均报警，重复调用不构成独立样本误报率。2048³ 的最终 FP32 合并因求和次序不同，reference/native 残差最大差值为 1.5、阈值最大差值为 0.001953125；相对同一份 partials 的 FP64 合并，两者残差最大误差分别为 0.9541015625 与 1.162109375。因此不能声称所有最终 checksum 逐位一致，也不能从这些样本的相同标记推断临界阈值判定完全等价。
+
+ptxas 显示各增广实例使用 255 个寄存器，部分实例存在 spill；这提示仍需测量寄存器压力，但当前未完成成功的 Compute Sanitizer 检查或 Nsight 瓶颈定位，不能据此给出运行时归因结论。配置、原始数据、分阶段结果在 `results/gemm/native-comparison/`，本地验证备份在 `results/validation/native-simplify-20261021/`。

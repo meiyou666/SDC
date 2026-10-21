@@ -17,6 +17,7 @@ class AbftConfig:
     timing: bool = False
     reference_mode: str = "separate"
     threshold_scale: str = "input"
+    implementation: str = "reference"
     parameters: dict = field(default_factory=dict)
 
     def __post_init__(self):
@@ -43,6 +44,12 @@ class AbftConfig:
         required_scale = "output" if self.reference_mode == "augmented" else "input"
         if self.threshold_scale != required_scale:
             raise ValueError(f"{self.reference_mode} requires threshold_scale={required_scale}")
+        if self.implementation not in {"reference", "native"}:
+            raise ValueError("implementation must be reference or native")
+        if self.implementation == "native" and (
+            self.reference_mode != "augmented" or self.method != "classic" or self.parameters
+        ):
+            raise ValueError("native implementation requires augmented classic without extra parameters")
         if not isinstance(self.method, str) or not self.method:
             raise ValueError("ABFT method must be a nonempty registered name")
         for value in (self.atol, self.rtol):

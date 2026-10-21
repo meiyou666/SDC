@@ -119,7 +119,7 @@ gemm:
 | `verify(observed, output, state, config)` | 返回设备张量字典，包含 `detected`、`nonfinite`、`located`、`location` 等判定 |
 | `recover(operands, state)` | 返回重算输出、投影和注入命中标记；默认复用干净的已准备操作数 |
 
-工厂在每次受保护 GEMM 调用时执行。需要历史状态的方法自行管理实例生命周期；当前训练检查点不保存插件状态。V-ABFT、GVFA、Strided ABFT 和 AEGIS 的机制需分别实现与验证。
+默认 `implementation: reference` 通过上述方法接口执行，每次受保护 GEMM 调用都会执行方法工厂。需要历史状态的方法自行管理实例生命周期；当前训练检查点不保存插件状态。`implementation: native` 是下述 BF16 增广 `classic` 的专用实现，不接受自定义方法或额外 `parameters`。V-ABFT、GVFA、Strided ABFT 和 AEGIS 的机制需分别实现与验证。
 
 输出融合位于 epilogue：两路权重对乘 alpha 后、输出 cast 前的 FP32 值做列投影。FP32/BF16 通过官方 example 35 的 visitor 接口接入，FP8/NVFP4 通过 `Sm90RowReduction` 接入。选择 `input_fused` 时，方法以 `prepare_fused()` 准备权重，再由主循环复用已加载输入生成参考；`bind_reference()` 接收原生预测与幅值。选择 `separate` 时调用原来的 `prepare()` 独立生成参考。分块投影合并和判定由 Python 层组织。修改权重数量或原生投影布局时，同时修改 CUDA 接口。文件及固定源码链接见[技术参考](../.agent/reference.md#官方源码对应)。
 
@@ -131,33 +131,49 @@ gemm:
 python -m abft.benchmark --config configs/gemm/abft_benchmark.yaml
 ```
 
-只跑 BF16 增广矩阵 ABFT 并查看调试输出时，使用 `configs/gemm/my_gemm.yaml`。该配置不加载模型或训练数据。
+只跑 BF16 增广矩阵 ABFT 并查看调试输出时，使用 `configs/gemm/my_gemm.yaml`。该配置显式选择 `implementation: native`，不加载模型或训练数据。
 
 ```bash
 python -m abft.benchmark --config configs/gemm/my_gemm.yaml
 ```
 
-`progress: true` 打印当前精度、矩阵尺寸、测量进度、耗时、输出差异和 ABFT 报警。`preview_size: 4` 显示输入矩阵及首组测量输出的左上角 4×4，设为 0 关闭，最大为 16。生成输入的预览位于类型转换和量化之前；FP32/BF16 另显示实际 GEMM 输入。所有预览、比较和打印都在计时区间之外，量化与算子实现不变。正式计时时可关闭进度与预览，减少两次测量之间的主机活动。
+控制台每组显示精度与矩阵尺寸、一张耗时表，以及输出逐位一致性和报警次数，不逐次打印测量日志。`progress: true` 额外显示加载和设备信息，设为 `false` 不影响每组结果输出。
+
+示例的 `preview_size: 0` 关闭矩阵预览；设为 `4` 可查看输入和首组输出的左上角 4×4，最大为 16。FP32/BF16 只显示实际 GEMM 输入，FP8/NVFP4 显示转换前输入并注明位置。所有预览、比较和打印均在计时区间外。
 
 ### BF16 增广矩阵路径
 
-`abft.reference_mode: augmented` 保留完整的官方 `128×128×64` 数据 tile，额外附加 2 行校验，逻辑输出为 `130×128`。从已加载的共享 A 计算 `W×A`，将编码写成额外共享缓冲中的 BF16 校验行，再用附加的官方 MMA fragment 与同一共享 B 相乘。原 128 行数据的主 MMA、分块坐标和流水不变；附加 2 行使用额外 MMA 片段承载，并非一条 130 行 MMA 指令。所有编码和矩阵乘法均为 BF16 输入、官方 FP32 累加，不再执行 FP32 标量的 `q×B` 参考传播。两侧校验在主结果转换为 BF16 之前取数。
+`abft.reference_mode: augmented` 保留完整的官方 `128×128×64` 数据 tile，额外附加 2 行校验，逻辑输出为 `130×128`。从已加载的共享 A 计算 `W×A`，将编码写成 BF16 校验行，再用附加的官方 MMA fragment 计算 `q×B`。原 128 行数据的主 MMA 和分块坐标保留；附加 2 行使用额外 MMA 片段承载，并非一条 130 行 MMA 指令。权重、数据和校验行均为 BF16，矩阵乘法使用官方 FP32 累加。两侧校验在主结果转换为 BF16 之前取数，返回的输出仍是原形状的 BF16 矩阵。
+
+在同一份配置的 `abft` 下选择实现：
+
+```yaml
+abft:
+  method: classic
+  reference_mode: augmented
+  threshold_scale: output
+  implementation: native  # 改为 reference 可运行原实现；省略时默认为 reference。
+```
+
+`native` 复用主 MMA 已加载到寄存器中的 B，按固定线程布局归约输出校验，再由一个设备内核完成分块合并、阈值比较和报告标记。仅缓存不可变的校验权重，每次调用独立分配结果与临时缓冲。`reference` 保留共享 B 的附加乘法和 Python 组织的校验合并，便于对照。两者都保留两路完整列校验；原 mainloop 语句顺序保留不代表流水性能不受新增计算、寄存器和同步影响。
 
 当前增广路径支持 BF16，A、B 均可为 packed 行主序或列主序，遵循原官方 GEMM 的对齐要求。编码按每个 128 行数据 tile 独立进行，不复制整份 A，也不重新从显存遍历 A/B。其他精度继续使用原路径，不会静默回退。
 
 此模式需显式设置 `abft.threshold_scale: output`，其阈值为 `atol + rtol × Σ|w*C_acc|`；旧 `input_fused/separate` 使用默认 `threshold_scale: input`，对应 `|W||A||B|`。输出幅值是可校准的尺度，不是旧输入误差上界。校验行写为 BF16 引入的舍入误差属于正常残差；示例保留原调试容差并如实记录报警，正式误报率和检出率实验须在独立正常样本上校准。
 
-增广路径支持计算结果注入和一次重算复检。BF16 行号权重可能重复，原 FP32 的比值定位规则不适用，因此当前报告 `located: false`，不声称可定位单行。完整 FP32 标量参考仍可通过 `reference_mode: input_fused` 与 `threshold_scale: input` 选择作对照。
+增广路径支持 `fault.location: accumulator` 和一次重算复检；复检沿用首次调用保存的参考校验。BF16 行号权重可能重复，原 FP32 的比值定位规则不适用，因此当前报告 `located: false`。当前验证范围是已有的累加结果注入点；复用 B 寄存器时，若 B 本身被破坏，数据与参考可能共同受影响，不能据此声称覆盖操作数故障。完整 FP32 标量参考仍可通过 `reference_mode: input_fused` 与 `threshold_scale: input` 选择作对照。
 
 配置指定精度、矩阵形状 `[M,N,K]`、输入种子、阈值、预热和测量次数。两条路径使用同一份已准备好的码值、scale 与布局，量化和布局转换在计时之前完成。保护路径从参考校验开始计时，到输出与设备端判定完成结束；参考解码和校验传播仍计入保护开销。
 
-输出 JSON 包含无保护与保护时延、配对比例、逐位输出一致性和正常调用报警结果。测量顺序交替，报告在计时外读取。CUDA Event 的完整调用时延可能包含 CPU 提交间隙，不等于 GPU 内核执行时间之和。正常重复调用使用同一输入，报警比例用于检查当前配置，不替代独立正常样本上的阈值校准。
+输出 JSON 保留无保护与保护时延、配对比例、逐次结果与完整样本。测量顺序交替，报告在计时外读取。正常重复调用使用同一输入，报警比例用于检查当前配置，不替代独立正常样本上的阈值校准。
 
-`profile_repeats` 大于 0 时，额外使用 PyTorch profiler/CUPTI 测量各阶段，打印汇总并保存到 JSON 的 `stage_profile`；它不计入主测量样本。阶段包括校验权重/参考准备、融合 GEMM、参考与输出 checksum 合并、检测、候选定位和报告状态张量。GPU 列累计关联的内核与拷贝时间，不包含 CPU 发射间隙；CPU 列包含提交、等待和 profiler 自身开销，两列不能相加。ABFT 完整调用是父范围，不能再与子阶段相加。其他方法若没有细分标记，则合并显示检测与定位。
+`profile_repeats` 大于 0 时，额外用 PyTorch profiler/CUPTI 采集阶段耗时，控制台表格只显示 GPU 活动中位数，单位为微秒（μs）。`reference` 分别列出校验准备、融合 GEMM、checksum 合并、检测、候选定位与报告状态；`native` 列出权重准备、融合 GEMM 和一次合并判定（`abft.finalize`）。总计已包含子阶段，不能重复相加。CPU 范围耗时、均值和完整样本保留在 JSON 的 `stage_profile` 中；该次采集独立于主测量样本。
 
-原生 GEMM 调用还包含校验缓冲初始化。识别到 CUPTI 的 CUTLASS 内核记录时，输出会进一步区分 `cutlass_kernel_ms` 和 `other_gpu_activity_ms`，避免将缓冲初始化混称为单个内核耗时。
+`profile_repeats: 0` 时，控制台改为显示 CUDA Event 完整调用时延，并标明可能包含 CPU 提交间隙。这与 CUPTI 的 GPU 活动累计时间口径不同，不能混用。JSON 中的 CPU 范围还含提交、等待和 profiler 开销，不能与 GPU 时间相加。
 
-编译、输入准备与量化均先完成；主测量和分阶段采集分别预热。测量期间不打印矩阵或结果；分阶段采集结束后才读取报告并输出各阶段的中位数、均值。融合内核内部的主乘法和 checksum 作为整体测量，未拆成独立内核。平台无法提供 CUDA 活动时间时会明确报错，不以零时间代替。
+`reference` 的原生 GEMM 调用还包含校验缓冲初始化；`native` 由内核写满本次缓冲，不另发预清零内核。识别到 CUPTI 的 CUTLASS 内核记录时，输出会进一步区分 `cutlass_kernel_ms` 和 `other_gpu_activity_ms`，避免将初始化等 GPU 活动混称为单个内核耗时。
+
+编译、输入准备与量化均先完成；主测量和分阶段采集分别预热。测量期间不打印矩阵或结果；采集结束后统一输出。融合内核内部的主乘法和 checksum 作为整体测量，未拆成独立内核。平台无法提供 CUDA 活动时间时会明确报错，不以零时间代替。
 
 自行编写实验时，先调用 `PreparedGemm.prepare()`，再将同一对象交给 `raw_native()` 和 `abft.execute_prepared()`。`execute()` 继续作为训练入口，负责准备一次输入并调用后者。`abft.timing` 默认关闭，只在需要阶段计时时开启。
 
@@ -165,4 +181,4 @@ python -m abft.benchmark --config configs/gemm/my_gemm.yaml
 
 输入融合在官方主循环的 A、B tile 就绪后计算参考校验，复用共享内存数据；NVFP4 同时读取该 tile 的 block16 scale。内核返回预测、幅值和结果校验的局部和，随后沿 M tile 合并判定。全局两路行权重及原 MMA 顺序保持一致；FP32、BF16、FP8、NVFP4 分别保留原来的 2、3、6、4 级流水线。此配置使用计算故障注入；`fault.location: accumulator` 对应已有的 epilogue FP32 注入点。
 
-新增原生路径已完成单文件编译检查，SM120 数值与性能结果待实机测量。`tests/cutlass_gemm/` 中的输入融合测试覆盖多 K 阶段、余数块、持久化调度、异构 scale、输出逐位对照、恢复与线性层前反向。运行 `bash scripts/gemm-accept.sh` 执行 GPU 检查。
+`tests/cutlass_gemm/` 中的检查覆盖多 K 阶段、余数块、持久化调度、异构 scale、输出对照、恢复与线性层前反向。运行 `bash scripts/gemm-accept.sh` 执行 GPU 检查。各实现的实际验证范围见[已有验证记录](../.agent/reference.md#已有验证记录)；编译成功不能代替 GPU 数值与性能验证。

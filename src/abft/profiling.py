@@ -11,6 +11,7 @@ STAGES = {
     "baseline.gemm": "无保护 GEMM",
     "abft.reference": "校验权重/参考准备",
     "abft.execute": "融合 GEMM 调用（含校验和缓冲初始化）",
+    "abft.finalize": "单核收尾：全列合并、阈值、非有限值和状态",
     "abft.merge_reference": "参考 checksum 与幅值合并",
     "abft.merge_observed": "输出 checksum 合并",
     "abft.detect": "阈值比较与非有限值检测",
@@ -36,15 +37,18 @@ def _cutlass_kernel_us(event):
     return own + sum(_cutlass_kernel_us(child) for child in getattr(event, "cpu_children", ()))
 
 
-def summarize_profile(events, repeats, *, input_fused):
+def summarize_profile(events, repeats, *, input_fused, native=False):
     """Use CPU scope owners to avoid counting duplicate CUDA annotations."""
     scopes = {name: [] for name in STAGES}
     for event in events:
         if event.name in scopes and event.device_type.name == "CPU":
             scopes[event.name].append(event)
-    required = {"baseline.gemm", "abft.reference", "abft.execute", "abft.merge_observed",
-                "abft.verify", "abft.report_flags", "abft.total"}
-    if input_fused:
+    required = {"baseline.gemm", "abft.reference", "abft.execute", "abft.total"}
+    if native:
+        required.add("abft.finalize")
+    else:
+        required.update(("abft.merge_observed", "abft.verify", "abft.report_flags"))
+    if input_fused and not native:
         required.add("abft.merge_reference")
     for name in required:
         if len(scopes[name]) != repeats:
@@ -104,14 +108,19 @@ def profile_prepared(prepared, config, *, warmup, repeats):
                     with record("abft.total"):
                         output, report = execute_prepared(prepared, abft_config=config, profile_scope=record)
         torch.cuda.synchronize(prepared.a.device)
-    result = summarize_profile(profiler.events(), repeats, input_fused=config.reference_mode in {"input_fused", "augmented"})
+    result = summarize_profile(profiler.events(), repeats,
+                               input_fused=config.reference_mode in {"input_fused", "augmented"},
+                               native=config.implementation == "native")
     if config.reference_mode == "augmented":
         for row in result["stages"]:
             if row["stage"] == "abft.execute":
-                row["label"] = "BF16 编码与增广 GEMM 调用（含缓冲初始化）"
+                row["label"] = ("BF16 增广 GEMM（无预清零）" if config.implementation == "native"
+                                else "BF16 编码与增广 GEMM 调用（含缓冲初始化）")
             elif row["stage"] == "abft.locate":
                 row["label"] = "定位状态（低精度编码路径未启用定位）"
-        result["fused_scope"] = "BF16 tile encoding and augmented GEMM share one kernel; native call additionally initializes buffers; no independent FP32 reference GEMM"
+        result["fused_scope"] = ("BF16 augmented GEMM plus one finalize kernel; no pre-zeroing, output reread or separate projection kernels"
+                                 if config.implementation == "native" else
+                                 "BF16 tile encoding and augmented GEMM share one kernel; native call additionally initializes buffers; no independent FP32 reference GEMM")
     # Synchronizing diagnostics are deliberately after the profiler has stopped.
     from .benchmark import compare_outputs
 
@@ -122,12 +131,33 @@ def profile_prepared(prepared, config, *, warmup, repeats):
 
 def print_profile(result):
     """Print only after all profiling, synchronization and aggregation finish."""
-    print("[分阶段] 单位 ms；GPU 为活动累计时间，CPU 含提交/等待及 profiler 开销；两列不可相加", flush=True)
+    import unicodedata
+
+    labels = {
+        "baseline.gemm": "无保护 GEMM", "abft.reference": "参考准备",
+        "abft.execute": "ABFT GEMM", "abft.finalize": "校验合并与判定",
+        "abft.merge_reference": "参考校验合并", "abft.merge_observed": "输出校验合并",
+        "abft.detect": "检测", "abft.locate": "定位状态", "abft.verify": "检测与定位",
+        "abft.report_flags": "报告状态", "abft.total": "ABFT 总计",
+    }
+    if any(row["stage"] == "abft.finalize" for row in result["stages"]):
+        labels["abft.reference"] = "权重准备"
+
+    def line(label, milliseconds):
+        width = sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in label)
+        print(f"  {label}{' ' * max(1, 24 - width)}{milliseconds * 1000:>10.3f}", flush=True)
+
+    print("  阶段                    GPU 中位耗时 / μs", flush=True)
     for row in result["stages"]:
-        gpu, cpu = row["gpu_active_ms"], row["cpu_scope_ms"]
-        print(f"  {row['label']}：GPU 中位={gpu['median']:.6f}，均值={gpu['mean']:.6f}；"
-              f"CPU 中位={cpu['median']:.6f}，均值={cpu['mean']:.6f}", flush=True)
+        label = labels[row["stage"]]
         if "cutlass_kernel_ms" in row:
-            print(f"    其中 CUTLASS 内核中位={row['cutlass_kernel_ms']['median']:.6f}，"
-                  f"初始化等其他 GPU 活动中位={row['other_gpu_activity_ms']['median']:.6f}", flush=True)
-    print("[分阶段] 融合内核中的主乘法与 checksum 合并计时；编译、预热、量化和打印均已排除", flush=True)
+            line(label + " 内核", row["cutlass_kernel_ms"]["median"])
+            if row["other_gpu_activity_ms"]["median"] > 0:
+                line("  初始化等", row["other_gpu_activity_ms"]["median"])
+        else:
+            line(label, row["gpu_active_ms"]["median"])
+    stages = {row["stage"]: row for row in result["stages"]}
+    baseline = stages["baseline.gemm"]["gpu_active_ms"]["median"]
+    protected = stages["abft.total"]["gpu_active_ms"]["median"]
+    if baseline > 0:
+        print(f"  总耗时 / 无保护：{protected / baseline:.2f}×", flush=True)

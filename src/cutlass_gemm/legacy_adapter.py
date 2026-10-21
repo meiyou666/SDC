@@ -45,8 +45,8 @@ def generate_legacy_reference_headers(cutlass, destination):
 def generate_augmented_header(cutlass, destination):
     """Append checksum MMA fragments while preserving the original data tile.
 
-    The callback only reads the existing A/B shared stage. It neither overwrites
-    that stage nor changes the already-prefetched official main MMA fragments.
+    Encoding reads the existing shared stage. Compact propagation reads the
+    already-transformed B registers; neither hook mutates official MMA operands.
     """
     source = (Path(cutlass) / "include/cutlass/gemm/threadblock/mma_multistage.h").read_bytes()
     if hashlib.sha256(source).hexdigest() != SOURCES["mma_multistage"]:
@@ -61,6 +61,11 @@ def generate_augmented_header(cutlass, destination):
         "    for (; gemm_k_iterations > (-Base::kStages + 1);) {": (
             "    for (; gemm_k_iterations > (-Base::kStages + 1);) {\n"
             "      if (encoding) encoding->consume(smem_read_stage_idx_);"
+        ),
+        "      // Execute the current warp-tile of MMA operations": (
+            "      if (encoding) encoding->propagate(\n"
+            "          warp_mma_k, pipe_state.warp_transformed_frag_B_[warp_mma_k % 2]);\n\n"
+            "      // Execute the current warp-tile of MMA operations"
         ),
     }
     for anchor, replacement in replacements.items():

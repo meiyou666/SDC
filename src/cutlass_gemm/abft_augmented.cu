@@ -13,17 +13,20 @@ using Row = cutlass::layout::RowMajor;
 using Col = cutlass::layout::ColumnMajor;
 using Element = cutlass::bfloat16_t;
 using Result = std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>;
+using CompactResult = std::tuple<at::Tensor, at::Tensor, at::Tensor>;
+template<bool Compact>
+using LaunchResult = std::conditional_t<Compact, CompactResult, Result>;
 
-template<class LayoutA, class LayoutB>
-Result launch(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
-              int row, int col, int bit) {
+template<bool Compact, class LayoutA, class LayoutB>
+LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
+                            const at::Tensor& weights, int row, int col, int bit) {
   // Same SM80 official BF16 main MMA, warp tile and three-stage schedule as
   // gemm.cu. The appended checksum rows use additional official MMA fragments;
   // the 128 original data rows retain all their input/output tile coordinates.
   using Gemm = cutlass::gemm::device::Gemm<Element, LayoutA, Element, LayoutB,
       Element, Row, float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
       cutlass::gemm::GemmShape<128,128,64>>;
-  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel>;
+  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel, Compact>;
   const int m = a.size(0), n = b.size(1), k = a.size(1);
   const int lda = a.stride(std::is_same_v<LayoutA, Row> ? 0 : 1);
   const int ldb = b.stride(std::is_same_v<LayoutB, Row> ? 0 : 1);
@@ -33,10 +36,21 @@ Result launch(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weight
   TORCH_CHECK(m_tiles <= properties->maxGridSize[0] && n_tiles <= properties->maxGridSize[1],
               "Augmented ABFT tile grid exceeds CUDA launch limits");
   auto d = at::empty({m, n}, a.options());
-  auto observed = at::zeros({2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
-  auto predicted = at::zeros_like(observed);
-  auto magnitude = at::zeros_like(observed);
-  auto hit = at::zeros({1}, a.options().dtype(at::kInt));
+  at::Tensor observed, predicted, magnitude, hit, partials, tile_flags;
+  if constexpr (Compact) {
+    // Every CTA owns its complete tile slice, including padded N columns.
+    // There are no atomics across CTAs and no pre-launch zeroing kernels.
+    partials = at::empty({3, 2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
+    observed = partials.select(0, 0);
+    predicted = partials.select(0, 1);
+    magnitude = partials.select(0, 2);
+    tile_flags = at::empty({m_tiles, n_tiles}, a.options().dtype(at::kInt));
+  } else {
+    observed = at::zeros({2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
+    predicted = at::zeros_like(observed);
+    magnitude = at::zeros_like(observed);
+    hit = at::zeros({1}, a.options().dtype(at::kInt));
+  }
   const auto* ptr_a = reinterpret_cast<const Element*>(a.const_data_ptr());
   const auto* ptr_b = reinterpret_cast<const Element*>(b.const_data_ptr());
   auto* ptr_d = reinterpret_cast<Element*>(d.mutable_data_ptr());
@@ -51,7 +65,8 @@ Result launch(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weight
       typename Kernel::Iterator::Params(Row(n)), ptr_a, ptr_b, ptr_d, {m, n, k},
       {reinterpret_cast<const Element*>(weights.const_data_ptr()),
        observed.data_ptr<float>(), predicted.data_ptr<float>(), magnitude.data_ptr<float>(),
-       hit.data_ptr<int>(), m_tiles, n_tiles * 128, m, row, col, bit}};
+       Compact ? nullptr : hit.data_ptr<int>(), m_tiles, n_tiles * 128, m, row, col, bit,
+       Compact ? tile_flags.data_ptr<int>() : nullptr}};
   const size_t shared_bytes = sizeof(typename Kernel::SharedStorage);
   TORCH_CHECK(shared_bytes <= properties->sharedMemPerBlockOptin,
               "Augmented ABFT kernel shared memory exceeds this GPU's limit");
@@ -63,11 +78,12 @@ Result launch(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weight
   cutlass::Kernel<Kernel><<<dim3(m_tiles, n_tiles), Kernel::kThreads,
                             shared_bytes, stream.stream()>>>(params);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  return {d, observed, hit, predicted, magnitude};
+  if constexpr (Compact) return {d, partials, tile_flags};
+  else return {d, observed, hit, predicted, magnitude};
 }
-}  // namespace
 
-Result sdc_cutlass_abft_augmented_mm(const at::Tensor& a, const at::Tensor& b,
+template<bool Compact>
+LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
     const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
   TORCH_CHECK(a.is_cuda() && b.is_cuda() && weights.is_cuda() &&
                   a.device() == b.device() && a.device() == weights.device(),
@@ -102,9 +118,20 @@ Result sdc_cutlass_abft_augmented_mm(const at::Tensor& a, const at::Tensor& b,
   TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
               "Augmented ABFT GEMM requires SM80 or newer");
   if (row_a) {
-    if (row_b) return launch<Row, Row>(a, b, weights, row, col, bit);
-    return launch<Row, Col>(a, b, weights, row, col, bit);
+    if (row_b) return launch<Compact, Row, Row>(a, b, weights, row, col, bit);
+    return launch<Compact, Row, Col>(a, b, weights, row, col, bit);
   }
-  if (row_b) return launch<Col, Row>(a, b, weights, row, col, bit);
-  return launch<Col, Col>(a, b, weights, row, col, bit);
+  if (row_b) return launch<Compact, Col, Row>(a, b, weights, row, col, bit);
+  return launch<Compact, Col, Col>(a, b, weights, row, col, bit);
+}
+}  // namespace
+
+Result sdc_cutlass_abft_augmented_mm(const at::Tensor& a, const at::Tensor& b,
+    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
+  return dispatch<false>(a, b, weights, row, col, bit);
+}
+
+CompactResult sdc_cutlass_abft_augmented_compact(const at::Tensor& a, const at::Tensor& b,
+    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
+  return dispatch<true>(a, b, weights, row, col, bit);
 }
