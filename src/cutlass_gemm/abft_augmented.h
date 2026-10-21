@@ -15,6 +15,8 @@
 #include "cute/tensor.hpp"
 #include "cute/atom/mma_atom.hpp"
 #include "cute/atom/mma_traits_sm80.hpp"
+#include "cute/atom/copy_atom.hpp"
+#include "cute/atom/copy_traits_sm75.hpp"
 
 namespace sdc_abft {
 
@@ -99,6 +101,51 @@ struct AugmentedTileEncoding {
   static_assert(register_mapping_is_lane_local(),
                 "Official B-to-A transpose must preserve every lane's coordinates");
 
+  // For native WA encoding, the official LDSM copy atom
+  // supplies the register fragment required by the official BF16 MMA atom.
+  // Global row-major A uses transposed 8x8 shared loads for A^T; global
+  // column-major A uses non-transposed loads. Both shared layouts retain
+  // contiguous aligned vectors of eight BF16 values.
+  using SharedALayout = typename Base::TensorRefA::Layout;
+  static constexpr bool kRowMajorA = cutlass::platform::is_same<
+      SharedALayout,
+      cutlass::layout::RowMajorTensorOpMultiplicandCrosswise<16,64>>::value;
+  static constexpr bool kColumnMajorA = cutlass::platform::is_same<
+      SharedALayout,
+      cutlass::layout::ColumnMajorTensorOpMultiplicandCongruous<16,64>>::value;
+  static_assert(kRowMajorA || kColumnMajorA, "WA LDSM requires pinned shared A layouts");
+  using EncodingCopyOp = typename cutlass::platform::conditional<
+      kRowMajorA, cute::SM75_U16x8_LDSM_T, cute::SM75_U32x4_LDSM_N>::type;
+  using EncodingCopyAtom = cute::Copy_Atom<EncodingCopyOp,Element>;
+  using EncodingCopy = decltype(cute::make_tiled_copy_A(EncodingCopyAtom{},ChecksumMma{}));
+  CUTLASS_HOST_DEVICE static constexpr bool copy_destination_matches_mma() {
+    for (int lane = 0; lane < 32; ++lane) {
+      for (int value = 0; value < 8; ++value) {
+        if (EncodingCopy::get_layoutD_TV()(cute::make_coord(lane,value)) !=
+            ChecksumMma{}.get_layoutA_TV()(cute::make_coord(lane,value))) return false;
+      }
+    }
+    return true;
+  }
+  static_assert(copy_destination_matches_mma(),
+                "Official copy and MMA must agree on all A fragment registers");
+  CUTLASS_HOST_DEVICE static constexpr bool copy_source_is_contiguous() {
+    for (int lane = 0; lane < 32; ++lane) {
+      const int first = EncodingCopy::get_layoutS_TV()(cute::make_coord(lane,0));
+      for (int value = 0; value < 8; ++value) {
+        const int coordinate = EncodingCopy::get_layoutS_TV()(cute::make_coord(lane,value));
+        if (kRowMajorA) {
+          if (first % 16 % 8 || coordinate != first + value) return false;
+        } else {
+          if (first / 16 % 8 || coordinate != first + value * 16) return false;
+        }
+      }
+    }
+    return true;
+  }
+  static_assert(copy_source_is_contiguous(),
+                "Official LDSM must read one aligned contiguous BF16 vector per lane");
+
   CUTLASS_DEVICE void initialize() {
     const int row_base = tile_m * kAugmentedDataRows;
     for (int index = thread; index < 256; index += Threads) {
@@ -145,13 +192,35 @@ struct AugmentedTileEncoding {
         const int local_row = reduction + cute::get<1>(w_coordinates(i));
         w_fragment(i) = p < 2 ? scratch.weights[p][local_row] : Element(0.f);
       }
-      CUTLASS_PRAGMA_UNROLL
-      for (int i = 0; i < cute::size(a_fragment); ++i) {
-        const int k = warp * 16 + cute::get<0>(a_coordinates(i));
-        const int local_row = reduction + cute::get<1>(a_coordinates(i));
-        const int row = tile_m * kAugmentedDataRows + local_row;
-        a_fragment(i) = row < projection.rows && k < valid_k
-            ? shared_a.at({local_row, stage * Shape::kK + k}) : Element(0.f);
+      if (reuse_pipeline_barriers) {
+        // The source coordinate comes from official copy/MMA composition,
+        // rather than an independently handwritten ldmatrix register map.
+        const int load_coordinate = EncodingCopy::get_layoutS_TV()(cute::make_coord(lane,0));
+        auto source = cute::make_tensor(cute::make_smem_ptr(&shared_a.at({
+            reduction + load_coordinate / 16,
+            stage * Shape::kK + warp * 16 + load_coordinate % 16})),
+            cute::Layout<cute::_8>{});
+        auto destination = cute::make_tensor(a_fragment.data(), cute::Layout<cute::_8>{});
+        EncodingCopyAtom{}.call(source,destination);
+        // LDSM reads an allocated shared-memory vector; discard masked M/K
+        // elements before the checksum MMA, including the first K residue tile.
+        CUTLASS_PRAGMA_UNROLL
+        for (int i = 0; i < cute::size(a_fragment); ++i) {
+          const int k = warp * 16 + cute::get<0>(a_coordinates(i));
+          const int local_row = reduction + cute::get<1>(a_coordinates(i));
+          const int row = tile_m * kAugmentedDataRows + local_row;
+          if (!(row < projection.rows && k < valid_k)) a_fragment(i) = Element(0.f);
+        }
+      } else {
+        // Keep the reference implementation unchanged for paired comparison.
+        CUTLASS_PRAGMA_UNROLL
+        for (int i = 0; i < cute::size(a_fragment); ++i) {
+          const int k = warp * 16 + cute::get<0>(a_coordinates(i));
+          const int local_row = reduction + cute::get<1>(a_coordinates(i));
+          const int row = tile_m * kAugmentedDataRows + local_row;
+          a_fragment(i) = row < projection.rows && k < valid_k
+              ? shared_a.at({local_row, stage * Shape::kK + k}) : Element(0.f);
+        }
       }
       cute::gemm(mma, a_fragment, w_fragment, q_fragment);
     }

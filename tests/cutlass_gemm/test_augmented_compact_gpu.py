@@ -73,14 +73,20 @@ def _assert_against_legacy(compact, legacy, m, n):
         (136, 144, 80, True, False),
         (136, 264, 192, True, True),
         (257, 136, 448, False, False),
+        (1, 8, 8, False, False),
+        (136, 144, 8, True, False),
+        (129, 144, 72, False, False),
+        (136, 144, 72, True, False),
     ],
     ids=["one-row-residue", "full-tile-B-column", "A-column-tail-residue",
-         "both-column-three-stages", "partial-M-N-seven-stages"],
+         "both-column-three-stages", "partial-M-N-seven-stages",
+         "half-atom-RR-one-row", "half-atom-A-column-tail",
+         "half-atom-residue-RR-tail", "half-atom-residue-A-column-tail"],
 )
 def test_compact_bitwise_layouts_tails_stage_wrap_and_nondefault_stream(
     m, n, k, column_a, column_b,
 ):
-    # Five cases jointly cover four packed layouts and multiple stage wraps,
+    # Cases cover four packed layouts, stage wraps, and half-K16-atom residues,
     # rather than multiplying every shape by every layout without new coverage.
     stream = torch.cuda.Stream()
     with torch.cuda.stream(stream):
