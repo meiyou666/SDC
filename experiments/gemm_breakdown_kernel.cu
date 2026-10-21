@@ -17,11 +17,14 @@ using Element = cutlass::bfloat16_t;
 using Gemm = cutlass::gemm::device::Gemm<Element, Row, Element, Row,
     Element, Row, float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
     cutlass::gemm::GemmShape<128,128,64>>;
-using Kernel = sdc_breakdown_detail::AugmentedKernel<typename Gemm::GemmKernel, true>;
+template<bool FullKN>
+using DiagnosticKernel =
+    sdc_breakdown_detail::AugmentedKernel<typename Gemm::GemmKernel, true, FullKN>;
 using Result = std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>;
-constexpr size_t kSharedBytes = sizeof(typename Kernel::SharedStorage);
 
+template<bool FullKN>
 void check_device(const at::Tensor& a) {
+  constexpr size_t kSharedBytes = sizeof(typename DiagnosticKernel<FullKN>::SharedStorage);
   TORCH_CHECK(a.is_cuda(), "GEMM breakdown requires a CUDA tensor");
   const auto* properties = at::cuda::getDeviceProperties(a.get_device());
   TORCH_CHECK(properties->major * 10 + properties->minor == SDC_BREAKDOWN_ARCH,
@@ -30,15 +33,21 @@ void check_device(const at::Tensor& a) {
               "GEMM breakdown shared memory exceeds this GPU's limit");
 }
 
+template<bool FullKN>
 void configure_kernel() {
+  using Kernel = DiagnosticKernel<FullKN>;
+  constexpr size_t kSharedBytes = sizeof(typename Kernel::SharedStorage);
   if (kSharedBytes >= 48 * 1024) {
     C10_CUDA_CHECK(cudaFuncSetAttribute(cutlass::Kernel<Kernel>,
         cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(kSharedBytes)));
   }
 }
 
-Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
-           int64_t mask, double seed) {
+template<bool FullKN>
+Result run_impl(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
+                int64_t mask, double seed) {
+  using Kernel = DiagnosticKernel<FullKN>;
+  constexpr size_t kSharedBytes = sizeof(typename Kernel::SharedStorage);
   TORCH_CHECK(mask >= 0 && mask <= 15, "GEMM breakdown mask must be in [0,15]");
   TORCH_CHECK(!(mask & 2) || (mask & 8),
               "qB propagation requires the q publication barrier");
@@ -67,7 +76,7 @@ Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
                   weights.size(1) == a.size(0) && weights.is_contiguous(),
               "GEMM breakdown weights must be contiguous BF16 [2,M]");
   const c10::cuda::CUDAGuard guard(a.device());
-  check_device(a);
+  check_device<FullKN>(a);
   const int m = a.size(0), n = b.size(1), k = a.size(1);
   const int m_tiles = (m + 127) / 128, n_tiles = (n + 127) / 128;
   const auto* properties = at::cuda::getCurrentDeviceProperties();
@@ -76,7 +85,7 @@ Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
   auto d = at::empty({m, n}, a.options());
   auto partials = at::empty({3, 2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
   auto flags = at::empty({m_tiles, n_tiles}, a.options().dtype(at::kInt));
-  auto sink = at::empty({m_tiles, n_tiles, Kernel::kThreads}, a.options().dtype(at::kFloat));
+  at::Tensor sink = at::empty({m_tiles, n_tiles, Kernel::kThreads}, a.options().dtype(at::kFloat));
   const auto* ptr_a = reinterpret_cast<const Element*>(a.const_data_ptr());
   const auto* ptr_b = reinterpret_cast<const Element*>(b.const_data_ptr());
   auto* ptr_d = reinterpret_cast<Element*>(d.mutable_data_ptr());
@@ -95,7 +104,7 @@ Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
        evidence, evidence + field, evidence + 2 * field, nullptr,
        m_tiles, n_tiles * 128, m, -1, -1, -1, flags.data_ptr<int>(),
        static_cast<int>(mask), static_cast<float>(seed), sink.data_ptr<float>()}};
-  configure_kernel();
+  configure_kernel<FullKN>();
   auto stream = at::cuda::getCurrentCUDAStream(a.get_device());
   cutlass::Kernel<Kernel><<<dim3(m_tiles, n_tiles), Kernel::kThreads,
                             kSharedBytes, stream.stream()>>>(params);
@@ -103,11 +112,24 @@ Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
   return {d, partials, flags, sink};
 }
 
-std::vector<int64_t> resources(const at::Tensor& a) {
+Result run(const at::Tensor& a, const at::Tensor& b, const at::Tensor& weights,
+           int64_t mask, double seed) {
+  // Selection depends only on N/K, never on the runtime ablation mask. Keep
+  // the same specialization as the production native dispatch for this shape.
+  const bool full_kn = a.dim() == 2 && b.dim() == 2 &&
+                       a.size(1) % 64 == 0 && b.size(1) % 128 == 0;
+  if (full_kn) return run_impl<true>(a, b, weights, mask, seed);
+  return run_impl<false>(a, b, weights, mask, seed);
+}
+
+template<bool FullKN>
+std::vector<int64_t> resources_impl(const at::Tensor& a) {
+  using Kernel = DiagnosticKernel<FullKN>;
+  constexpr size_t kSharedBytes = sizeof(typename Kernel::SharedStorage);
   TORCH_CHECK(a.is_cuda(), "GEMM breakdown resources requires a CUDA tensor");
   const c10::cuda::CUDAGuard guard(a.device());
-  check_device(a);
-  configure_kernel();
+  check_device<FullKN>(a);
+  configure_kernel<FullKN>();
   cudaFuncAttributes attributes{};
   C10_CUDA_CHECK(cudaFuncGetAttributes(&attributes, cutlass::Kernel<Kernel>));
   int active_blocks = 0;
@@ -118,11 +140,19 @@ std::vector<int64_t> resources(const at::Tensor& a) {
           attributes.maxThreadsPerBlock, active_blocks,
           at::cuda::getCurrentDeviceProperties()->multiProcessorCount};
 }
+
+std::vector<int64_t> resources(const at::Tensor& a, int64_t n) {
+  TORCH_CHECK(a.dim() == 2 && a.size(1) > 0 && n > 0 &&
+                  n <= std::numeric_limits<int>::max() - 128,
+              "GEMM breakdown resources requires a matrix and valid N");
+  if (a.size(1) % 64 == 0 && n % 128 == 0) return resources_impl<true>(a);
+  return resources_impl<false>(a);
+}
 }  // namespace
 
 TORCH_LIBRARY(sdc_breakdown, library) {
   library.def("run(Tensor a, Tensor b, Tensor weights, int mask, float seed) -> (Tensor, Tensor, Tensor, Tensor)");
-  library.def("resources(Tensor a) -> int[]");
+  library.def("resources(Tensor a, int n) -> int[]");
 }
 
 TORCH_LIBRARY_IMPL(sdc_breakdown, CUDA, library) {

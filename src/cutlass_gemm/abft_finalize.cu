@@ -3,6 +3,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAException.h>
 #include <cub/block/block_reduce.cuh>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -11,6 +12,9 @@
 
 namespace {
 constexpr int kThreads = 256;
+constexpr int kParallelThreads = 128;
+constexpr int64_t kParallelMinWork = 8192;
+constexpr int kParallelMaxBlocks = 256;
 constexpr int kTileColumns = 128;
 constexpr unsigned kDetected = 1u;
 constexpr unsigned kNonfinite = 2u;
@@ -25,24 +29,46 @@ struct CombineFlags {
   }
 };
 
-// One CTA consumes the small checksum arrays, never the GEMM output matrix.
+__device__ void write_flags(unsigned combined, bool* flags_out,
+                            int32_t* hit_out, int64_t* location_out) {
+  flags_out[0] = (combined & kDetected) != 0;
+  flags_out[1] = (combined & kNonfinite) != 0;
+  flags_out[2] = false;  // BF16 augmented encoding does not provide row localization.
+  flags_out[3] = false;  // Recovery is controlled by the caller, not this check.
+  flags_out[4] = false;
+  hit_out[0] = (combined & kHit) != 0;
+  location_out[0] = -1;
+  location_out[1] = -1;
+}
+
+// Consume only the checksum arrays, never the GEMM output matrix. The small
+// path uses one CTA; the parallel grid splits independent columns and channels.
+// Each (channel, column) is still reduced in ascending M-tile order by one thread.
 // partials is [observed/predicted/magnitude, checksum, M tile, padded N].
 // reference is [predicted/magnitude, checksum, N]. On a retry it is read-only
 // evidence from the first execution; retry predictions are deliberately ignored.
+template <bool Parallel>
 __global__ void finalize_kernel(
     const float* partials, const int32_t* tile_flags, int64_t n,
     int64_t m_tiles, int64_t padded_n, int64_t n_tiles,
     float atol, float rtol, bool use_reference, bool diagnostics,
     float* reference, float* residual_out, float* threshold_out,
-    bool* flags_out, int32_t* hit_out, int64_t* location_out) {
-  using Reduction = cub::BlockReduce<unsigned, kThreads>;
+    bool* flags_out, int32_t* hit_out, int64_t* location_out,
+    int32_t* block_states) {
+  constexpr int threads = Parallel ? kParallelThreads : kThreads;
+  using Reduction = cub::BlockReduce<unsigned, threads>;
   __shared__ typename Reduction::TempStorage reduction_storage;
   unsigned state = 0;
+  const int64_t block = Parallel ? int64_t(blockIdx.y) * gridDim.x + blockIdx.x : 0;
+  const int64_t flag_thread = block * threads + threadIdx.x;
+  const int64_t flag_stride = Parallel ? int64_t(gridDim.x) * gridDim.y * threads : threads;
+  const int64_t column_thread = Parallel ? int64_t(blockIdx.x) * threads + threadIdx.x : threadIdx.x;
+  const int64_t column_stride = Parallel ? int64_t(gridDim.x) * threads : threads;
   const int64_t channel_stride = m_tiles * padded_n;
   const int64_t field_stride = 2 * channel_stride;
 
-  for (int64_t index = threadIdx.x; index < m_tiles * n_tiles;
-       index += kThreads) {
+  // Each tile flag belongs to exactly one thread in the entire grid.
+  for (int64_t index = flag_thread; index < m_tiles * n_tiles; index += flag_stride) {
     const int32_t tile_state = tile_flags[index];
     if (tile_state & 1) state |= kHit;
     // The epilogue records BF16 output overflow as well as nonfinite data.
@@ -50,9 +76,10 @@ __global__ void finalize_kernel(
     if (tile_state & 2) state |= kDetected | kNonfinite;
   }
 
-  for (int64_t col = threadIdx.x; col < n; col += kThreads) {
+  for (int64_t col = column_thread; col < n; col += column_stride) {
 #pragma unroll
-    for (int channel = 0; channel < 2; ++channel) {
+    for (int entry = 0; entry < (Parallel ? 1 : 2); ++entry) {
+      const int channel = Parallel ? int(blockIdx.y) : entry;
       float observed = 0.f;
       float predicted = 0.f;
       float magnitude = 0.f;
@@ -91,14 +118,28 @@ __global__ void finalize_kernel(
 
   const unsigned combined = Reduction(reduction_storage).Reduce(state, CombineFlags{});
   if (threadIdx.x == 0) {
-    flags_out[0] = (combined & kDetected) != 0;
-    flags_out[1] = (combined & kNonfinite) != 0;
-    flags_out[2] = false;  // BF16 augmented encoding does not provide row localization.
-    flags_out[3] = false;  // Recovery is controlled by the caller, not this check.
-    flags_out[4] = false;
-    hit_out[0] = (combined & kHit) != 0;
-    location_out[0] = -1;
-    location_out[1] = -1;
+    if constexpr (Parallel) {
+      block_states[block] = static_cast<int32_t>(combined);
+    } else {
+      write_flags(combined, flags_out, hit_out, location_out);
+    }
+  }
+}
+
+// Only exact integer status bits cross CTA boundaries. This launch follows the
+// column/channel grid on the same stream; no unordered floating-point atomics.
+__global__ void finalize_flags_kernel(
+    const int32_t* block_states, int blocks,
+    bool* flags_out, int32_t* hit_out, int64_t* location_out) {
+  using Reduction = cub::BlockReduce<unsigned, kThreads>;
+  __shared__ typename Reduction::TempStorage reduction_storage;
+  unsigned state = 0;
+  for (int index = threadIdx.x; index < blocks; index += kThreads) {
+    state |= static_cast<unsigned>(block_states[index]);
+  }
+  const unsigned combined = Reduction(reduction_storage).Reduce(state, CombineFlags{});
+  if (threadIdx.x == 0) {
+    write_flags(combined, flags_out, hit_out, location_out);
   }
 }
 }  // namespace
@@ -146,11 +187,29 @@ FinalizeOutput sdc_cutlass_abft_finalize(
   auto hit = at::empty({1}, partials.options().dtype(at::kInt));
   auto location = at::empty({2}, partials.options().dtype(at::kLong));
   const auto stream = at::cuda::getCurrentCUDAStream(partials.get_device());
-  finalize_kernel<<<1, kThreads, 0, stream.stream()>>>(
+  if (n * m_tiles >= kParallelMinWork) {
+    const int64_t column_blocks = (n + kParallelThreads - 1) / kParallelThreads;
+    const int blocks_x = static_cast<int>(std::min<int64_t>(column_blocks, kParallelMaxBlocks / 2));
+    const int blocks = 2 * blocks_x;
+    // Per-call scratch belongs to the current stream; no shared mutable cache.
+    auto block_states = at::empty({blocks}, partials.options().dtype(at::kInt));
+    finalize_kernel<true><<<dim3(blocks_x, 2), kParallelThreads, 0, stream.stream()>>>(
+        partials.data_ptr<float>(), tile_flags.data_ptr<int32_t>(), n, m_tiles, padded_n,
+        n_tiles, static_cast<float>(atol), static_cast<float>(rtol), reference.has_value(), diagnostics,
+        output_reference.data_ptr<float>(), residual.data_ptr<float>(), threshold.data_ptr<float>(),
+        flags.data_ptr<bool>(), hit.data_ptr<int32_t>(), location.data_ptr<int64_t>(),
+        block_states.data_ptr<int32_t>());
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    finalize_flags_kernel<<<1, kThreads, 0, stream.stream()>>>(
+        block_states.data_ptr<int32_t>(), blocks,
+        flags.data_ptr<bool>(), hit.data_ptr<int32_t>(), location.data_ptr<int64_t>());
+  } else {
+    finalize_kernel<false><<<1, kThreads, 0, stream.stream()>>>(
       partials.data_ptr<float>(), tile_flags.data_ptr<int32_t>(), n, m_tiles, padded_n,
       n_tiles, static_cast<float>(atol), static_cast<float>(rtol), reference.has_value(), diagnostics,
       output_reference.data_ptr<float>(), residual.data_ptr<float>(), threshold.data_ptr<float>(),
-      flags.data_ptr<bool>(), hit.data_ptr<int32_t>(), location.data_ptr<int64_t>());
+      flags.data_ptr<bool>(), hit.data_ptr<int32_t>(), location.data_ptr<int64_t>(), nullptr);
+  }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return {output_reference, residual, threshold, flags, hit, location};
 }

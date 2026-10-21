@@ -171,7 +171,7 @@ def run(cfg, *, ncu):
                     return
                 print(f"BF16 A[{shape[0]},{shape[2]}] × B[{shape[2]},{shape[1]}]：验证并采样...", flush=True)
                 validation = validate(calls)
-                resources = diagnostic.resources(a)
+                resources = diagnostic.resources(a, shape[1])
                 if len(resources) != len(RESOURCE_NAMES):
                     raise RuntimeError("Unexpected diagnostic resource ABI")
                 times = profile(calls, cfg)
