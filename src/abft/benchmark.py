@@ -32,14 +32,22 @@ class BenchmarkConfig:
     repeats: int
     profile_repeats: int
     output: str
+    progress: bool = False
+    preview_size: int = 0
 
 
 def load_config(path):
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or set(raw) != set(BenchmarkConfig.__dataclass_fields__):
-        raise ValueError("Benchmark YAML must declare exactly all BenchmarkConfig fields")
+    fields = set(BenchmarkConfig.__dataclass_fields__)
+    optional = {"progress", "preview_size"}
+    if not isinstance(raw, dict) or set(raw) - fields or fields - optional - set(raw):
+        raise ValueError("Benchmark YAML contains unknown fields or is missing required fields")
     raw["abft"] = parse_abft_config(raw["abft"])
     cfg = BenchmarkConfig(**raw)
+    if type(cfg.progress) is not bool:
+        raise ValueError("progress must be a boolean")
+    if type(cfg.preview_size) is not int or not 0 <= cfg.preview_size <= 16:
+        raise ValueError("preview_size must be an integer from 0 to 16 (0 disables previews)")
     if not isinstance(cfg.device, str) or not cfg.device.startswith("cuda:") or not cfg.device[5:].isdigit():
         raise ValueError("device must explicitly select cuda:<index>; CPU timing is unsupported")
     if cfg.abft.method == "none" or cfg.abft.on_error != "report" or cfg.abft.recovery != "none":
@@ -100,7 +108,7 @@ def compare_outputs(native, output):
             "difference_overflow": maximum is not None and not math.isfinite(maximum)}
 
 
-def measure_pairs(baseline, protected, *, warmup, repeats, measure, observe):
+def measure_pairs(baseline, protected, *, warmup, repeats, measure, observe, on_pair=None):
     """Scheduling seam for CPU tests; only run() supplies native GPU execution.
 
     measure(fn) returns (value, elapsed_ms); observe runs after both measurements.
@@ -117,11 +125,24 @@ def measure_pairs(baseline, protected, *, warmup, repeats, measure, observe):
         for name in (("baseline", "protected") if index % 2 == 0 else ("protected", "baseline")):
             outputs[name], elapsed = measure(functions[name])
             times[name].append(elapsed)
-        observations.append(observe(outputs["baseline"], outputs["protected"]))
+        observation = observe(outputs["baseline"], outputs["protected"])
+        observations.append(observation)
+        if on_pair is not None:
+            on_pair(index + 1, times["baseline"][-1], times["protected"][-1], observation)
     baseline_stats, protected_stats = summarize(times["baseline"]), summarize(times["protected"])
     ratios = [p / b for b, p in zip(times["baseline"], times["protected"], strict=True)]
     return {"baseline_ms": baseline_stats, "protected_ms": protected_stats,
             "paired_ratio": summarize(ratios), "observations": observations}
+
+
+def show_matrix(name, tensor, size):
+    """Copy only a bounded preview to the host, outside timed operations."""
+    if not size:
+        return
+    values = tensor[:size, :size].detach().float().cpu().tolist()
+    print(f"[矩阵] {name} shape={tuple(tensor.shape)} dtype={tensor.dtype}，左上角：", flush=True)
+    for row in values:
+        print("  " + " ".join(f"{value: .6g}" for value in row), flush=True)
 
 
 def run(cfg):
@@ -135,8 +156,15 @@ def run(cfg):
     from .engine import execute_prepared
     from .operands import PreparedGemm
 
+    def log(message):
+        if cfg.progress:
+            print(f"[GEMM] {message}", flush=True)
+
     device = torch.device(cfg.device)
+    log(f"检查设备并加载 CUTLASS 扩展：{device}；首次运行可能需要编译")
     backend.require_device(device)
+    total = len(cfg.formats) * len(cfg.shapes) * len(cfg.seeds)
+    log(f"设备 {torch.cuda.get_device_name(device)}；共 {total} 组；量化与调试输出不计入耗时")
     results = []
     with torch.cuda.device(device), torch.no_grad():
         stream = torch.cuda.current_stream(device)
@@ -150,25 +178,47 @@ def run(cfg):
             return value, start.elapsed_time(end)
 
         def observe(native, protected):
+            nonlocal preview_pending
             output, report = protected
             record = report.to_record()
+            if preview_pending:
+                show_matrix("普通 GEMM 输出 C", native, cfg.preview_size)
+                show_matrix("ABFT GEMM 输出 C", output, cfg.preview_size)
+                preview_pending = False
             return {"detected": bool(record["detected"]), "report": record,
                     **compare_outputs(native, output)}
+
+        def on_pair(index, baseline_ms, protected_ms, observation):
+            log(f"测量 {index}/{cfg.repeats}：普通={baseline_ms:.6f} ms，"
+                f"ABFT={protected_ms:.6f} ms，报警={observation['detected']}，"
+                f"逐位一致={observation['output_bits_equal']}，"
+                f"最大有限绝对差={observation['max_abs_finite_difference']}，"
+                f"非有限元素={observation['nonfinite_elements']}")
 
         for fmt in cfg.formats:
             for m, n, k in cfg.shapes:
                 for seed in cfg.seeds:
+                    log(f"组 {len(results) + 1}/{total}：{fmt['precision']}，"
+                        f"A[{m},{k}] × B[{k},{n}]，seed={seed}；生成并准备输入")
                     generator = torch.Generator(device=device).manual_seed(seed)
                     a = torch.randn((m, k), device=device, dtype=torch.float32, generator=generator) * cfg.input_std
                     b = torch.randn((k, n), device=device, dtype=torch.float32, generator=generator) * cfg.input_std
+                    show_matrix("生成输入 A（类型转换和量化前）", a, cfg.preview_size)
+                    show_matrix("生成输入 B（类型转换和量化前）", b, cfg.preview_size)
                     prepared = PreparedGemm.prepare(a, b, **fmt)
+                    if fmt["precision"] in {"fp32", "bf16"}:
+                        show_matrix("实际 GEMM 输入 A", prepared.a, cfg.preview_size)
+                        show_matrix("实际 GEMM 输入 B", prepared.b, cfg.preview_size)
                     # Includes all preparation work before the first timed event.
                     torch.cuda.synchronize(device)
                     def protected():
                         return execute_prepared(prepared, abft_config=cfg.abft,
                                                 context={"execution_kind": "benchmark", "retry": False})
+                    preview_pending = bool(cfg.preview_size)
+                    log(f"输入准备完成；预热 {cfg.warmup} 组，然后测量 {cfg.repeats} 组")
                     measured = measure_pairs(prepared.raw_native, protected, warmup=cfg.warmup,
-                                             repeats=cfg.repeats, measure=measure, observe=observe)
+                                             repeats=cfg.repeats, measure=measure, observe=observe,
+                                             on_pair=on_pair if cfg.progress else None)
                     observations = measured.pop("observations")
                     alarms = sum(item["detected"] for item in observations)
                     measured.update(format=fmt, shape=[m, n, k], seed=seed,
@@ -176,11 +226,16 @@ def run(cfg):
                                     observed_normal_alarm_rate=alarms / cfg.repeats,
                                     observations=observations)
                     if cfg.profile_repeats:
+                        log(f"单独测量各阶段：{cfg.profile_repeats} 次")
                         profile = []
                         for _ in range(cfg.profile_repeats):
                             _, report = execute_prepared(prepared, abft_config=replace(cfg.abft, timing=True))
                             profile.append(report.to_record())
                         measured["separate_stage_profile"] = profile
+                    log(f"本组完成：普通中位耗时={measured['baseline_ms']['median']:.6f} ms，"
+                        f"ABFT中位耗时={measured['protected_ms']['median']:.6f} ms，"
+                        f"配对耗时比例中位数={measured['paired_ratio']['median']:.3f}，"
+                        f"正常调用报警={alarms}/{cfg.repeats}")
                     results.append(measured)
     return {"config": asdict(cfg), "timing_scope": "prepared operands to native output and ABFT device decision; excludes quantization, logging and optional stage profiling",
             "alarm_denominator": "repeated normal calls per fixed operand pair; not independent production samples",
@@ -200,7 +255,7 @@ def main():
     output = Path(cfg.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    print(output)
+    print(f"[GEMM] 完成，结果已保存：{output}", flush=True)
 
 
 if __name__ == "__main__":
