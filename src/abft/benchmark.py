@@ -142,7 +142,7 @@ def show_matrix(name, tensor, size):
     if not size:
         return
     values = tensor[:size, :size].detach().float().cpu().tolist()
-    print(f"[矩阵] {name} shape={tuple(tensor.shape)} dtype={tensor.dtype}，左上角：", flush=True)
+    print(f"{name} shape={tuple(tensor.shape)} {tensor.dtype} [{size}×{size} 预览]", flush=True)
     for row in values:
         print("  " + " ".join(f"{value: .6g}" for value in row), flush=True)
 
@@ -161,10 +161,10 @@ def run(cfg):
             print(f"[GEMM] {message}", flush=True)
 
     device = torch.device(cfg.device)
-    log(f"检查设备并加载 CUTLASS 扩展：{device}；首次运行可能需要编译")
+    log("加载 CUTLASS（首次运行需编译）...")
     backend.require_device(device)
     total = len(cfg.formats) * len(cfg.shapes) * len(cfg.seeds)
-    log(f"设备 {torch.cuda.get_device_name(device)}；共 {total} 组；量化与调试输出不计入耗时")
+    log(f"{torch.cuda.get_device_name(device)} | {total} 组 | 预热 {cfg.warmup}，测量 {cfg.repeats}")
     results = []
     with torch.cuda.device(device), torch.no_grad():
         stream = torch.cuda.current_stream(device)
@@ -187,27 +187,21 @@ def run(cfg):
             return {"detected": bool(record["detected"]), "report": record,
                     **compare_outputs(native, output)}
 
-        def log_pair(index, baseline_ms, protected_ms, observation):
-            log(f"测量 {index}/{cfg.repeats}：普通={baseline_ms:.6f} ms，"
-                f"ABFT={protected_ms:.6f} ms，报警={observation['detected']}，"
-                f"逐位一致={observation['output_bits_equal']}，"
-                f"最大有限绝对差={observation['max_abs_finite_difference']}，"
-                f"非有限元素={observation['nonfinite_elements']}")
-
         for fmt in cfg.formats:
             for m, n, k in cfg.shapes:
                 for seed in cfg.seeds:
-                    log(f"组 {len(results) + 1}/{total}：{fmt['precision']}，{cfg.abft.reference_mode}，"
-                        f"A[{m},{k}] × B[{k},{n}]，seed={seed}；生成并准备输入")
+                    print(f"[{len(results) + 1}/{total}] {fmt['precision'].upper()} {cfg.abft.implementation} | "
+                          f"A[{m},{k}] × B[{k},{n}] | seed={seed}", flush=True)
                     generator = torch.Generator(device=device).manual_seed(seed)
                     a = torch.randn((m, k), device=device, dtype=torch.float32, generator=generator) * cfg.input_std
                     b = torch.randn((k, n), device=device, dtype=torch.float32, generator=generator) * cfg.input_std
-                    show_matrix("生成输入 A（类型转换和量化前）", a, cfg.preview_size)
-                    show_matrix("生成输入 B（类型转换和量化前）", b, cfg.preview_size)
                     prepared = PreparedGemm.prepare(a, b, **fmt)
                     if fmt["precision"] in {"fp32", "bf16"}:
-                        show_matrix("实际 GEMM 输入 A", prepared.a, cfg.preview_size)
-                        show_matrix("实际 GEMM 输入 B", prepared.b, cfg.preview_size)
+                        show_matrix("A", prepared.a, cfg.preview_size)
+                        show_matrix("B", prepared.b, cfg.preview_size)
+                    else:
+                        show_matrix("A（量化前）", a, cfg.preview_size)
+                        show_matrix("B（量化前）", b, cfg.preview_size)
                     # Includes all preparation work before the first timed event.
                     torch.cuda.synchronize(device)
                     def protected():
@@ -215,11 +209,8 @@ def run(cfg):
                                                 context={"execution_kind": "benchmark", "retry": False})
                     preview_pending = bool(cfg.preview_size)
                     preview_outputs = None
-                    pair_logs = []
-                    log(f"输入准备完成；预热 {cfg.warmup} 组，然后测量 {cfg.repeats} 组")
                     measured = measure_pairs(prepared.raw_native, protected, warmup=cfg.warmup,
-                                             repeats=cfg.repeats, measure=measure, observe=observe,
-                                             on_pair=lambda *entry: pair_logs.append(entry) if cfg.progress else None)
+                                             repeats=cfg.repeats, measure=measure, observe=observe)
                     observations = measured.pop("observations")
                     alarms = sum(item["detected"] for item in observations)
                     measured.update(format=fmt, shape=[m, n, k], seed=seed,
@@ -229,22 +220,21 @@ def run(cfg):
                     if cfg.profile_repeats:
                         from .profiling import print_profile, profile_prepared
 
-                        log(f"单独测量各阶段：{cfg.profile_repeats} 次")
                         measured["stage_profile"] = profile_prepared(
                             prepared, cfg.abft, warmup=cfg.warmup, repeats=cfg.profile_repeats,
                         )
                     # All printing/readback of previews follows both measurement passes.
                     if preview_outputs is not None:
-                        show_matrix("普通 GEMM 输出 C", preview_outputs[0], cfg.preview_size)
-                        show_matrix("ABFT GEMM 输出 C", preview_outputs[1], cfg.preview_size)
-                    for entry in pair_logs:
-                        log_pair(*entry)
+                        show_matrix("C（无保护）", preview_outputs[0], cfg.preview_size)
+                        show_matrix("C（ABFT）", preview_outputs[1], cfg.preview_size)
                     if cfg.profile_repeats:
                         print_profile(measured["stage_profile"])
-                    log(f"本组完成：普通中位耗时={measured['baseline_ms']['median']:.6f} ms，"
-                        f"ABFT中位耗时={measured['protected_ms']['median']:.6f} ms，"
-                        f"配对耗时比例中位数={measured['paired_ratio']['median']:.3f}，"
-                        f"正常调用报警={alarms}/{cfg.repeats}")
+                    else:
+                        print(f"调用中位耗时（含提交间隙）：无保护 {measured['baseline_ms']['median']:.4f} ms | "
+                              f"ABFT {measured['protected_ms']['median']:.4f} ms", flush=True)
+                    equal = all(item["output_bits_equal"] for item in observations)
+                    status = "逐位一致" if equal else "存在差异（见 JSON）"
+                    print(f"输出：{status} | 无故障报警：{alarms}/{cfg.repeats}\n", flush=True)
                     results.append(measured)
     return {"config": asdict(cfg), "timing_scope": "CUDA event interval around full calls, including possible host launch gaps; excludes quantization, logging, compilation, warmup and separate CUPTI profiling",
             "alarm_denominator": "repeated normal calls per fixed operand pair; not independent production samples",
@@ -264,7 +254,7 @@ def main():
     output = Path(cfg.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
-    print(f"[GEMM] 完成，结果已保存：{output}", flush=True)
+    print(f"完整结果：{output}", flush=True)
 
 
 if __name__ == "__main__":

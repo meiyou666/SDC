@@ -49,6 +49,7 @@ def test_augmented_append_keeps_original_data_mainloop(tmp_path, monkeypatch):
     text = ("class MmaMultistage {\n  using Shape = Shape_;\n"
             "    PipeState pipe_state;\n    first_warp_load();\n"
             "    for (; gemm_k_iterations > (-Base::kStages + 1);) {\n"
+            "      // Execute the current warp-tile of MMA operations\n"
             "      original_data_mma();\n        advance_smem_read_stage();\n"
             "        next_warp_load();\n    }\n};\n")
     source = tmp_path / "include/cutlass/gemm/threadblock/mma_multistage.h"
@@ -57,11 +58,15 @@ def test_augmented_append_keeps_original_data_mainloop(tmp_path, monkeypatch):
     monkeypatch.setitem(adapter.SOURCES, "mma_multistage", hashlib.sha256(text.encode()).hexdigest())
     target = adapter.generate_augmented_header(tmp_path, tmp_path / "generated")
     adapted = target.read_text()
-    assert "consume(smem_read_stage_idx_);\n      original_data_mma();" in adapted
+    assert "encoding->consume(smem_read_stage_idx_);" in adapted
+    assert "encoding->propagate(" in adapted
     restored = adapted.replace("AugmentedMmaMultistage", "MmaMultistage").replace(
         "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
         "  Encoding* encoding = nullptr;\n", "", 1,
-    ).replace("\n      if (encoding) encoding->consume(smem_read_stage_idx_);", "", 1)
+    ).replace("\n      if (encoding) encoding->consume(smem_read_stage_idx_);", "", 1).replace(
+        "      if (encoding) encoding->propagate(\n"
+        "          warp_mma_k, pipe_state.warp_transformed_frag_B_[warp_mma_k % 2]);\n\n", "", 1,
+    )
     assert restored == text
     mtime = target.stat().st_mtime_ns
     adapter.generate_augmented_header(tmp_path, target.parent)

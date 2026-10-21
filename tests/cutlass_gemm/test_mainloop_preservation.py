@@ -39,3 +39,20 @@ def test_only_checksum_calls_are_added_to_official_mma(local, official):
     adapted, finishes = re.subn(r"Reference::finish\([^;]*\);", "", adapted)
     assert (declarations, consumes, finishes) == (1, 2, 1)
     assert re.sub(r"\s+", "", adapted) == re.sub(r"\s+", "", original)
+
+
+def test_augmented_preserves_pinned_multistage_source(tmp_path):
+    from cutlass_gemm.legacy_adapter import generate_augmented_header
+
+    upstream = CUTLASS / "include/cutlass/gemm/threadblock/mma_multistage.h"
+    if not upstream.is_file():
+        pytest.skip("Pinned CUTLASS source is installed in the NVIDIA environment")
+    adapted = generate_augmented_header(CUTLASS, tmp_path).read_text()
+    restored = adapted.replace("AugmentedMmaMultistage", "MmaMultistage").replace(
+        "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
+        "  Encoding* encoding = nullptr;\n", "", 1,
+    ).replace("\n      if (encoding) encoding->consume(smem_read_stage_idx_);", "", 1).replace(
+        "      if (encoding) encoding->propagate(\n"
+        "          warp_mma_k, pipe_state.warp_transformed_frag_B_[warp_mma_k % 2]);\n\n", "", 1,
+    )
+    assert restored == upstream.read_text()

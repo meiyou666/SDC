@@ -65,6 +65,29 @@ def _selected(fault, context):
             and (fault.role is None or context.get("role") == fault.role))
 
 
+def _report_context(prepared, cfg, fault, context, selected, output):
+    augmented = cfg.reference_mode == "augmented"
+    fused = cfg.reference_mode in {"input_fused", "augmented"}
+    precision = prepared.precision
+    return {**context, "fault": asdict(fault), "fault_selected": selected,
+            "precision": precision,
+            "scaling": {"fp32": "none", "bf16": "none", "fp8": "tensorwise", "nvfp4": "block16"}[precision],
+            "reference_mode": cfg.reference_mode, "implementation": cfg.implementation,
+            "threshold_scale": cfg.threshold_scale,
+            "checksum_input_precision": "bf16" if augmented else "fp32",
+            "reference_algorithm": "augmented_gemm" if augmented else "separate_projection_arithmetic",
+            "augmented_rows_per_data_tile": 2 if augmented else 0,
+            "protection_scope": "computation_after_input_load" if fused else "prepared_inputs_and_computation",
+            "m": prepared.m, "n": prepared.n, "k": prepared.k,
+            "input_precision": precision, "accumulator_precision": "fp32",
+            "output_precision": str(output.dtype), "check_precision": "fp32",
+            "injection_point": ("none" if not selected else
+                                "post_alpha_fp32_epilogue_before_output_cast"
+                                if fault.location == "accumulator" else "prepared_input_codes"),
+            "fault_hit_meaning": "injection_executed_not_output_damage",
+            "location_assumption": "disabled_for_low_precision_encoding" if augmented else "single_output_element"}
+
+
 @torch.no_grad()
 def execute(a, b, precision, scaling, global_scale="amax", abft_config=None,
             fault_config=None, context=None, *, raw_fn=None, reference_mm=None, collector_fn=None,
@@ -119,11 +142,15 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
     context = {"layer": None, "role": None, "call_index": 1,
                "execution_kind": "forward", "retry": False, **dict(context or {})}
     selected = _selected(fault, context)
+    if cfg.implementation == "native":
+        if any(fn is not None for fn in (raw_fn, reference_mm, collector_fn, reference_collector_fn)):
+            raise ValueError("native implementation does not accept reference collector overrides")
+        from .native import execute_augmented
+
+        return execute_augmented(prepared, cfg, fault, context, profile_scope=profile_scope)
     if cfg.method == "none" and not selected:
         return (raw_fn(prepared) if raw_fn else prepared.raw_native()), None
     a = prepared.a
-    precision = prepared.precision
-    scaling = {"fp32": "none", "bf16": "none", "fp8": "tensorwise", "nvfp4": "block16"}[precision]
     started = time.perf_counter()
     events = []
     def begin():
@@ -200,22 +227,7 @@ def execute_prepared(prepared, abft_config=None, fault_config=None, context=None
         result.update(fault_hit=hit, recovered=torch.zeros((), device=a.device, dtype=torch.bool),
                       recheck_failed=torch.zeros((), device=a.device, dtype=torch.bool))
     end("verify", mark)
-    report_context = {**context, "fault": asdict(fault), "fault_selected": selected,
-                      "precision": precision, "scaling": scaling,
-                      "reference_mode": cfg.reference_mode,
-                      "threshold_scale": cfg.threshold_scale,
-                      "checksum_input_precision": "bf16" if augmented else "fp32",
-                      "reference_algorithm": "augmented_gemm" if augmented else "separate_projection_arithmetic",
-                      "augmented_rows_per_data_tile": 2 if augmented else 0,
-                      "protection_scope": "computation_after_input_load" if input_fused else "prepared_inputs_and_computation",
-                      "m": prepared.m, "n": prepared.n, "k": prepared.k,
-                      "input_precision": precision, "accumulator_precision": "fp32",
-                      "output_precision": str(output.dtype), "check_precision": "fp32",
-                      "injection_point": ("none" if not selected else
-                                          "post_alpha_fp32_epilogue_before_output_cast"
-                                          if fault.location == "accumulator" else "prepared_input_codes"),
-                      "fault_hit_meaning": "injection_executed_not_output_damage",
-                      "location_assumption": "disabled_for_low_precision_encoding" if augmented else "single_output_element"}
+    report_context = _report_context(prepared, cfg, fault, context, selected, output)
     report = AbftReport(result, report_context, cfg.method, "instrumented" if fused else "raw", events)
     if method and cfg.recovery == "recompute" and bool(result["detected"].item()):
         mark = begin()

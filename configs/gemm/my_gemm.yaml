@@ -12,6 +12,7 @@ input_std: 1.0
 abft:
   method: classic
   reference_mode: augmented
+  implementation: native  # 复用 B 寄存器并合并判定；reference 保留优化前的对照。
   # 显式使用输出幅值作为阈值尺度，不沿用旧输入乘积上界。
   threshold_scale: output
   # 保留原调试容差。BF16 校验编码新增舍入误差，需独立校准；报警如实记录。
@@ -27,6 +28,6 @@ repeats: 20
 # 单独采集各阶段 GPU 活动时间与 CPU 范围时间；0 表示关闭。
 profile_repeats: 20
 progress: true
-# 每个矩阵只显示左上角 4×4；设为 0 关闭，最大为 16。
-preview_size: 4
+# 默认只显示耗时表和检查结果；设为 4 可查看矩阵左上角 4×4，最大为 16。
+preview_size: 0
 output: results/gemm/my_gemm.json

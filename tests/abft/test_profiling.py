@@ -62,6 +62,15 @@ def test_missing_samples_or_gpu_activity_fail_explicitly():
         summarize_profile(values, 2, input_fused=True)
 
 
+def test_native_profile_requires_finalize_instead_of_tensor_postprocessing():
+    names = ("baseline.gemm", "abft.reference", "abft.execute", "abft.finalize", "abft.total")
+    values = [event(name, gpu=0 if name == "abft.reference" else 10) for _ in range(2) for name in names]
+    result = summarize_profile(values, 2, input_fused=True, native=True)
+    assert {row["stage"] for row in result["stages"]} == set(names)
+    with pytest.raises(RuntimeError, match="abft.finalize"):
+        summarize_profile([e for e in values if e.name != "abft.finalize"], 2, input_fused=True, native=True)
+
+
 @pytest.mark.parametrize("invalid", [-1, float("nan"), float("inf")])
 def test_invalid_stage_time_is_not_reported_as_success(invalid):
     values = samples()
