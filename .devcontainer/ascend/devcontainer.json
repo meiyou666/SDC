@@ -4,6 +4,7 @@
     "dockerfile": "../../environment/docker/Dockerfile",
     "context": "../..",
     "target": "ascend",
+    "options": ["--network=host", "--allow=network.host"],
     "args": {
       "ASCEND_SOC": "${localEnv:SDC_ASCEND_SOC:910b}"
     }
@@ -16,6 +17,7 @@
   },
   "runArgs": [
     "--shm-size=8g",
+    "--network=host",
     "--device=/dev/davinci0",
     "--device=/dev/davinci_manager",
     "--device=/dev/devmm_svm",

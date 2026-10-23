@@ -1,0 +1,559 @@
+"""CPU contract tests; no substitute GPU-performance or kernel evidence."""
+from contextlib import contextmanager
+from types import SimpleNamespace
+
+import pytest
+import torch
+
+from abft import AbftConfig, FaultConfig
+from abft.engine import AbftError, execute
+from abft.methods import Classic, register_method
+from abft.operands import PreparedGemm
+
+
+def collect(operands, weights, fault):
+    a, b = operands.decode_block(0, operands.k)
+    output = a @ b
+    row, col, bit = fault
+    if row >= 0:
+        mask = 1 << bit if bit < 31 else -(1 << 31)
+        output.view(torch.int32)[row, col] ^= mask
+    return output, (weights @ output).unsqueeze(1), torch.tensor([int(row >= 0)])
+
+
+def run(a, b, **kwargs):
+    return execute(a, b, "fp32", "none", reference_mm=torch.mm,
+                   collector_fn=collect, **kwargs)
+
+
+@pytest.mark.parametrize("precision,bit", [("fp32", 31), ("bf16", 15)])
+@pytest.mark.parametrize("location", ["a", "b"])
+def test_input_bitflip_clones_without_polluting_clean(precision, bit, location):
+    a, b = torch.ones(3, 16), torch.ones(16, 2)
+    prepared = PreparedGemm.prepare(a, b, precision, "none")
+    active = prepared.injected(FaultConfig(location=location, row=0, col=0, bit=bit))
+    assert getattr(active, location)[0, 0] == -1
+    assert getattr(prepared, location)[0, 0] == 1
+    assert torch.all(a == 1) and torch.all(b == 1)
+    other = "b" if location == "a" else "a"
+    assert getattr(active, other) is getattr(prepared, other)
+
+
+def nvfp4():
+    # Two blocks have different scales, and B is stored in transposed rows.
+    a = torch.full((3, 16), 0x22, dtype=torch.uint8)
+    b = torch.full((2, 16), 0x22, dtype=torch.uint8)
+    def meta(rows):
+        return SimpleNamespace(scales=torch.tensor([[2., 4.]] * rows).to(torch.float8_e4m3fn).view(torch.uint8),
+                               multiplier=torch.tensor(2.))
+    return PreparedGemm(a, b, "nvfp4", 3, 2, 32, meta(3), meta(2))
+
+
+@pytest.mark.parametrize("col,expected", [(0, 0x23), (1, 0x32)])
+def test_nvfp4_nibble_flip(col, expected):
+    clean = nvfp4()
+    changed = clean.injected(FaultConfig(location="a", col=col, bit=0))
+    assert changed.a[0, 0] == expected
+    assert clean.a[0, 0] == 0x22
+    changed_b = clean.injected(FaultConfig(location="b", row=col, col=1, bit=0))
+    assert changed_b.b[1, 0] == expected
+    assert clean.b[1, 0] == 0x22
+
+
+def test_nvfp4_reference_uses_actual_block_scales_and_b_orientation():
+    prepared = nvfp4()
+    state = Classic().prepare(prepared, AbftConfig(reference_block_k=16), torch.mm)
+    a, b = prepared.decode_block(0, 32)
+    assert torch.equal(a[:, :16], torch.ones(3, 16))
+    assert torch.equal(a[:, 16:], torch.full((3, 16), 2.))
+    assert torch.equal(state["expected"], state["weights"] @ (a @ b))
+    with pytest.raises(ValueError, match="block16"):
+        prepared.decode_block(1, 17)
+
+
+def test_reference_is_chunked_and_matches_prepared_bf16(monkeypatch):
+    torch.manual_seed(3)
+    p = PreparedGemm.prepare(torch.randn(4, 48), torch.randn(48, 3), "bf16", "none")
+    calls = []
+    decode = p.decode_block
+    def record(start, end):
+        calls.append((start, end))
+        return decode(start, end)
+    monkeypatch.setattr(p, "decode_block", record)
+    state = Classic().prepare(p, AbftConfig(reference_block_k=16), torch.mm)
+    assert calls == [(0, 16), (16, 32), (32, 48)]
+    torch.testing.assert_close(state["expected"], state["weights"] @ (p.a.float() @ p.b.float()))
+
+
+def test_accumulator_detection_and_location():
+    _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                    abft_config={"method": "classic", "on_error": "report"},
+                    fault_config={"location": "accumulator", "row": 1, "col": 0, "bit": 31})
+    assert report.detected and report.located
+    assert report.location.tolist() == [1, 0]
+    assert report.to_record()["fault_hit"] == [1]
+
+
+@pytest.mark.parametrize("precision", ["fp32", "bf16"])
+def test_fault_only_accumulator_uses_fp32_weights_with_float64_default(precision):
+    from abft import execute_prepared
+    original_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float64)
+        prepared = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+        def collector(operands, weights, fault):
+            assert weights.dtype == torch.float32
+            assert weights.device == operands.a.device
+            return collect(operands, weights, fault)
+        output, report = execute_prepared(
+            prepared, abft_config="none",
+            fault_config={"location": "accumulator", "row": 1, "col": 0, "bit": 31},
+            collector_fn=collector,
+        )
+        expected = torch.full((3, 2), 16., dtype=torch.float32)
+        expected[1, 0] = -16.
+        torch.testing.assert_close(output, expected)
+        assert report.to_record()["fault_hit"] == [1]
+        assert report.context["fault_selected"]
+        assert not report.detected
+    finally:
+        torch.set_default_dtype(original_dtype)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_nonfinite_always_detected_never_located(value):
+    method = Classic()
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    cfg = AbftConfig()
+    state = method.prepare(p, cfg, torch.mm)
+    output = p.a @ p.b
+    output[1, 0] = value
+    result = method.verify(state["weights"] @ output, output, state, cfg)
+    assert result["detected"] and result["nonfinite"]
+    assert not result["located"]
+
+
+def test_ambiguous_numeric_location_rejected():
+    method = Classic()
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    cfg = AbftConfig(atol=0.4, rtol=0.)
+    state = method.prepare(p, cfg, torch.mm)
+    observed = state["expected"].clone()
+    observed[:, 0] += torch.tensor([1., 2.])
+    result = method.verify(observed, p.a @ p.b, state, cfg)
+    assert result["detected"] and not result["located"]
+
+
+def test_recovery_reuses_clean_preparation_and_rechecks(monkeypatch):
+    original = PreparedGemm.prepare.__func__
+    preparations = []
+    def prepare(cls, *args):
+        p = original(cls, *args)
+        preparations.append(p)
+        return p
+    monkeypatch.setattr(PreparedGemm, "prepare", classmethod(prepare))
+    a, b = torch.ones(3, 16), torch.ones(16, 2)
+    output, report = run(a, b, abft_config={"method": "classic", "recovery": "recompute"},
+                         fault_config={"location": "a", "bit": 31})
+    assert len(preparations) == 1
+    assert report.detected and report.recovered and not report.recheck_failed
+    assert torch.equal(output, a @ b)
+
+
+def test_failed_recheck_raises_and_preserves_report():
+    def broken(p, weights, fault):
+        c, partials, hit = collect(p, weights, fault)
+        return c, partials + 100, hit
+    with pytest.raises(AbftError) as exc:
+        execute(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none",
+                abft_config={"method": "classic", "recovery": "recompute"},
+                reference_mm=torch.mm, collector_fn=broken)
+    assert exc.value.report.recheck_failed and not exc.value.report.recovered
+
+
+def test_none_uses_original_backend_without_preparation(monkeypatch):
+    from abft import engine
+    expected = torch.ones(1)
+    monkeypatch.setattr(engine.backend, "gemm", lambda *args: expected)
+    monkeypatch.setattr(PreparedGemm, "prepare", lambda *args: pytest.fail("Unexpected preparation"))
+    output, report = run(torch.ones(3, 16), torch.ones(16, 2))
+    assert output is expected and report is None
+
+
+def test_report_policy_has_no_item_sync(monkeypatch):
+    monkeypatch.setattr(torch.Tensor, "item", lambda *args: pytest.fail("Implicit sync"))
+    _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                    abft_config={"method": "classic", "on_error": "report"})
+    assert report.method == "classic"
+
+
+def test_method_plugin(monkeypatch):
+    from abft import methods
+    monkeypatch.setattr(methods, "_METHODS", dict(methods._METHODS))
+    class Plugin(Classic):
+        def verify(self, *args):
+            result = super().verify(*args)
+            result["plugin_used"] = torch.tensor(True)
+            return result
+    register_method("test_plugin", Plugin)
+    _, report = run(torch.ones(3, 16), torch.ones(16, 2), abft_config="test_plugin")
+    assert report.plugin_used
+    with pytest.raises(ValueError, match="duplicate"):
+        register_method("test_plugin", Plugin)
+
+
+@pytest.mark.parametrize("context", [{"call_index": 2}, {"retry": True}, {"layer": "other"}])
+def test_fault_selection(context):
+    _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                    abft_config="classic", context=context,
+                    fault_config={"location": "a", "bit": 31, "layer": "target"})
+    assert not report.context["fault_selected"] and not report.detected
+
+
+def test_fp8_reference_decodes_stored_codes_and_multiplier():
+    qa = SimpleNamespace(multiplier=torch.tensor(2.))
+    qb = SimpleNamespace(multiplier=torch.tensor(4.))
+    a = torch.full((3, 32), 2.).to(torch.float8_e4m3fn).view(torch.uint8)
+    b = torch.full((2, 32), 4.).to(torch.float8_e4m3fn).view(torch.uint8)
+    p = PreparedGemm(a, b, "fp8", 3, 2, 32, qa, qb)
+    state = Classic().prepare(p, AbftConfig(reference_block_k=16), torch.mm)
+    assert torch.equal(state["expected"], torch.tensor([[96., 96.], [192., 192.]]))
+    changed = p.injected(FaultConfig(location="b", row=3, col=1, bit=7))
+    _, decoded_b = changed.decode_block(0, 16)
+    assert decoded_b[3, 1] == -1
+    assert p.b[1, 3] == b[1, 3]
+
+
+@pytest.mark.parametrize("diagnostics", [False, True])
+def test_report_diagnostics_and_precision_metadata(diagnostics):
+    _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                    abft_config={"method": "classic", "diagnostics": diagnostics})
+    assert ("residual" in report.tensors) == diagnostics
+    assert ("threshold" in report.tensors) == diagnostics
+    assert (report.context["m"], report.context["n"], report.context["k"]) == (3, 2, 16)
+    assert report.context["accumulator_precision"] == "fp32"
+
+
+@pytest.mark.parametrize("value", [{"atol": float("nan")}, {"rtol": -1},
+                                    {"reference_block_k": 17}, {"diagnostics": 1}])
+def test_invalid_config(value):
+    with pytest.raises(ValueError):
+        AbftConfig(**value)
+
+
+def test_reference_packs_fp32_k_slices_for_native_contract():
+    p = PreparedGemm.prepare(torch.ones(3, 48), torch.ones(48, 2), "fp32", "none")
+    calls = []
+    def packed_mm(a, b):
+        assert a.is_contiguous() or a.T.is_contiguous()
+        assert b.is_contiguous() or b.T.is_contiguous()
+        calls.append((a.shape, b.shape))
+        return a @ b
+    Classic().prepare(p, AbftConfig(reference_block_k=16), packed_mm)
+    assert len(calls) == 12
+
+
+@pytest.mark.parametrize("precision,bit", [("fp32", 31), ("bf16", 15)])
+def test_preparation_and_fault_preserve_native_column_layout(precision, bit):
+    a, b = torch.ones(16, 3).T, torch.ones(2, 16).T
+    p = PreparedGemm.prepare(a, b, precision, "none")
+    assert p.a.stride() == a.stride()
+    assert p.b.stride() == b.stride()
+    active = p.injected(FaultConfig(location="b", row=3, col=1, bit=bit))
+    assert active.b.stride() == p.b.stride()
+    assert active.b[3, 1] == -1
+    assert p.b[3, 1] == 1
+
+
+def test_report_serialization_preserves_nonfinite_paths_as_strict_json():
+    import json
+
+    from abft.engine import AbftReport
+    report = AbftReport({"nonfinite": torch.tensor(True),
+                         "residual": torch.tensor([[float("nan"), float("inf"), -float("inf")]])},
+                        {}, "classic", "instrumented")
+    record = report.to_record()
+    assert record["nonfinite"] is True
+    assert record["residual"] == [[None, None, None]]
+    assert record["nonfinite_metrics"] == {"residual[0][0]": "nan", "residual[0][1]": "inf",
+                                           "residual[0][2]": "-inf"}
+    json.dumps(record, allow_nan=False)
+
+
+def test_prepared_baseline_and_protection_share_exact_operands(monkeypatch):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(16, 3).T, torch.ones(2, 16).T, "fp32", "none")
+    monkeypatch.setattr(PreparedGemm, "prepare", lambda *args: pytest.fail("Prepared twice"))
+    seen = []
+    def raw(operands):
+        seen.append(operands)
+        return operands.a @ operands.b
+    def collected(operands, weights, fault):
+        seen.append(operands)
+        return collect(operands, weights, fault)
+    baseline, empty = execute_prepared(p, raw_fn=raw)
+    protected, report = execute_prepared(p, "classic", reference_mm=torch.mm, collector_fn=collected)
+    assert seen == [p, p]
+    assert seen[0].a is p.a and seen[0].b is p.b
+    assert empty is None and not report.detected
+    torch.testing.assert_close(baseline, protected)
+
+
+def test_prepared_retry_never_prepares_and_reference_runs_inside_call(monkeypatch):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 32), torch.ones(32, 2), "fp32", "none")
+    monkeypatch.setattr(PreparedGemm, "prepare", lambda *args: pytest.fail("Prepared twice"))
+    actions = []
+    original_decode = p.decode_block
+    def decode(start, end):
+        actions.append("decode")
+        return original_decode(start, end)
+    monkeypatch.setattr(p, "decode_block", decode)
+    def collector(operands, weights, fault):
+        actions.append("collect")
+        assert operands is p
+        return collect(operands, weights, fault)
+    assert not actions
+    output, report = execute_prepared(p, {"method": "classic", "recovery": "recompute", "reference_block_k": 16},
+                                      {"location": "accumulator", "bit": 31},
+                                      reference_mm=torch.mm, collector_fn=collector)
+    assert actions[:2] == ["decode", "decode"]
+    assert actions.count("collect") == 2
+    assert report.recovered
+    torch.testing.assert_close(output, p.a @ p.b)
+
+
+def test_prepared_none_uses_native_without_original_gemm_or_reference(monkeypatch):
+    from abft import engine
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    output = torch.ones(3, 2)
+    monkeypatch.setattr(p, "raw_native", lambda: output)
+    monkeypatch.setattr(engine.backend, "gemm", lambda *args: pytest.fail("Original gemm re-prepares"))
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Unexpected reference"))
+    actual, report = engine.execute_prepared(p)
+    assert actual is output and report is None
+
+
+@pytest.mark.parametrize("timing", [False, True])
+def test_stage_events_are_opt_in_and_reference_is_in_timed_boundary(monkeypatch, timing):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    actions = []
+    class Event:
+        def __init__(self, **kwargs):
+            actions.append("event")
+        def record(self, stream):
+            actions.append("record")
+    monkeypatch.setattr(torch.Tensor, "is_cuda", property(lambda self: True))
+    monkeypatch.setattr(torch.cuda, "Event", Event)
+    monkeypatch.setattr(torch.cuda, "current_stream", lambda *args: None)
+    def reference(a, b):
+        actions.append("reference_mm")
+        return a @ b
+    _, report = execute_prepared(p, {"method": "classic", "timing": timing},
+                                 reference_mm=reference, collector_fn=collect)
+    if timing:
+        assert [entry[0] for entry in report.timing_events] == ["reference", "fault_prepare", "execute", "verify"]
+        assert actions[:3] == ["event", "record", "reference_mm"]
+        assert actions[6:8] == ["event", "record"]
+    else:
+        assert "event" not in actions
+        assert report.timing_events == []
+    assert report.host_seconds >= 0
+
+
+@pytest.mark.parametrize("reference_mode", ["separate", "input_fused"])
+@pytest.mark.parametrize("fault", [None, {"location": "accumulator", "row": 1, "col": 0, "bit": 31}])
+def test_profiling_scopes_preserve_outputs_and_detection(monkeypatch, reference_mode, fault):
+    from abft import engine
+
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    # A custom factory may reuse an instance: scopes must not leak to later calls.
+    method = Classic()
+    monkeypatch.setattr(engine, "get_method", lambda name: method)
+    config = {"method": "classic", "reference_mode": reference_mode, "on_error": "report"}
+    kwargs = dict(reference_mm=torch.mm, collector_fn=collect, reference_collector_fn=fused_cpu_collector)
+    output, report = engine.execute_prepared(p, config, fault, **kwargs)
+    scopes = []
+    @contextmanager
+    def scope(name):
+        scopes.append(name)
+        yield
+    profiled, profiled_report = engine.execute_prepared(p, config, fault, profile_scope=scope, **kwargs)
+    torch.testing.assert_close(profiled, output)
+    for key, tensor in report.tensors.items():
+        torch.testing.assert_close(profiled_report.tensors[key], tensor)
+    assert {"abft.reference", "abft.execute", "abft.merge_observed", "abft.detect", "abft.locate"} <= set(scopes)
+    assert ("abft.merge_reference" in scopes) == (reference_mode == "input_fused")
+    scopes.clear()
+    engine.execute_prepared(p, config, fault, **kwargs)
+    assert not scopes
+
+
+def test_invalid_timing_config():
+    with pytest.raises(ValueError, match="timing"):
+        AbftConfig(timing=1)
+
+
+def fused_fp8_operands():
+    codes = torch.ones(3, 16).to(torch.float8_e4m3fn).view(torch.uint8)
+    return PreparedGemm(codes, codes[:2].clone(), "fp8", 3, 2, 16, alpha=torch.tensor(1.))
+
+
+def fused_cpu_collector(p, weights, fault):
+    output = torch.full((p.m, p.n), 16.)
+    predicted = (weights @ output).unsqueeze(1)
+    if fault[0] >= 0:
+        output[fault[0], fault[1]] *= -1
+    return output, (weights @ output).unsqueeze(1), torch.tensor([int(fault[0] >= 0)]), predicted, predicted.abs()
+
+
+def test_input_fused_uses_native_reference_without_decode_or_reference_mm(monkeypatch):
+    from abft import execute_prepared
+    p = fused_fp8_operands()
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Decoded input"))
+    monkeypatch.setattr(p, "collected_reference_native", lambda weights, fault: fused_cpu_collector(p, weights, fault))
+    def forbidden(*args):
+        pytest.fail("Separate reference or collector invoked")
+    _, report = execute_prepared(p, {"method": "classic", "reference_mode": "input_fused"},
+                                 reference_mm=forbidden, collector_fn=forbidden)
+    assert not report.detected
+    assert report.context["reference_mode"] == "input_fused"
+    assert report.context["protection_scope"] == "computation_after_input_load"
+
+
+def test_input_fused_native_reference_actually_controls_verification():
+    from abft import execute_prepared
+    def mismatched(p, weights, fault):
+        output, observed, hit, predicted, magnitude = fused_cpu_collector(p, weights, fault)
+        return output, observed, hit, predicted + 100., magnitude
+    _, report = execute_prepared(fused_fp8_operands(),
+                                 {"method": "classic", "reference_mode": "input_fused", "on_error": "report"},
+                                 reference_collector_fn=mismatched)
+    assert report.detected
+
+
+@pytest.mark.parametrize("corrupt_retry", [False, True])
+def test_input_fused_retry_keeps_original_reference(corrupt_retry):
+    from abft import execute_prepared
+    calls = []
+    def collector(p, weights, fault):
+        calls.append(fault)
+        output, observed, hit, predicted, magnitude = fused_cpu_collector(p, weights, fault)
+        if len(calls) == 2:
+            # A bad retry and its co-varying new reference must be rejected.
+            predicted = predicted + 200.
+            if corrupt_retry:
+                observed = predicted.clone()
+                output += 200.
+        return output, observed, hit, predicted, magnitude
+    _, report = execute_prepared(fused_fp8_operands(),
+                                 {"method": "classic", "reference_mode": "input_fused", "on_error": "report",
+                                  "recovery": "recompute"},
+                                 {"location": "accumulator", "row": 1, "bit": 31},
+                                 reference_collector_fn=collector)
+    assert calls == [(1, 0, 31), (-1, -1, -1)]
+    assert bool(report.recovered) is not corrupt_retry
+    assert bool(report.recheck_failed) is corrupt_retry
+
+
+@pytest.mark.parametrize("location", ["a", "b"])
+def test_input_fused_rejects_input_memory_faults(location):
+    from abft import execute_prepared
+    with pytest.raises(ValueError, match="input memory"):
+        execute_prepared(fused_fp8_operands(), {"method": "classic", "reference_mode": "input_fused"},
+                         {"location": location}, reference_collector_fn=fused_cpu_collector)
+
+
+@pytest.mark.parametrize("precision", ["fp16"])
+def test_input_fused_rejects_unsupported_precision(precision):
+    from abft import execute_prepared
+    p = fused_fp8_operands()
+    p.precision = precision
+    with pytest.raises(NotImplementedError, match=precision):
+        execute_prepared(p, {"method": "classic", "reference_mode": "input_fused"},
+                         reference_collector_fn=fused_cpu_collector)
+    with pytest.raises(NotImplementedError, match=precision):
+        p.collected_reference_native(torch.ones(2, 3))
+
+
+@pytest.mark.parametrize("precision", ["fp32", "bf16"])
+def test_legacy_prepared_uses_fused_reference_without_decoding(monkeypatch, precision):
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), precision, "none")
+    monkeypatch.setattr(p, "decode_block", lambda *args: pytest.fail("Unexpected separate reference"))
+    output, report = execute_prepared(
+        p, {"method": "classic", "reference_mode": "input_fused"},
+        reference_collector_fn=fused_cpu_collector,
+    )
+    assert not report.detected
+    assert report.context["precision"] == precision
+    torch.testing.assert_close(output, torch.full((3, 2), 16.))
+
+
+def test_classic_binds_tile_partial_reference():
+    method = Classic()
+    state = method.prepare_fused(fused_fp8_operands(), AbftConfig())
+    predicted = torch.arange(24.).reshape(2, 3, 4)
+    bound = method.bind_reference(predicted, predicted.abs(), state)
+    assert "expected" not in state
+    assert torch.equal(bound["expected"], predicted.sum(1)[:, :2])
+
+
+def test_method_fused_interface_defaults_to_explicit_unsupported():
+    from abft.methods import AbftMethod
+    class SeparateOnly(AbftMethod):
+        def prepare(self, *args):
+            pass
+        def propagate(self, *args):
+            pass
+        def verify(self, *args):
+            pass
+    method = SeparateOnly()
+    with pytest.raises(NotImplementedError):
+        method.prepare_fused(fused_fp8_operands(), AbftConfig())
+    with pytest.raises(NotImplementedError):
+        method.bind_reference(None, None, {})
+
+
+def test_plugin_parameters_control_detection(monkeypatch):
+    from abft import methods
+    monkeypatch.setattr(methods, "_METHODS", dict(methods._METHODS))
+    class ConfiguredMethod(Classic):
+        def validate_config(self, config):
+            if set(config.parameters) != {"always_detect"} or type(config.parameters["always_detect"]) is not bool:
+                raise ValueError("always_detect must be specified as boolean")
+        def verify(self, observed, output, state, config):
+            result = super().verify(observed, output, state, config)
+            result["detected"] = torch.tensor(config.parameters["always_detect"])
+            return result
+    register_method("configured_plugin", ConfiguredMethod)
+    for forced in [False, True]:
+        _, report = run(torch.ones(3, 16), torch.ones(16, 2),
+                        abft_config={"method": "configured_plugin", "on_error": "report",
+                                     "parameters": {"always_detect": forced}})
+        assert bool(report.detected) is forced
+    with pytest.raises(ValueError, match="always_detect"):
+        run(torch.ones(3, 16), torch.ones(16, 2), abft_config="configured_plugin")
+
+
+def test_classic_rejects_unrecognized_parameters_before_reference():
+    from abft import execute_prepared
+    p = PreparedGemm.prepare(torch.ones(3, 16), torch.ones(16, 2), "fp32", "none")
+    with pytest.raises(ValueError, match="classic does not accept"):
+        execute_prepared(p, {"method": "classic", "parameters": {"unused": 1}},
+                         reference_mm=lambda *args: pytest.fail("Invalid config reached reference"))
+
+
+@pytest.mark.parametrize("parameters", [None, [], {1: "bad"}, {"nested": {1: 2}},
+                                         {"bad": object()}, {"bad": float("nan")},
+                                         {"nested": [float("inf")]}, {"bad": -float("inf")}])
+def test_parameters_reject_unsafe_json(parameters):
+    with pytest.raises(ValueError, match="parameters"):
+        AbftConfig(parameters=parameters)
+
+
+def test_parameter_defaults_are_independent():
+    first, second = AbftConfig(), AbftConfig()
+    first.parameters["new"] = 1
+    assert second.parameters == {}

@@ -1,0 +1,27 @@
+# 在项目 NVIDIA SM120 容器内运行：python -m abft.benchmark --config 此文件
+# 示例阈值用于调试；正式比较按独立正常数据设置 atol/rtol。
+device: cuda:0
+formats:
+  - {precision: fp32, scaling: none, global_scale: amax}
+  - {precision: bf16, scaling: none, global_scale: amax}
+  - {precision: fp8, scaling: tensorwise, global_scale: amax}
+  - {precision: nvfp4, scaling: block16, global_scale: amax}
+shapes:
+  - [128, 128, 128]
+  - [512, 1024, 1024]
+seeds: [2026, 2027]
+input_std: 1.0
+abft:
+  method: classic
+  reference_mode: input_fused
+  atol: 0.0001
+  rtol: 0.0001
+  recovery: none
+  on_error: report
+  reference_block_k: 256
+  diagnostics: false
+  timing: false
+warmup: 3
+repeats: 20
+profile_repeats: 0
+output: results/gemm/abft_benchmark.json

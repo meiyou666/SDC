@@ -6,9 +6,12 @@
 | --- | --- | --- |
 | [本地 Windows](#本地-windows) | Docker Desktop | Windows 中的仓库 |
 | [本地 WSL](#本地-wsl) | Ubuntu 中的 Docker Engine | WSL 文件系统中的仓库 |
-| [云服务器](#云服务器) | 服务器中的 Docker Engine | Remote-SSH 打开的服务器仓库 |
+| [完整云服务器](#云服务器) | 服务器中的 Docker Engine | Remote-SSH 打开的服务器仓库 |
+| [平台已分配容器](#云容器虚拟环境) | 无需安装 Docker | Remote-SSH 打开的项目虚拟环境工作区 |
 
-项目代码、依赖安装、测试与实验均在容器中执行。宿主机用于编辑、Git 操作和启动 Docker。训练步骤见[训练教程](../docs/training.md)，CUTLASS 构建与接入见[GEMM 教程](../docs/gemm.md)。
+项目代码、依赖安装、测试与实验使用共享 Docker 或云容器中的项目虚拟环境。训练步骤见[训练教程](../docs/training.md)，CUTLASS 构建与接入见[GEMM 教程](../docs/gemm.md)。
+
+Docker 入口的镜像构建和运行使用宿主机网络（`host`）。平台已分配容器时，直接使用下文的项目虚拟环境。
 
 ## 本地 Windows
 
@@ -25,7 +28,7 @@
    Start-Process '.\Docker Desktop Installer.exe' -Wait -ArgumentList 'install','--user','--backend=docker-vmm'
    ```
 
-3. 启动 Docker Desktop。在 **Settings → Resources** 为虚拟机分配至少 4 GB 内存；在 **General → Virtual Machine Manager** 选择 **Docker VMM**。在 **Resources → File sharing** 添加仓库目录，点击 **Apply & restart**。设置说明见[官方 VMM 文档](https://docs.docker.com/desktop/features/vmm/)。
+3. 启动 Docker Desktop。在 **Settings → Resources** 为虚拟机分配至少 4 GB 内存；在 **General → Virtual Machine Manager** 选择 **Docker VMM**。在 **Resources → File sharing** 添加仓库目录，在 **Resources → Network** 开启 **Enable host networking**，点击 **Apply & restart**。设置说明见[官方 VMM 文档](https://docs.docker.com/desktop/features/vmm/)和[宿主机网络说明](https://docs.docker.com/engine/network/drivers/host/#docker-desktop)。
 4. 重新打开终端和 VS Code。安装 **Dev Containers** 和 **Container Tools** 扩展，打开仓库中的 `SDC.code-workspace`。
 5. 按 `Ctrl+Shift+P`，执行 **Dev Containers: Reopen in Container**，选择 **SDC**。首次进入会构建镜像并安装 VS Code 扩展。
 6. 按[确认环境可用](#确认环境可用)检查容器。
@@ -85,6 +88,8 @@
 
 ### 初始化服务器环境
 
+完整云服务器按本节初始化。SSH 登录后本身就在平台容器内时，使用下文的[云容器虚拟环境](#云容器虚拟环境)。
+
 在 **Remote-SSH 的服务器终端、仓库根目录**执行：
 
 ```bash
@@ -118,9 +123,55 @@ bash environment/docker/setup-cloud.sh ascend --soc 910b
 3. 执行 **Dev Containers: Reopen in Container**，选择刚生成的 **SDC 云端（…）**。VS Code 使用构建缓存启动容器。
 4. 左下角显示容器名称后，新建终端，按下一节确认环境可用。此后 Python、调试器和 Codex 均在服务器容器中运行。
 
+### 云容器虚拟环境
+
+平台已分配 Ubuntu 容器时，通过 Remote-SSH 打开仓库，直接创建项目 `.venv`。系统可用 Ubuntu 22.04 或 24.04；CUDA/CANN 和驱动使用平台预装版本。NVIDIA 编译器版本必须与 `baseline.json` 中的 `nvcc` 一致，不能用 `nvidia-smi` 显示的 CUDA 版本代替。
+
+在 **SSH 终端、仓库根目录**执行：
+
+```bash
+bash environment/setup-platform.sh nvidia
+source environment/activate.sh
+```
+
+昇腾使用 `bash environment/setup-platform.sh ascend`，平台需预装基线要求的 CANN。脚本检查现有 SDK，再安装固定版本的 uv、Python、锁定依赖和 CUTLASS；不替换系统 Python、GPU 驱动或 SDK。若提示缺少基础工具，在 Ubuntu 平台终端安装：
+
+```bash
+apt-get update
+apt-get install -y python3 python3-pip curl ca-certificates git tar xz-utils build-essential ninja-build
+```
+
+非 root 用户在上述安装命令前加 `sudo`。
+
+uv 从清华 PyPI 镜像下载到 `.sdc/bin`；引导用的 pip 只向项目临时目录安装 uv。托管 Python 默认从南京大学的 python-build-standalone 镜像下载，保留 uv 的版本选择与校验，解释器和命令入口均保存在 `.sdc/`。可通过 `UV_PYTHON_INSTALL_MIRROR` 指定其他下载地址。项目依赖仍由 `uv.lock` 管理，普通 Python 包使用清华源；PyTorch 和 CUTLASS 使用现有官方源。
+
+安装完成后，在 VS Code 的 SSH 窗口通过 **文件 → 从文件打开工作区**，选择 `.sdc/SDC-platform.code-workspace`。它设置项目 Python、终端和调试所需的 SDK 环境。安装远端 **Python** 和 **Python Debugger** 扩展；调试选择 **平台容器：按 YAML 调试**。
+
+在新终端确认：
+
+```bash
+source environment/activate.sh
+command -v python
+python environment/verify_environment.py --smoke
+python environment/verify_environment.py --accelerator
+```
+
+Python 应指向当前仓库的 `.venv/bin/python`。训练、测试与 GEMM 检查继续使用原入口：
+
+```bash
+bash scripts/train.sh prepare --config configs/training/qwen3_06b.yaml
+bash scripts/train.sh train --config configs/training/qwen3_06b.yaml
+bash scripts/check.sh
+bash scripts/gemm-accept.sh
+```
+
+每个新 SSH 终端执行一次 `source environment/activate.sh`；上述脚本也会自动选择项目环境。更新锁文件、SDK 配置或移动仓库后，重跑安装命令并重新打开生成的工作区。普通代码修改无需重新安装。
+
+`.venv/` 保存 Python 环境，`.sdc/` 保存工具、CUTLASS、版本记录和工作区，两者均不提交 Git。个人 AI 工具继续使用个人安装，不改项目 Python 依赖。后台训练可在 `tmux` 会话中激活环境后运行训练命令。
+
 ## 确认环境可用
 
-以下命令在 **VS Code 的容器终端、仓库根目录**执行：
+以下命令在 **VS Code 的项目 Docker 终端、仓库根目录**执行；平台虚拟环境按上一节检查：
 
 ```bash
 pwd
@@ -150,7 +201,7 @@ python environment/verify_environment.py --accelerator
 | **SDC NVIDIA** | NVIDIA 训练与实验，含 CUDA、CUTLASS 和 CUTLASS DSL | NVIDIA GPU 与可用驱动 |
 | **SDC Ascend** | 昇腾训练与实验，含 CANN | 昇腾 NPU 与可用驱动、固件 |
 
-本地日常开发选择 **SDC**；云端选择初始化脚本生成的入口。
+本地日常开发选择 **SDC**；完整云服务器选择初始化脚本生成的入口。平台虚拟环境直接使用 Remote-SSH，无需选择 Dev Container。
 
 - **再次打开**：恢复之前的容器窗口，或打开同一仓库后执行 **Reopen in Container**。
 - **切换已有配置**：在容器窗口执行 **Dev Containers: Switch Container**，选择另一个配置。首次使用该配置时需要构建，之后使用已有镜像和构建缓存。

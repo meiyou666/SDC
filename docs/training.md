@@ -2,7 +2,7 @@
 
 本教程使用 Qwen3-0.6B，在 WikiText-103 文本上进行单卡全参数继续预训练。NVIDIA 通过统一入口选择 FP32、BF16、FP8 或 NVFP4 CUTLASS 线性层，主权重保持 FP32。各精度共用数据、优化器和训练流程。
 
-先按[环境教程](../environment/README.md)进入 NVIDIA 或昇腾训练容器。除“后台运行”中的 Docker 调度命令外，以下命令均在容器内的仓库根目录执行。使用 CUTLASS 算子时，先完成[GEMM 教程](gemm.md)中的编译与检查。
+先按[环境教程](../environment/README.md)进入训练 Docker，或在平台容器中激活统一 `.venv`。除 Docker 调度命令外，以下命令均在已配置环境的仓库根目录执行。使用 CUTLASS 算子时，先完成[GEMM 教程](gemm.md)中的编译与检查。
 
 ## 准备数据
 
@@ -74,13 +74,13 @@ training:
 bash scripts/train.sh train --config experiments/my_training.yaml
 ```
 
-`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft` 当前设为 `none`。更换精度、缩放或其他实验参数时，设置新的输出目录。
+`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft: none` 关闭保护；`classic` 为两路校验，`sum` 为一路检测。四精度 `input_fused` 均可选 `implementation: native`，但其参考校验仍为 FP32；BF16 `augmented` 保留 BF16 编码。完整配置、故障和恢复见 [GEMM 教程](gemm.md#启用-abft)。更换精度、缩放或其他实验参数时，设置新的输出目录。
 
 `gemm.backend: torch` 保留原生参考和 NPU 兼容路径，支持 FP32、BF16 和 FP16；CPU 仅用于 FP32 单元测试。昇腾训练将公共配置的 backend 改为 `torch`。
 
 ## 在 VS Code 中调试
 
-先通过 Remote-SSH 连接服务器，再进入项目的 NVIDIA Dev Container。VS Code 终端中的仓库路径应为 `/workspace/SDC`，Python 为 `/opt/venv/bin/python`。在扩展面板确认 **Python Debugger** 已安装到当前容器。
+Docker 路线进入 NVIDIA Dev Container，Python 为 `/opt/venv/bin/python`。平台容器路线通过 Remote-SSH 打开 `.sdc/SDC-platform.code-workspace`，选择“平台容器：按 YAML 调试”，使用仓库 `.venv/bin/python`。在扩展面板确认 **Python Debugger** 已安装到对应远端环境。
 
 1. 打开 [qwen3_debug.yaml](../configs/training/qwen3_debug.yaml)。它复用公共模型与数据，运行两步 BF16 CUTLASS 训练，每步记录日志，不保存检查点。梯度累积设为 1，关闭梯度检查点，便于依次查看前向、反向与参数更新。
 2. 模型和数据已准备好时直接使用；首次准备仍执行前文的 `prepare` 命令。调试配置默认离线加载。
@@ -100,6 +100,8 @@ bash scripts/train.sh train --config experiments/my_training.yaml
 FP8 或 NVFP4 调试按前文修改 YAML，并在 `backend.py` 的 `alpha = ...` 行查看 `qa`、`qb` 的码值与尺度。`torch.ops.sdc_cutlass.*` 调入 C++/CUDA；Python 调试器用于跟踪其调用前后的张量。查看 CUDA 内核内部需要 CUDA 调试器。
 
 两步训练结束后仍执行最终验证，此时会再次前向而不反向。重新开始调试前，把 `training.output_dir` 改为新目录，例如 `qwen3_debug_02/{device}`；保留已有输出。调试配置不保存检查点，不使用 `resume: latest`。
+
+调试校验时选择 [qwen3_abft_debug.yaml](../configs/training/qwen3_abft_debug.yaml)，先在 `abft/engine.py` 的 `execute()` 与方法的 `prepare_fused()` 设置断点；增广路径看 `prepare_augmented()`，独立参考看 `prepare()`。`reference` 的判定可继续跟进 `verify()`；`native` 在 `abft/native.py` 调用公共 CUDA finalizer，查看其返回的报告张量。配置中的 `diagnostics: true` 保留完整残差与阈值，详细字段见 [GEMM 教程](gemm.md#启用-abft)。
 
 同一份配置也可从终端运行：
 
@@ -127,6 +129,7 @@ bash scripts/train.sh train --config configs/training/qwen3_debug.yaml
 | `metrics.jsonl` | 逐步 loss、梯度范数、学习率和验证指标 |
 | `result.json` | 最终状态、训练与验证指标；失败时记录原因和训练步数 |
 | `checkpoint-<step>/` | 模型、优化器、调度器、随机状态和训练位置 |
+| `checkpoint-<step>/abft_state.pt` | 启用 ABFT 时保存的方法配置、物理调用计数及有状态方法的历史/RNG |
 
 以 NVIDIA 默认目录为例；昇腾或自定义实验替换 `run_dir`：
 
@@ -188,5 +191,9 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml
 ```
 
 也可将配置中的 `latest` 替换为具体的 `checkpoint-<step>` 路径。后台续训使用同一配置。
+
+训练通过 `MethodSession` 管理各层、前向/反向角色及输入配置对应的方法实例，由 `AlgorithmState` 回调保存和恢复 `abft_state.pt`。其余续训检查通过后，缺少该文件的旧检查点仅允许无状态方法继续，GEMM 物理调用计数从 0 开始；有状态方法缺少历史/RNG 状态时拒绝续训。
+
+开启 `gemm.fault` 注入时仍不支持续训，原因是故障续训协议尚未验证。此类实验设置新输出目录并使用 `resume: null`。有状态算法还须明确校准阶段及激活重计算是否更新历史；session 会计入每次实际 GEMM 请求，不自动推断逻辑重放身份。
 
 续训要求配置、数据、`uv.lock` 哈希及模型变换标识和参数一致。恢复位置是最近保存的检查点；尚未保存的步骤需要重跑。没有完整检查点时，设置新输出目录重新开始。已达到 `max_steps` 的检查点不能继续，修改训练配置后也应开启新实验。

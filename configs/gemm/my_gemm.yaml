@@ -1,0 +1,33 @@
+# 独立 BF16 增广 GEMM：校验行与数据使用相同 BF16 输入格式。
+# 运行：python -m abft.benchmark --config configs/gemm/my_gemm.yaml
+device: cuda:0
+formats:
+  - {precision: bf16, scaling: none, global_scale: amax}
+# [M, N, K]：A[M,K] × B[K,N] → C[M,N]；输入为随机矩阵。
+shapes:
+  - [128, 128, 128]
+  - [512, 1024, 1024]
+seeds: [2026]
+input_std: 1.0
+abft:
+  method: classic
+  reference_mode: augmented
+  implementation: native  # 复用 B 寄存器并合并判定；reference 保留优化前的对照。
+  # 显式使用输出幅值作为阈值尺度，不沿用旧输入乘积上界。
+  threshold_scale: output
+  # 保留原调试容差。BF16 校验编码新增舍入误差，需独立校准；报警如实记录。
+  atol: 0.0001
+  rtol: 0.0001
+  recovery: none
+  on_error: report
+  reference_block_k: 256
+  diagnostics: true  # 将校验残差和阈值写入 JSON，便于检查 BF16 编码误差。
+  timing: false
+warmup: 3
+repeats: 20
+# 单独采集各阶段 GPU 活动时间与 CPU 范围时间；0 表示关闭。
+profile_repeats: 20
+progress: true
+# 默认只显示耗时表和检查结果；设为 4 可查看矩阵左上角 4×4，最大为 16。
+preview_size: 0
+output: results/gemm/my_gemm.json
