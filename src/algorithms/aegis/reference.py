@@ -42,7 +42,7 @@ def bitwise_equal(left: torch.Tensor, right: torch.Tensor) -> bool:
 @torch.no_grad()
 def gemm(a: torch.Tensor, b: torch.Tensor, *, output_dtype: torch.dtype,
          k_blocks: int = 1, fault: Fault | None = None) -> tuple[torch.Tensor, torch.Tensor]:
-    """FP64 block product rounded to FP32, then FP32 block accumulation.
+    """FP32 block product followed by FP32 block accumulation.
 
     This fixes an arithmetic order for mechanism checks; it does not model MMA
     rounding. Faults affect input storage or the final pre-cast accumulator.
@@ -65,7 +65,7 @@ def gemm(a: torch.Tensor, b: torch.Tensor, *, output_dtype: torch.dtype,
     acc = torch.zeros((a.shape[0], b.shape[1]), dtype=torch.float32)
     width = a.shape[1] // k_blocks
     for start in range(0, a.shape[1], width):
-        acc += (a[:, start:start + width].double() @ b[start:start + width].double()).float()
+        acc += a[:, start:start + width].float() @ b[start:start + width].float()
     if fault is not None and fault.target == 'accumulator':
         acc = flip(acc, fault.bit, fault.coord, zero_mask=fault.zero_mask)
     return acc, acc.to(output_dtype)

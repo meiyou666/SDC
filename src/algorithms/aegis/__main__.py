@@ -53,44 +53,58 @@ def run(config: dict) -> dict:
         return gemm(a, b, output_dtype=output_dtype, k_blocks=config['k_blocks'], fault=fault)
 
     stats = {'acc32': [], 'output': []}
-    for _ in range(config['calibration_calls']):
+    calibration = []
+    for record in range(config['calibration_calls']):
         a, b = sample()
         checksums = prepare(a, b, columns=config['columns'])
-        acc, out = execute(a, b)
-        for tap, value in (('acc32', acc), ('output', out)):
-            stats[tap].append(sense(checksums, value).stat)
+        clean_acc, clean = execute(a, b)
+        target = config['targets'][record % len(config['targets'])]
+        size = a.numel() if target == 'A' else b.numel() if target == 'B' else m * n
+        fault = Fault(target, 0, record % size, zero_mask=True)
+        zero_acc, zero = execute(a, b, fault)
+        if not bitwise_equal(clean_acc, zero_acc) or not bitwise_equal(clean, zero):
+            raise RuntimeError("zero-mask injection changed the healthy computation")
+        for group, acc, out in (('normal', clean_acc, clean), ('zero_mask', zero_acc, zero)):
+            for tap, value in (('acc32', acc), ('output', out)):
+                stat = sense(checksums, value).stat
+                stats[tap].append(stat)
+                calibration.append(dict(record=record, method=f'{tap}-fixed', group=group,
+                                        phase='calibration',
+                                        fault=None if group == 'normal' else asdict(fault),
+                                        out_changed=False,
+                                        output_finite=bool(torch.isfinite(out).all()),
+                                        stat=stat, stat_nonfinite=not math.isfinite(stat)))
     policies = {}
     initial = {}
-    for tap, adaptive in (('output', False), ('acc32', False), ('acc32', True)):
+    for tap, adaptive in (('output', False), ('acc32', False)):
         name = f"{tap}-{'adaptive' if adaptive else 'fixed'}"
         policy = Threshold(max(floor, calibrate(stats[tap], config['alpha'])),
                            adaptive=adaptive, window=config['window'], factor=config['factor'])
         policies[name] = (tap, policy)
         initial[name] = policy.state_dict()
-    events = []
+    events = calibration
+    for event in events:
+        policy = policies[event['method']][1]
+        event.update(threshold=policy.tau, alarm=policy.update(event['stat']),
+                     state_after=policy.state_dict())
     for record in range(config['test_calls']):
         a, b = sample()
         checksums = prepare(a, b, columns=config['columns'])
         _, clean = execute(a, b)
-        faults = [None]
+        faults = []
         for target in config['targets']:
             size = a.numel() if target == 'A' else b.numel() if target == 'B' else m * n
-            coord = int(torch.randint(size, (), generator=generator).item())
             bits = 32 if target == 'accumulator' else a.element_size() * 8
-            faults.append(Fault(target, 0, coord, zero_mask=True))
-            faults.extend(Fault(target, bit, coord) for bit in range(bits))
-        # Independent paired events: every method starts from the same calibrated
-        # normal history for each event, not from the preceding injected fault.
+            faults.extend(Fault(target, bit, coord) for coord in range(size) for bit in range(bits))
         for fault in faults:
             acc, out = execute(a, b, fault)
-            group = 'normal' if fault is None else 'zero_mask' if fault.zero_mask else 'fault'
             for name, (tap, policy) in policies.items():
                 policy.load_state_dict(initial[name])
                 evidence = sense(checksums, acc if tap == 'acc32' else out)
                 threshold = policy.tau
                 alarm = policy.update(evidence.stat)
-                events.append(dict(record=record, method=name, group=group,
-                                   fault=None if fault is None else asdict(fault),
+                events.append(dict(record=record, method=name, group='fault', phase='injection',
+                                   fault=asdict(fault),
                                    out_changed=not bitwise_equal(out, clean),
                                    output_finite=bool(torch.isfinite(out).all()), alarm=alarm,
                                    stat=evidence.stat if math.isfinite(evidence.stat) else None,
@@ -103,11 +117,12 @@ def run(config: dict) -> dict:
         zero = [e for e in selected if e['group'] == 'zero_mask']
         damaged = [e for e in selected if e['group'] == 'fault' and e['out_changed']]
         finite = [e for e in damaged if e['output_finite']]
-        summary[name] = dict(false_alarm=rate(sum(e['alarm'] for e in normal), len(normal)),
+        summary[name] = dict(calibration_alarm=rate(sum(e['alarm'] for e in normal), len(normal)),
                              zero_mask_alarm=rate(sum(e['alarm'] for e in zero), len(zero)),
                              detection=rate(sum(e['alarm'] for e in damaged), len(damaged)),
                              finite_detection=rate(sum(e['alarm'] for e in finite), len(finite)))
     return dict(config=config, initial_states=initial, summary=summary, events=events,
+                calibration_stats=stats,
                 execution='cpu-mathematical-reference', torch_version=torch.__version__)
 
 
