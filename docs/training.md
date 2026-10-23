@@ -74,7 +74,7 @@ training:
 bash scripts/train.sh train --config experiments/my_training.yaml
 ```
 
-`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft: none` 关闭保护；启用 `classic`、配置故障和恢复见 [GEMM 教程](gemm.md#启用-abft)。更换精度、缩放或其他实验参数时，设置新的输出目录。
+`gemm.global_scale` 选择 `amax` 动态缩放或有限正数乘子，用于 FP8、NVFP4 量化。`gemm.abft: none` 关闭保护；`classic` 为两路校验，`sum` 为一路检测。四精度 `input_fused` 均可选 `implementation: native`，但其参考校验仍为 FP32；BF16 `augmented` 保留 BF16 编码。完整配置、故障和恢复见 [GEMM 教程](gemm.md#启用-abft)。更换精度、缩放或其他实验参数时，设置新的输出目录。
 
 `gemm.backend: torch` 保留原生参考和 NPU 兼容路径，支持 FP32、BF16 和 FP16；CPU 仅用于 FP32 单元测试。昇腾训练将公共配置的 backend 改为 `torch`。
 
@@ -101,7 +101,7 @@ FP8 或 NVFP4 调试按前文修改 YAML，并在 `backend.py` 的 `alpha = ...`
 
 两步训练结束后仍执行最终验证，此时会再次前向而不反向。重新开始调试前，把 `training.output_dir` 改为新目录，例如 `qwen3_debug_02/{device}`；保留已有输出。调试配置不保存检查点，不使用 `resume: latest`。
 
-调试校验时选择 [qwen3_abft_debug.yaml](../configs/training/qwen3_abft_debug.yaml)，在 `abft/engine.py` 的 `execute()` 与 `abft/methods.py` 的 `prepare()`、`verify()` 设置断点，依次查看参考校验、原生投影和报告。配置中的 `diagnostics: true` 保留完整残差与阈值，详细字段见 [GEMM 教程](gemm.md#启用-abft)。
+调试校验时选择 [qwen3_abft_debug.yaml](../configs/training/qwen3_abft_debug.yaml)，先在 `abft/engine.py` 的 `execute()` 与方法的 `prepare_fused()` 设置断点；增广路径看 `prepare_augmented()`，独立参考看 `prepare()`。`reference` 的判定可继续跟进 `verify()`；`native` 在 `abft/native.py` 调用公共 CUDA finalizer，查看其返回的报告张量。配置中的 `diagnostics: true` 保留完整残差与阈值，详细字段见 [GEMM 教程](gemm.md#启用-abft)。
 
 同一份配置也可从终端运行：
 
@@ -129,6 +129,7 @@ bash scripts/train.sh train --config configs/training/qwen3_debug.yaml
 | `metrics.jsonl` | 逐步 loss、梯度范数、学习率和验证指标 |
 | `result.json` | 最终状态、训练与验证指标；失败时记录原因和训练步数 |
 | `checkpoint-<step>/` | 模型、优化器、调度器、随机状态和训练位置 |
+| `checkpoint-<step>/abft_state.pt` | 启用 ABFT 时保存的方法配置、物理调用计数及有状态方法的历史/RNG |
 
 以 NVIDIA 默认目录为例；昇腾或自定义实验替换 `run_dir`：
 
@@ -191,6 +192,8 @@ bash scripts/train.sh train --config configs/training/qwen3_06b.yaml
 
 也可将配置中的 `latest` 替换为具体的 `checkpoint-<step>` 路径。后台续训使用同一配置。
 
-开启 `gemm.fault` 注入时不支持续训，因为实际 GEMM 调用计数尚未写入检查点。此类实验设置新输出目录并使用 `resume: null`。
+训练通过 `MethodSession` 管理各层、前向/反向角色及输入配置对应的方法实例，由 `AlgorithmState` 回调保存和恢复 `abft_state.pt`。其余续训检查通过后，缺少该文件的旧检查点仅允许无状态方法继续，GEMM 物理调用计数从 0 开始；有状态方法缺少历史/RNG 状态时拒绝续训。
+
+开启 `gemm.fault` 注入时仍不支持续训，原因是故障续训协议尚未验证。此类实验设置新输出目录并使用 `resume: null`。有状态算法还须明确校准阶段及激活重计算是否更新历史；session 会计入每次实际 GEMM 请求，不自动推断逻辑重放身份。
 
 续训要求配置、数据、`uv.lock` 哈希及模型变换标识和参数一致。恢复位置是最近保存的检查点；尚未保存的步骤需要重跑。没有完整检查点时，设置新输出目录重新开始。已达到 `max_steps` 的检查点不能继续，修改训练配置后也应开启新实验。

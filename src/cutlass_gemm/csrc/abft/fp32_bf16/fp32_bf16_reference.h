@@ -1,5 +1,5 @@
 #pragma once
-#include "abft_legacy_kernel.h"
+#include "abft/fp32_bf16/fp32_bf16_observe.h"
 #include "cutlass/gemm/threadblock/mma_multistage.h"
 #include "cutlass/gemm/threadblock/mma_pipelined.h"
 
@@ -11,19 +11,20 @@ struct LegacyReferenceParams {
 
 // Read official logical TensorRefs, including their permuted shared layouts.
 // Only q/q_abs live in shared memory; column accumulators remain per-thread.
-template<class Base>
+template<class Base, class Algorithm = policy::Classic>
 struct LegacyTileReference {
   using Shape = typename Base::Shape;
   static constexpr int Threads = Base::WarpCount::kCount * 32;
   static constexpr int Slots = (Shape::kN + Threads - 1) / Threads;
-  struct Storage { float q[2][Shape::kK], q_abs[2][Shape::kK]; };
+  static constexpr int kChecksums = Algorithm::kChecksums;
+  struct Storage { float q[kChecksums][Shape::kK], q_abs[kChecksums][Shape::kK]; };
   typename Base::SharedStorage& operands;
   Storage& scratch;
   ProjectionParams projection;
   LegacyReferenceParams destination;
   int rows, columns, inner, tile_m, tile_n, thread, k_tile = 0;
-  float predicted[2][Slots] = {};
-  float magnitude[2][Slots] = {};
+  float predicted[kChecksums][Slots] = {};
+  float magnitude[kChecksums][Slots] = {};
 
   CUTLASS_DEVICE void consume(int stage) {
     auto a = operands.operand_A_ref();
@@ -32,22 +33,30 @@ struct LegacyTileReference {
     // remaining K tiles are full. A tail-last mask would truncate a full tile.
     const int valid_k = k_tile == 0 ? (inner - 1) % Shape::kK + 1 : Shape::kK;
     for (int k = thread; k < Shape::kK; k += Threads) {
-      float q0 = 0.f, q1 = 0.f, a0 = 0.f, a1 = 0.f;
+      float encoded[kChecksums] = {}, absolute[kChecksums] = {};
       // Explicit K mask also protects predicated non-zfill tail stages.
       if (k < valid_k) {
         for (int m = 0; m < Shape::kM; ++m) {
           int row = tile_m * Shape::kM + m;
           if (row < rows) {
             float value = float(a.at({m, stage * Shape::kK + k}));
-            float w0 = projection.weights[row], w1 = projection.weights[int64_t(rows) + row];
-            q0 = fmaf(w0, value, q0); q1 = fmaf(w1, value, q1);
-            a0 = fmaf(fabsf(w0), fabsf(value), a0);
-            a1 = fmaf(fabsf(w1), fabsf(value), a1);
+            float weights[kChecksums];
+            CUTLASS_PRAGMA_UNROLL
+            for (int p = 0; p < kChecksums; ++p) {
+              weights[p] = projection.weights[int64_t(p) * rows + row];
+              encoded[p] = Algorithm::encode(weights[p], value, encoded[p]);
+            }
+            CUTLASS_PRAGMA_UNROLL
+            for (int p = 0; p < kChecksums; ++p) {
+              absolute[p] = Algorithm::encode(fabsf(weights[p]), fabsf(value), absolute[p]);
+            }
           }
         }
       }
-      scratch.q[0][k] = q0; scratch.q[1][k] = q1;
-      scratch.q_abs[0][k] = a0; scratch.q_abs[1][k] = a1;
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) scratch.q[p][k] = encoded[p];
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) scratch.q_abs[p][k] = absolute[p];
     }
     __syncthreads();
     for (int slot = 0; slot < Slots; ++slot) {
@@ -56,9 +65,9 @@ struct LegacyTileReference {
         for (int k = 0; k < Shape::kK; ++k) {
           if (k < valid_k) {
             float value = float(b.at({stage * Shape::kK + k, n}));
-            for (int p = 0; p < 2; ++p) {
-              predicted[p][slot] = fmaf(scratch.q[p][k], value, predicted[p][slot]);
-              magnitude[p][slot] = fmaf(scratch.q_abs[p][k], fabsf(value), magnitude[p][slot]);
+            for (int p = 0; p < kChecksums; ++p) {
+              predicted[p][slot] = Algorithm::propagate(scratch.q[p][k], value, predicted[p][slot]);
+              magnitude[p][slot] = Algorithm::propagate(scratch.q_abs[p][k], fabsf(value), magnitude[p][slot]);
             }
           }
         }
@@ -75,7 +84,7 @@ struct LegacyTileReference {
       if (n < Shape::kN) {
         int col = tile_n * Shape::kN + n;
         int64_t offset = int64_t(tile_m) * projection.padded_n + col;
-        for (int p = 0; p < 2; ++p) {
+        for (int p = 0; p < kChecksums; ++p) {
           destination.predicted[p * plane + offset] = predicted[p][slot];
           destination.magnitude[p * plane + offset] = magnitude[p][slot];
         }
@@ -89,29 +98,29 @@ struct LegacyTileReference {
 #include "abft_mma_pipelined.h"
 
 namespace sdc_abft {
-template<class Mma> struct ReferenceMma;
+template<class Mma, class Algorithm = policy::Classic> struct ReferenceMma;
 template<class S, class A, class SA, cutlass::arch::CacheOperation::Kind CA,
          class B, class SB, cutlass::arch::CacheOperation::Kind CB,
          class C, class L, class P, int Stages,
-         cutlass::gemm::SharedMemoryClearOption Clear, class Enable>
+         cutlass::gemm::SharedMemoryClearOption Clear, class Enable, class Algorithm>
 struct ReferenceMma<cutlass::gemm::threadblock::MmaMultistage<
-    S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>> {
+    S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>, Algorithm> {
   using Type = cutlass::gemm::threadblock::AbftMmaMultistage<
-      S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>;
+      S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable,Algorithm>;
 };
 template<class S, class A, class SA, class B, class SB, class C, class L,
-         class P, class TA, class TB, class Enable>
-struct ReferenceMma<cutlass::gemm::threadblock::MmaPipelined<S,A,SA,B,SB,C,L,P,TA,TB,Enable>> {
-  using Type = cutlass::gemm::threadblock::AbftMmaPipelined<S,A,SA,B,SB,C,L,P,TA,TB,Enable>;
+         class P, class TA, class TB, class Enable, class Algorithm>
+struct ReferenceMma<cutlass::gemm::threadblock::MmaPipelined<S,A,SA,B,SB,C,L,P,TA,TB,Enable>, Algorithm> {
+  using Type = cutlass::gemm::threadblock::AbftMmaPipelined<S,A,SA,B,SB,C,L,P,TA,TB,Enable,Algorithm>;
 };
 
-template<class BaseKernel>
+template<class BaseKernel, class Algorithm = policy::Classic>
 struct LegacyReferenceKernel {
-  using Mma = typename ReferenceMma<typename BaseKernel::Mma>::Type;
+  using Mma = typename ReferenceMma<typename BaseKernel::Mma, Algorithm>::Type;
   using OriginalEpilogue = typename BaseKernel::Epilogue;
   using Iterator = typename OriginalEpilogue::OutputTileIterator;
   static constexpr int kThreads = BaseKernel::kThreadCount;
-  using Visitor = ProjectionVisitor<Iterator, kThreads>;
+  using Visitor = ProjectionVisitor<Iterator, kThreads, Algorithm>;
   using Epilogue = typename cutlass::epilogue::threadblock::EpilogueWithVisitorFromExistingEpilogue<
       Visitor, OriginalEpilogue>::Epilogue;
   using Reference = typename Mma::Reference;

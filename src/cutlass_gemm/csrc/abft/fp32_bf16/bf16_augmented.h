@@ -1,6 +1,6 @@
 // BF16 augmented ABFT using the pinned official CUTLASS SM80 multistage MMA.
-// Per CTA, retain all 128 data rows and append two checksum output rows as
-// additional official MMA fragments. There is no 130-row hardware instruction.
+// Per CTA, retain all 128 data rows and append the policy's checksum rows
+// (Classic: two; Sum: one) as additional official MMA fragments.
 // Official sources at f3fde58372d33e9a5650ba7b80fc48b3b49d40c8:
 // include/cutlass/gemm/threadblock/mma_multistage.h (main MMA and pipeline)
 // include/cute/arch/mma_sm80.hpp (BF16 m16n8k16 encoding MMA)
@@ -17,6 +17,7 @@
 #include "cute/atom/mma_traits_sm80.hpp"
 #include "cute/atom/copy_atom.hpp"
 #include "cute/atom/copy_traits_sm75.hpp"
+#include "abft/common/policy.cuh"
 
 namespace sdc_abft {
 
@@ -39,15 +40,19 @@ struct AugmentedParams {
   int* tile_flags = nullptr;
 };
 
-// Encoding is the matrix product W[2,128] * A[128,64], performed by official
+// Encoding is the matrix product W[kChecksums,128] * A[128,64], performed by official
 // CuTe BF16 Tensor Core MMA atoms. The input A comes exclusively from the
-// original mainloop's shared-memory stage. The two checksum rows are cast to
+// original mainloop's shared-memory stage. The checksum rows are cast to
 // BF16 and propagated by additional official BF16 MMA fragments. Compact mode
 // reuses the original main MMA's transformed B registers; the reference path
 // reads the same shared B stage. Data and checksum use FP32 accumulators. The original
 // 128x128 data MMA, its A/B storage, and its three-stage schedule are unchanged.
-template<class Base>
+template<class Base, class Algorithm = policy::Classic>
 struct AugmentedTileEncoding {
+  using Policy = Algorithm;
+  static constexpr int kChecksums = Policy::kChecksums;
+  static_assert(kChecksums > 0 && kChecksums <= 8,
+                "The official checksum MMA has eight physical checksum columns");
   using Shape = typename Base::Shape;
   using Element = cutlass::bfloat16_t;
   static constexpr int Threads = Base::WarpCount::kCount * 32;
@@ -65,7 +70,10 @@ struct AugmentedTileEncoding {
   // slots let a fast warp encode the next tile without overwriting q still
   // being read by another warp's last group. The next q-publication barrier
   // completes those readers before this slot can be reused two tiles later.
-  struct Storage { alignas(4) Element weights[2][128]; Element q[2][2][64]; };
+  struct Storage {
+    alignas(4) Element weights[kChecksums][128];
+    Element q[2][kChecksums][64];
+  };
   typename Base::SharedStorage& operands;
   Storage& scratch;
   AugmentedParams projection;
@@ -186,7 +194,7 @@ struct AugmentedTileEncoding {
 
   CUTLASS_DEVICE void initialize() {
     const int row_base = tile_m * kAugmentedDataRows;
-    for (int index = thread; index < 256; index += Threads) {
+    for (int index = thread; index < kChecksums * 128; index += Threads) {
       const int p = index / 128, local_row = index % 128;
       const int row = row_base + local_row;
       scratch.weights[p][local_row] =
@@ -210,7 +218,8 @@ struct AugmentedTileEncoding {
     // Identity tensors let official CuTe define every register's matrix
     // coordinate; no handwritten Tensor Core register mapping or PTX is used.
     // Transpose W*A to A^T*W^T so one 16x8 atom serves 16 K columns and
-    // both checksum rows. This uses eight official MMAs per warp/stage.
+    // the active checksum rows. This uses eight official MMAs per warp/stage;
+    // inactive hardware checksum columns are explicitly filled with zero.
     auto a_coordinates = thr_mma.partition_A(cute::make_identity_tensor(
         cute::make_shape(cute::_16{}, cute::_16{})));
     auto w_coordinates = thr_mma.partition_B(cute::make_identity_tensor(
@@ -229,7 +238,7 @@ struct AugmentedTileEncoding {
           constexpr int i = 2 * decltype(pair)::value;
           const int p = cute::get<0>(w_coordinates(i));
           const int local_row = reduction + cute::get<1>(w_coordinates(i));
-          if (p < 2) {
+          if (p < kChecksums) {
             auto source = cute::make_tensor(cute::make_smem_ptr(&scratch.weights[p][local_row]),
                                             cute::Layout<cute::_2>{});
             auto target = cute::make_tensor(w_fragment.data() + i, cute::Layout<cute::_2>{});
@@ -243,7 +252,7 @@ struct AugmentedTileEncoding {
         for (int i = 0; i < cute::size(w_fragment); ++i) {
           const int p = cute::get<0>(w_coordinates(i));
           const int local_row = reduction + cute::get<1>(w_coordinates(i));
-          w_fragment(i) = p < 2 ? scratch.weights[p][local_row] : Element(0.f);
+          w_fragment(i) = p < kChecksums ? scratch.weights[p][local_row] : Element(0.f);
         }
       }
       if (reuse_pipeline_barriers) {
@@ -278,7 +287,7 @@ struct AugmentedTileEncoding {
               ? shared_a.at({local_row, stage * Shape::kK + k}) : Element(0.f);
         }
       }
-      cute::gemm(mma, a_fragment, w_fragment, q_fragment);
+      Policy::encode(mma, a_fragment, w_fragment, q_fragment);
     }
 
     const int q_slot = reuse_pipeline_barriers ? k_tile % 2 : 0;
@@ -287,12 +296,12 @@ struct AugmentedTileEncoding {
     for (int i = 0; i < cute::size(q_fragment); ++i) {
       const int k = warp * 16 + cute::get<0>(q_coordinates(i));
       const int p = cute::get<1>(q_coordinates(i));
-      if (p < 2) {
+      if (p < kChecksums) {
         scratch.q[q_slot][p][k] = full_kn || k < valid_k
             ? convert(q_fragment(i)) : Element(0.f);
       }
     }
-    // The two BF16 rows live beside A, not in its original 128 data rows.
+    // The BF16 checksum rows live beside A, not in its original 128 data rows.
     __syncthreads();
 
     if (reuse_pipeline_barriers) {
@@ -304,7 +313,7 @@ struct AugmentedTileEncoding {
     }
 
     // Propagate q*B as B^T*q^T. Each warp owns 32 B columns and accumulates
-    // their two appended results with the official BF16 m16n8k16 operation.
+    // their appended checksum results with the official BF16 m16n8k16 operation.
     // Both operands are read on chip; B is never loaded from global again.
     auto shared_b = operands.operand_B_ref();
     auto b_coordinates = thr_mma.partition_A(cute::make_identity_tensor(
@@ -330,9 +339,9 @@ struct AugmentedTileEncoding {
       for (int i = 0; i < cute::size(encoded_fragment); ++i) {
         const int p = cute::get<0>(encoded_coordinates(i));
         const int k = reduction + cute::get<1>(encoded_coordinates(i));
-        encoded_fragment(i) = p < 2 ? scratch.q[0][p][k] : Element(0.f);
+        encoded_fragment(i) = p < kChecksums ? scratch.q[0][p][k] : Element(0.f);
       }
-      cute::gemm(mma, b_fragment, encoded_fragment, predicted);
+      Policy::propagate(mma, b_fragment, encoded_fragment, predicted);
     }
     // The reference comparison path retains its original stage-wide barrier.
     __syncthreads();
@@ -381,7 +390,7 @@ struct AugmentedTileEncoding {
       constexpr int index = decltype(pair)::value * 2;
       const int p = cute::get<0>(encoded_coordinates(index));
       const int k = warp_k * 16 + cute::get<1>(encoded_coordinates(index));
-      if (p < 2) {
+      if (p < kChecksums) {
         auto source = cute::make_tensor(cute::make_smem_ptr(&scratch.q[q_slot][p][k]),
                                        cute::Layout<cute::_2>{});
         auto destination = cute::make_tensor(encoded_fragment.data() + index,
@@ -389,7 +398,7 @@ struct AugmentedTileEncoding {
         PropagationPairCopy{}.call(source, destination);
       }
     });
-    cute::gemm(mma, b_fragment, encoded_fragment, predicted);
+    Policy::propagate(mma, b_fragment, encoded_fragment, predicted);
   }
 
   template<class MainFragmentB>
@@ -410,7 +419,7 @@ struct AugmentedTileEncoding {
     for (int i = 0; i < cute::size(predicted); ++i) {
       const int col = tile_n * 128 + (thread / 32) * 32 + cute::get<0>(coordinates(i));
       const int p = cute::get<1>(coordinates(i));
-      if (p < 2 && (col < columns || projection.tile_flags != nullptr)) {
+      if (p < kChecksums && (col < columns || projection.tile_flags != nullptr)) {
         const int64_t index = int64_t(tile_m) * projection.padded_n + col;
         projection.predicted[p * plane + index] = col < columns ? predicted(i) : 0.f;
       }
@@ -423,34 +432,36 @@ struct AugmentedTileEncoding {
 
 namespace sdc_abft {
 
-template<class Mma> struct AugmentedMma;
+template<class Mma, class Algorithm = policy::Classic> struct AugmentedMma;
 template<class S, class A, class SA, cutlass::arch::CacheOperation::Kind CA,
          class B, class SB, cutlass::arch::CacheOperation::Kind CB,
          class C, class L, class P, int Stages,
-         cutlass::gemm::SharedMemoryClearOption Clear, class Enable>
+         cutlass::gemm::SharedMemoryClearOption Clear, class Enable, class Algorithm>
 struct AugmentedMma<cutlass::gemm::threadblock::MmaMultistage<
-    S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>> {
+    S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>, Algorithm> {
   using Type = cutlass::gemm::threadblock::AugmentedMmaMultistage<
-      S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable>;
+      S,A,SA,CA,B,SB,CB,C,L,P,Stages,Clear,Enable,Algorithm>;
 };
 
-template<int Threads, int Columns, bool Compact>
+template<int Threads, int Columns, bool Compact, int Checksums>
 struct AugmentedProjectionStorage {
-  float sums[2][Threads * Columns];
-  float magnitude[2][Threads * Columns];
+  float sums[Checksums][Threads * Columns];
+  float magnitude[Checksums][Threads * Columns];
   int columns[Threads * Columns];
 };
 
-template<int Threads, int Columns>
-struct AugmentedProjectionStorage<Threads, Columns, true> {
-  float sums[2][Threads * Columns];
-  float magnitude[2][Threads * Columns];
+template<int Threads, int Columns, int Checksums>
+struct AugmentedProjectionStorage<Threads, Columns, true, Checksums> {
+  float sums[Checksums][Threads * Columns];
+  float magnitude[Checksums][Threads * Columns];
   int warp_flags[Threads / 32];
 };
 
-template<class Iterator, int Threads, bool Compact = false>
+template<class Iterator, int Threads, bool Compact = false, class Algorithm = policy::Classic>
 class AugmentedVisitor {
  public:
+  using Policy = Algorithm;
+  static constexpr int kChecksums = Policy::kChecksums;
   using OutputTileIterator = Iterator;
   using ElementOutput = typename Iterator::Element;
   using ElementAccumulator = float;
@@ -460,7 +471,7 @@ class AugmentedVisitor {
   static constexpr int kColumns = ThreadMap::Iterations::kColumn * kElementsPerAccess;
   using AccumulatorFragment = cutlass::Array<float, kElementsPerAccess>;
   using OutputVector = cutlass::Array<ElementOutput, kElementsPerAccess>;
-  using SharedStorage = AugmentedProjectionStorage<Threads, kColumns, Compact>;
+  using SharedStorage = AugmentedProjectionStorage<Threads, kColumns, Compact, kChecksums>;
 
   CUTLASS_DEVICE AugmentedVisitor(
       AugmentedParams params, SharedStorage& shared, cutlass::MatrixCoord extent,
@@ -469,8 +480,11 @@ class AugmentedVisitor {
       : params_(params), shared_(shared), extent_(extent), thread_(thread), offset_(offset),
         iterator_(output_params, output, extent, thread, offset) {
     for (int c = 0; c < kColumns; ++c) {
-      sums_[0][c] = sums_[1][c] = 0.f;
-      magnitude_[0][c] = magnitude_[1][c] = 0.f;
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) {
+        sums_[p][c] = 0.f;
+        magnitude_[p][c] = 0.f;
+      }
       if constexpr (!Compact) columns_[c] = -1;
     }
   }
@@ -499,18 +513,20 @@ class AugmentedVisitor {
           }
         }
       }
-      const float row_weights[2] = {
-          float(params_.weights[row]),
-          float(params_.weights[int64_t(params_.rows) + row])};
+      float row_weights[kChecksums];
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) {
+        row_weights[p] = float(params_.weights[int64_t(p) * params_.rows + row]);
+      }
       CUTLASS_PRAGMA_UNROLL
       for (int e = 0; e < kElementsPerAccess; ++e) {
         const int col = coord.column() + e;
         const int slot = column * kElementsPerAccess + e;
         if (col < extent_.column()) {
           CUTLASS_PRAGMA_UNROLL
-          for (int p = 0; p < 2; ++p) {
+          for (int p = 0; p < kChecksums; ++p) {
             const float term = row_weights[p] * adjusted[e];
-            sums_[p][slot] += term;
+            sums_[p][slot] = Policy::observe(row_weights[p], adjusted[e], sums_[p][slot]);
             magnitude_[p][slot] += fabsf(term);
           }
         }
@@ -548,10 +564,10 @@ class AugmentedVisitor {
             value = __uint_as_float(__float_as_uint(value) ^ (1u << params_.fault_bit));
             *params_.hit = 1;
           }
-          for (int p = 0; p < 2; ++p) {
+          for (int p = 0; p < kChecksums; ++p) {
             const float weight = float(params_.weights[int64_t(p) * params_.rows + row]);
             const float term = weight * value;
-            sums_[p][slot] += term;
+            sums_[p][slot] = Policy::observe(weight, value, sums_[p][slot]);
             // This is sum |w*C_acc|, not the old input absolute-product bound.
             // BF16 encoding rounding is part of the augmented residual and must
             // be calibrated; this scale alone is not a rigorous rounding bound.
@@ -571,7 +587,7 @@ class AugmentedVisitor {
   CUTLASS_DEVICE void end_epilogue() {
     for (int c = 0; c < kColumns; ++c) {
       const int index = thread_ * kColumns + c;
-      for (int p = 0; p < 2; ++p) {
+      for (int p = 0; p < kChecksums; ++p) {
         shared_.sums[p][index] = sums_[p][c];
         shared_.magnitude[p][index] = magnitude_[p][c];
       }
@@ -607,7 +623,7 @@ class AugmentedVisitor {
         const int64_t index = int64_t(blockIdx.x) * params_.padded_n + col;
         const int64_t plane = int64_t(params_.m_tiles) * params_.padded_n;
         CUTLASS_PRAGMA_UNROLL
-        for (int p = 0; p < 2; ++p) {
+        for (int p = 0; p < kChecksums; ++p) {
           float sum = 0.f, magnitude = 0.f;
           if (col < extent_.column()) {
             // Match the legacy thread-major/slot-major summation order exactly.
@@ -616,8 +632,8 @@ class AugmentedVisitor {
             CUTLASS_PRAGMA_UNROLL
             for (int contributor = 0; contributor < Threads / access_width; ++contributor) {
               const int source = (lane_column + contributor * access_width) * kColumns + slot;
-              sum += shared_.sums[p][source];
-              magnitude += shared_.magnitude[p][source];
+              sum = Policy::merge(sum, shared_.sums[p][source]);
+              magnitude = Policy::merge(magnitude, shared_.magnitude[p][source]);
             }
           }
           params_.observed[p * plane + index] = sum;
@@ -632,12 +648,12 @@ class AugmentedVisitor {
         if (col < extent_.column()) {
           const int64_t index = int64_t(blockIdx.x) * params_.padded_n + col;
           const int64_t plane = int64_t(params_.m_tiles) * params_.padded_n;
-          for (int p = 0; p < 2; ++p) {
+          for (int p = 0; p < kChecksums; ++p) {
             float sum = 0.f, magnitude = 0.f;
             for (int i = 0; i < Threads * kColumns; ++i) {
               if (shared_.columns[i] == col) {
-                sum += shared_.sums[p][i];
-                magnitude += shared_.magnitude[p][i];
+                sum = Policy::merge(sum, shared_.sums[p][i]);
+                magnitude = Policy::merge(magnitude, shared_.magnitude[p][i]);
               }
             }
             params_.observed[p * plane + index] = sum;
@@ -655,18 +671,19 @@ class AugmentedVisitor {
   cutlass::MatrixCoord offset_;
   Iterator iterator_;
   typename Iterator::Fragment fragment_;
-  float sums_[2][kColumns], magnitude_[2][kColumns];
+  float sums_[kChecksums][kColumns], magnitude_[kChecksums][kColumns];
   int columns_[Compact ? 1 : kColumns];
   int flags_ = 0;
 };
 
-template<class BaseKernel, bool Compact = false, bool FullKN = false>
+template<class BaseKernel, bool Compact = false, bool FullKN = false,
+         class Algorithm = policy::Classic>
 struct AugmentedKernel {
-  using Mma = typename AugmentedMma<typename BaseKernel::Mma>::Type;
+  using Mma = typename AugmentedMma<typename BaseKernel::Mma, Algorithm>::Type;
   using OriginalEpilogue = typename BaseKernel::Epilogue;
   using Iterator = typename OriginalEpilogue::OutputTileIterator;
   static constexpr int kThreads = BaseKernel::kThreadCount;
-  using Visitor = AugmentedVisitor<Iterator, kThreads, Compact>;
+  using Visitor = AugmentedVisitor<Iterator, kThreads, Compact, Algorithm>;
   using Epilogue = typename cutlass::epilogue::threadblock::EpilogueWithVisitorFromExistingEpilogue<
       Visitor, OriginalEpilogue>::Epilogue;
   using Encoding = typename Mma::Encoding;

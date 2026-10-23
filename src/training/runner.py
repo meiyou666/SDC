@@ -124,6 +124,67 @@ class RunRecord(TrainerCallback):
             write_json(self.output / "config.resolved.json", self.config.to_dict())
 
 
+class AlgorithmState(TrainerCallback):
+    """Checkpoint ABFT history separately from model weights and restore before use."""
+
+    filename = "abft_state.pt"
+    schema_version = 1
+
+    def __init__(self, model):
+        from cutlass_gemm.linear import protection_sessions
+
+        self.sessions = protection_sessions(model)
+        self.status = "fresh"
+
+    def restore(self, checkpoint, *, device):
+        if not self.sessions:
+            if checkpoint and (Path(checkpoint) / self.filename).exists():
+                raise ValueError("ABFT checkpoint contains sessions but the current model has no protection")
+            return
+        if checkpoint is None:
+            return
+        path = Path(checkpoint) / self.filename
+        if not path.is_file():
+            if any(entry["session"].stateful for entry in self.sessions):
+                raise ValueError("Stateful ABFT resume requires abft_state.pt with method history and RNG")
+            self.status = "legacy_stateless_no_history"
+            print("[训练] 旧检查点无 ABFT 状态：仅恢复无状态方法，GEMM 调用计数从 0 开始。", flush=True)
+            return
+        # Preserve state tensor devices: an algorithm's CPU generator state
+        # must not be mapped to CUDA along with its device-side history.
+        payload = torch.load(path, weights_only=True)
+        if (type(payload) is not dict or set(payload) != {"schema_version", "controllers"} or
+                type(payload["schema_version"]) is not int or payload["schema_version"] != self.schema_version or
+                type(payload["controllers"]) is not list):
+            raise ValueError("ABFT training checkpoint schema does not match")
+        controllers = payload["controllers"]
+        if len(controllers) != len(self.sessions):
+            raise ValueError("ABFT checkpoint controller/layer layout does not match the model")
+        for saved, current in zip(controllers, self.sessions, strict=True):
+            if (type(saved) is not dict or set(saved) != {"layers", "session"} or
+                    saved["layers"] != current["layers"]):
+                raise ValueError("ABFT checkpoint controller/layer layout does not match the model")
+        for saved, current in zip(controllers, self.sessions, strict=True):
+            current["session"].load_state_dict(saved["session"], device=device)
+        self.status = "restored"
+
+    def on_save(self, args, state, control, **kwargs):
+        if not state.is_world_process_zero or not self.sessions:
+            return
+        checkpoint = Path(args.output_dir) / f"checkpoint-{state.global_step}"
+        payload = {"schema_version": self.schema_version, "controllers": [
+            {"layers": list(entry["layers"]), "session": entry["session"].state_dict()}
+            for entry in self.sessions
+        ]}
+        path = checkpoint / self.filename
+        temporary = path.with_name(f".{self.filename}.{uuid.uuid4().hex}.tmp")
+        try:
+            torch.save(payload, temporary)
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def require_device(device: str) -> None:
     """Check the requested device before the model is loaded."""
     if device == "cuda" and not torch.cuda.is_available():
@@ -355,11 +416,19 @@ def train(
             flush=True,
         )
     record = _run_record(config, args, data_hash, checkpoint, transform)
+    algorithm_state = AlgorithmState(model)
+    # Restore before Trainer construction and before its user callbacks. Method
+    # factories may initialize RNG; Trainer subsequently restores training RNG.
+    algorithm_state.restore(checkpoint, device=args.device)
+    state_callbacks = [algorithm_state] if algorithm_state.sessions else []
+    if state_callbacks:
+        record["abft_session"] = {"status": algorithm_state.status,
+                                  "schema_version": algorithm_state.schema_version}
     trainer = ResumeTrainer(
         model=model, args=args, processing_class=tokenizer,
         train_dataset=datasets["train"], eval_dataset=datasets["validation"],
         data_collator=CausalCollator(),
-        callbacks=[RunRecord(output, config, record), JsonMetrics(output, session), *callbacks],
+        callbacks=[*state_callbacks, RunRecord(output, config, record), JsonMetrics(output, session), *callbacks],
     )
     print(
         f"[训练] 开始训练：max_steps={config.training.max_steps}，"

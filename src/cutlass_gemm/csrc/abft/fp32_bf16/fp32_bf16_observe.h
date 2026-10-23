@@ -36,6 +36,7 @@
 #include "cutlass/gemm/device/gemm.h"
 #include "cutlass/epilogue/threadblock/epilogue_with_visitor.h"
 #include "cutlass/numeric_conversion.h"
+#include "abft/common/policy.cuh"
 
 namespace sdc_abft {
 struct ProjectionParams {
@@ -47,9 +48,10 @@ struct ProjectionParams {
   int fault_row;
   int fault_col;
   int fault_bit;
+  int* nonfinite = nullptr;
 };
 
-template <class Iterator, int Threads>
+template <class Iterator, int Threads, class Algorithm = policy::Classic>
 class ProjectionVisitor {
  public:
   using OutputTileIterator = Iterator;
@@ -59,10 +61,11 @@ class ProjectionVisitor {
   static constexpr int kIterations = Iterator::kIterations;
   static constexpr int kElementsPerAccess = Iterator::kElementsPerAccess;
   static constexpr int kColumns = ThreadMap::Iterations::kColumn * kElementsPerAccess;
+  static constexpr int kChecksums = Algorithm::kChecksums;
   using AccumulatorFragment = cutlass::Array<float, kElementsPerAccess>;
   using OutputVector = cutlass::Array<ElementOutput, kElementsPerAccess>;
   struct SharedStorage {
-    float sums[2][Threads * kColumns];
+    float sums[kChecksums][Threads * kColumns];
     int columns[Threads * kColumns];
   };
 
@@ -73,8 +76,8 @@ class ProjectionVisitor {
       : params_(params), shared_(shared), extent_(extent), thread_(thread),
         block_offset_(block_offset), iterator_(output_params, output, extent, thread, block_offset) {
     for (int c = 0; c < kColumns; ++c) {
-      sums_[0][c] = 0.0f;
-      sums_[1][c] = 0.0f;
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) sums_[p][c] = 0.0f;
       columns_[c] = -1;
     }
   }
@@ -98,10 +101,17 @@ class ProjectionVisitor {
           value = __uint_as_float(__float_as_uint(value) ^ (1u << params_.fault_bit));
           *params_.hit = 1;  // Unique output-element owner; no atomic is required.
         }
-        sums_[0][slot] += params_.weights[row] * value;
-        sums_[1][slot] += params_.weights[int64_t(extent_.row()) + row] * value;
+        CUTLASS_PRAGMA_UNROLL
+        for (int p = 0; p < kChecksums; ++p) {
+          sums_[p][slot] = Algorithm::observe(
+              params_.weights[int64_t(p) * extent_.row() + row], value, sums_[p][slot]);
+        }
       }
       output[e] = convert(value);
+      if (params_.nonfinite && row < extent_.row() && col < extent_.column() &&
+          !isfinite(float(output[e]))) {
+        atomicExch(params_.nonfinite, 1);
+      }
     }
   }
   CUTLASS_DEVICE void end_step(int) {
@@ -113,24 +123,28 @@ class ProjectionVisitor {
     // the CTA reduction deterministic, including when projections are nonfinite.
     for (int c = 0; c < kColumns; ++c) {
       const int index = thread_ * kColumns + c;
-      shared_.sums[0][index] = sums_[0][c];
-      shared_.sums[1][index] = sums_[1][c];
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) shared_.sums[p][index] = sums_[p][c];
       shared_.columns[index] = columns_[c];
     }
     __syncthreads();
     for (int local_col = thread_; local_col < 128; local_col += Threads) {
       const int col = block_offset_.column() + local_col;
       if (col < extent_.column()) {
-        float sum0 = 0.0f, sum1 = 0.0f;
+        float sums[kChecksums] = {};
         for (int index = 0; index < Threads * kColumns; ++index) {
           if (shared_.columns[index] == col) {
-            sum0 += shared_.sums[0][index];
-            sum1 += shared_.sums[1][index];
+            CUTLASS_PRAGMA_UNROLL
+            for (int p = 0; p < kChecksums; ++p) {
+              sums[p] = Algorithm::merge(sums[p], shared_.sums[p][index]);
+            }
           }
         }
         const int64_t index = int64_t(block_offset_.row() / 128) * params_.padded_n + col;
-        params_.partial[index] = sum0;
-        params_.partial[int64_t(params_.m_tiles) * params_.padded_n + index] = sum1;
+        CUTLASS_PRAGMA_UNROLL
+        for (int p = 0; p < kChecksums; ++p) {
+          params_.partial[int64_t(p) * params_.m_tiles * params_.padded_n + index] = sums[p];
+        }
       }
     }
   }
@@ -142,17 +156,17 @@ class ProjectionVisitor {
   cutlass::MatrixCoord block_offset_;
   Iterator iterator_;
   typename Iterator::Fragment fragment_;
-  float sums_[2][kColumns];
+  float sums_[kChecksums][kColumns];
   int columns_[kColumns];
 };
 
-template <class BaseKernel>
+template <class BaseKernel, class Algorithm = policy::Classic>
 struct ProjectionKernel {
   using Mma = typename BaseKernel::Mma;
   using OriginalEpilogue = typename BaseKernel::Epilogue;
   using Iterator = typename OriginalEpilogue::OutputTileIterator;
   static constexpr int kThreads = BaseKernel::kThreadCount;
-  using Visitor = ProjectionVisitor<Iterator, kThreads>;
+  using Visitor = ProjectionVisitor<Iterator, kThreads, Algorithm>;
   using Epilogue = typename cutlass::epilogue::threadblock::EpilogueWithVisitorFromExistingEpilogue<
       Visitor, OriginalEpilogue>::Epilogue;
   using ElementA = typename Mma::IteratorA::Element;

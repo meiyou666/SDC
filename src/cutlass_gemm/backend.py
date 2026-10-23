@@ -23,9 +23,9 @@ def settings():
 def build_key():
     digest = hashlib.sha256(json.dumps(settings(), sort_keys=True).encode())
     digest.update(f"{torch.__version__}:{torch._C._GLIBCXX_USE_CXX11_ABI}".encode())
-    for path in sorted(SOURCE.iterdir()):
-        if path.suffix in {".cpp", ".cu", ".h", ".cuh", ".py"}:
-            digest.update(path.name.encode())
+    for path in sorted(SOURCE.rglob("*")):
+        if path.is_file() and path.suffix in {".cpp", ".cu", ".h", ".cuh", ".py"}:
+            digest.update(path.relative_to(SOURCE).as_posix().encode())
             digest.update(path.read_bytes())
     for path in sorted((SOURCE.parent / "abft").rglob("*.py")):
         digest.update(path.relative_to(SOURCE.parent).as_posix().encode())
@@ -36,9 +36,11 @@ def build_key():
 def _extension_key():
     digest = hashlib.sha256(json.dumps(settings(), sort_keys=True).encode())
     digest.update(f"{torch.__version__}:{torch._C._GLIBCXX_USE_CXX11_ABI}".encode())
-    for path in sorted(SOURCE.iterdir()):
-        if path.suffix in {".cpp", ".cu", ".h", ".cuh"} or path.name in {"official_adapter.py", "legacy_adapter.py"}:
-            digest.update(path.name.encode())
+    for path in sorted(SOURCE.rglob("*")):
+        relative = path.relative_to(SOURCE)
+        if path.is_file() and (path.suffix in {".cpp", ".cu", ".h", ".cuh"}
+                               or (relative.parts[0] == "codegen" and path.suffix == ".py")):
+            digest.update(relative.as_posix().encode())
             digest.update(path.read_bytes())
     return digest.hexdigest()[:16]
 
@@ -67,8 +69,8 @@ def load_extension():
         raise RuntimeError("编译配置已更新，请重新初始化平台环境或重建 NVIDIA 镜像。")
     os.environ.setdefault("MAX_JOBS", str(config["max_build_jobs"]))
     arch = config["cuda_arch"]
-    from .legacy_adapter import generate_augmented_header, generate_legacy_reference_headers
-    from .official_adapter import generate_reference_kernel
+    from .codegen.sm80 import generate_augmented_header, generate_legacy_reference_headers
+    from .codegen.sm120 import generate_reference_kernel
 
     generated = Path(os.environ.get("TORCH_EXTENSIONS_DIR", get_default_build_root())) / "sdc_generated" / _extension_key()
     generate_reference_kernel(cutlass, generated)
@@ -77,15 +79,18 @@ def load_extension():
     return load(
         name=f"sdc_cutlass_{_extension_key()}",
         sources=[str(SOURCE / name) for name in (
-            "bindings.cpp", "gemm.cu", "fp8.cu", "nvfp4.cu",
-            "abft_legacy.cu", "abft_fp8.cu", "abft_nvfp4.cu",
-            "abft_fp8_reference.cu",
-            "abft_legacy_reference.cu",
-            "abft_augmented.cu",
-            "abft_finalize.cu",
-            "abft_nvfp4_reference.cu",
+            "csrc/bindings.cpp",
+            "csrc/gemm/fp32_bf16.cu", "csrc/gemm/fp8.cu", "csrc/gemm/nvfp4.cu",
+            "csrc/abft/fp32_bf16/fp32_bf16_observe.cu",
+            "csrc/abft/fp8/fp8_observe.cu", "csrc/abft/nvfp4/nvfp4_observe.cu",
+            "csrc/abft/fp8/fp8_reference.cu",
+            "csrc/abft/fp32_bf16/fp32_bf16_reference.cu",
+            "csrc/abft/fp32_bf16/bf16_augmented.cu",
+            "csrc/abft/common/finalize.cu",
+            "csrc/abft/nvfp4/nvfp4_reference.cu",
         )],
-        extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],
+        extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"),
+                             str(SOURCE / "csrc"), str(generated)],
         extra_cflags=["-O2", f"-std={config['cxx_standard']}"],
         extra_cuda_cflags=["-O2", f"-std={config['cxx_standard']}",
                           f"-gencode=arch=compute_{arch},code=sm_{arch}",

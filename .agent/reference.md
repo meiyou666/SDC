@@ -10,8 +10,9 @@
 | 云端初始化 | [setup-cloud.sh](../environment/docker/setup-cloud.sh)、[configure-cloud.py](../environment/docker/configure-cloud.py) |
 | 平台容器虚拟环境 | [setup-platform.sh](../environment/setup-platform.sh)、[activate.sh](../environment/activate.sh)、[configure_platform.py](../environment/configure_platform.py) |
 | 训练与数据 | [训练配置](../configs/training/qwen3_06b.yaml)、[src/training](../src/training/)、[训练测试](../tests/training/) |
-| CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[src/cutlass_gemm](../src/cutlass_gemm/)、[算子测试](../tests/cutlass_gemm/) |
-| ABFT 与故障注入 | [调试配置](../configs/training/qwen3_abft_debug.yaml)、[src/abft](../src/abft/)、[使用与扩展方法](../docs/gemm.md#启用-abft) |
+| CUTLASS 与线性层 | [gemm.json](../environment/gemm.json)、[linear.py](../src/cutlass_gemm/linear.py)、[backend.py](../src/cutlass_gemm/backend.py)、[csrc/gemm](../src/cutlass_gemm/csrc/gemm/)、[算子测试](../tests/cutlass_gemm/) |
+| ABFT 与故障注入 | [调试配置](../configs/training/qwen3_abft_debug.yaml)、[src/abft](../src/abft/)、[csrc/abft](../src/cutlass_gemm/csrc/abft/)、[codegen](../src/cutlass_gemm/codegen/)、[使用与扩展方法](../docs/gemm.md#启用-abft) |
+| BF16 算法接入 | [开发教程](../docs/reproduction/bf16-algorithm-guide.md)、[方法接口](../src/abft/methods.py)、[GPU policy](../src/cutlass_gemm/csrc/abft/common/policy.cuh)、[独立 GEMM 配置](../configs/gemm/my_gemm.yaml) |
 | CI 与代码审查 | [工作流](../.github/workflows/)、[环境检查](../scripts/ci/)、[检查测试](../tests/ci/)、[审查规范](../.github/CODE_REVIEW.md) |
 
 ## 环境与依赖维护
@@ -74,7 +75,7 @@ train(
 - 模型加载后、Trainer 创建前执行 `install(model, tile_size=64)`，返回用于训练的模型。
 - 提供 `model_transform` 时必须提供 `transform_id`；`transform_params` 为可保存为 JSON 的参数字典。
 - `callbacks` 接收 `TrainerCallback` 列表，用于读取训练状态和记录事件。
-- Python、NumPy 和 Torch 的随机种子在模型加载与变换之前设置。需要随检查点保存的校验向量或在线状态，注册为参数或持久化 buffer。
+- Python、NumPy 和 Torch 的随机种子在模型加载与变换之前设置。模型自身的附加状态注册为参数或持久化 buffer；ABFT 方法历史和 RNG 通过 `MethodSession` 的状态接口保存，见后文。
 
 `run.json` 保存配置签名、数据摘要、锁文件哈希、提交版本、设备、模型变换标识和参数。续训时比对配置、数据、锁文件和模型变换信息，并检查检查点中的模型、优化器、调度器和随机状态。缺少模型变换记录的旧运行使用新目录重新训练。
 
@@ -84,37 +85,45 @@ train(
 
 统一 Trainer 根据 `gemm` 配置将 Qwen 的全部 `nn.Linear` 替换为 `CutlassLinear`，包括 attention 投影、MLP 与 `lm_head`。前向 `X @ W.T`、输入梯度 `dY @ W` 和权重梯度 `dY.T @ X` 均调用所选精度的 CUTLASS GEMM。替换保留原 Parameter 对象、共享权重与模块别名，其他算子沿用原模型。
 
+源码分为 Python 入口、`codegen/` 和 `csrc/`。跟踪一次调用时，先读 `linear.py` 和 `backend.py`，再读绑定及所选精度的无保护 GEMM；启用保护后再读 `src/abft/` 与对应精度的 `csrc/abft/`。`codegen/` 负责构建时的官方源码适配，不是另一个运行入口。
+
 | 文件 | 职责 |
 | --- | --- |
-| [backend.py](../src/cutlass_gemm/backend.py) | 读取编译配置、生成构建标识、编译加载扩展、检查设备 |
-| [bindings.cpp](../src/cutlass_gemm/bindings.cpp) | 注册 PyTorch 算子及 CUDA 实现 |
-| [gemm.cu](../src/cutlass_gemm/gemm.cu) | FP32 与 BF16 官方 GEMM |
-| [fp8.cu](../src/cutlass_gemm/fp8.cu) | 官方 SM120 E4M3 GEMM，FP32 列主序输出 |
-| [nvfp4.cu](../src/cutlass_gemm/nvfp4.cu) | 官方 example 79a GEMM，BF16 输出及 SF 布局辅助函数 |
-| [quantization.py](../src/cutlass_gemm/quantization.py) | Torch 缩放与官方 CUTLASS 类型转换连接 |
 | [linear.py](../src/cutlass_gemm/linear.py) | 统一线性层与 autograd 适配 |
+| [backend.py](../src/cutlass_gemm/backend.py) | 读取编译配置、生成构建标识、编译加载扩展、检查设备 |
+| [quantization.py](../src/cutlass_gemm/quantization.py) | Torch 缩放与官方 CUTLASS 类型转换连接 |
+| [csrc/bindings.cpp](../src/cutlass_gemm/csrc/bindings.cpp) | 注册 PyTorch 算子及 CUDA 实现 |
+| [csrc/gemm/fp32_bf16.cu](../src/cutlass_gemm/csrc/gemm/fp32_bf16.cu) | FP32 与 BF16 官方 GEMM |
+| [csrc/gemm/fp8.cu](../src/cutlass_gemm/csrc/gemm/fp8.cu) | 官方 SM120 E4M3 GEMM，FP32 列主序输出 |
+| [csrc/gemm/nvfp4.cu](../src/cutlass_gemm/csrc/gemm/nvfp4.cu) | 官方 example 79a GEMM，BF16 输出及 SF 布局辅助函数 |
+| [codegen/sm80.py](../src/cutlass_gemm/codegen/sm80.py) | 从固定官方 SM80 主循环生成 FP32/BF16 输入融合与 BF16 增广类型 |
+| [codegen/sm120.py](../src/cutlass_gemm/codegen/sm120.py) | 从固定官方 SM120 kernel 生成 FP8/NVFP4 输入融合类型 |
 
 四种 GEMM 均使用 FP32 累加。FP32 外围精度为 FP32，其余外围精度为 BF16；主权重保持 FP32，参数梯度返回原参数 dtype。BF16 使用官方 SM80 单测的 `128×128×64` 分块和默认三阶段配置，共享内存为 96 KiB。FP8 保留官方单测的 FP32 列主序输出，前向再转为 BF16，反向返回对应输入和参数的 dtype。NVFP4 使用 example 79a 的 BF16 输出配置。
 
-`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 选择 `none`、`classic` 或已注册的方法。具体字段见 [config.py](../src/training/config.py) 与 [ABFT 配置](../src/abft/config.py)。
+`gemm.precision/scaling` 对应 `fp32/none`、`bf16/none`、`fp8/tensorwise`、`nvfp4/block16`。`global_scale` 为 `amax` 或有限正数乘子；`abft` 选择 `none`、`classic`、`sum` 或已注册的方法。具体字段见 [config.py](../src/training/config.py) 与 [ABFT 配置](../src/abft/config.py)。
 
 ### ABFT 调用关系
 
-BF16 `reference_mode: augmented` 由 `abft_augmented.cu/.h` 实现。保留官方 128 数据行 tile，额外 2 条校验行形成逻辑 130 行；输出仍为原形状的 BF16 矩阵。片内 `W×A` 使用官方 CuTe BF16 MMA，结果 cast BF16 后保存在额外共享缓冲；附加官方 MMA fragment 计算 `q×B`，原 128 行数据主 MMA、A/B 存储和分块坐标保留。A/B 均支持 packed 行/列主序，明确拒绝其他精度，不作额外整矩阵重读。输入权重、数据和校验行均为 BF16，编码及主/附加 MMA 累加均为 FP32；两侧校验取 precast FP32 累加结果。
+BF16 `reference_mode: augmented` 由 `csrc/abft/fp32_bf16/bf16_augmented.cu/.h` 实现。保留官方 128 数据行 tile；Classic 附加 2 条校验行形成逻辑 130 行，Sum 附加 1 条形成逻辑 129 行，输出仍为原形状的 BF16 矩阵。片内 `W×A` 使用官方 CuTe BF16 MMA，结果 cast BF16 后保存在额外共享缓冲；附加官方 MMA fragment 计算 `q×B`，原 128 行数据主 MMA、A/B 存储和分块坐标保留。A/B 均支持 packed 行/列主序，明确拒绝其他精度，不作额外整矩阵重读。输入权重、数据和校验行均为 BF16，编码及主/附加 MMA 累加均为 FP32；两侧校验取 precast FP32 累加结果。
 
 新模式需显式 `threshold_scale: output`，magnitude为输出幅值 `Σ|w*C_acc|`，不是旧 `|W||A||B|` 上界；报告记录实际口径。BF16编码舍入进入正常残差，不能沿用FP32阈值宣称误报率不变。全局行号权重转BF16会重复，当前关闭比值定位并返回located=false；检测和重算复检仍可用。保留旧两条参考路径作为对照，独立示例 `configs/gemm/my_gemm.yaml` 显式选择 `augmented` 与 `implementation: native`。
 
-`abft.implementation` 默认为 `reference`，保留五张量入口和 Python 方法接口。`native` 仅接受 BF16、`reference_mode: augmented`、`method: classic`、空 `parameters`；由 `engine.execute_prepared()` 分派到 `native.execute_augmented()`，不经过插件方法工厂和可替换的参考收集 hook。两种实现使用相同的全局全 1/递增权重与两路完整列关系，没有改为 strided 编码。
+`abft.implementation` 默认为 `reference`，保留五张量入口和 Python 方法接口。Classic、Sum 的四精度 `input_fused` 与 BF16 `augmented` 均可选 `native`；`separate` 仍走 `reference`。`engine.execute_prepared()` 先取得方法实例、验证精度/参考模式和参数，再由 `CompiledPolicy` 选择已编译的 CUDA 类型。native 不调用 Python `verify()`，也不接受测试用 collector 替换 hook。Classic 使用全 1/递增权重的两路完整列关系，Sum 使用一路全 1 完整列关系，均未改为 strided 编码。
 
-`native` 的数据流与资源约定如下：
+`csrc/abft/common/policy.cuh` 是 CUDA policy 的唯一注册位置：`Classic=0`、`kChecksums=2`，`Sum=1`、`kChecksums=1`。host dispatch 选择类型，设备内的 `encode/propagate/observe/merge/finalize` 调用真实模板实现，不在内循环按算法 ID 分支。Python `CompiledPolicy` 校验对应的 ID/通道数并记录数值格式；方法类须显式声明，继承或改写 Python `verify()` 不会自动改动 native GPU 判定。新增 GPU 公式需添加 CUDA policy、注册并同步 Python 元数据；继续使用既有官方 GEMM/MMA 与精度适配，不能只添加方法名。
 
-1. `legacy_adapter.generate_augmented_header()` 保留官方主循环原语句顺序。在共享 A 就绪后调用 `consume()` 计算 `WA`。`native` 通过官方 CuTe `make_tiled_copy_A` 将共享 A 加载到编码 MMA 的寄存器片段：行主序 A 使用 `SM75_U16x8_LDSM_T`，列主序 A 使用 `SM75_U32x4_LDSM_N`；静态检查覆盖 copy/MMA 坐标对应与连续对齐向量。权重通过 `UniversalCopy<uint32_t>` 成对加载。主机仅在 `N%128==0 && K%64==0` 时派发 `FullKN` 实例，去除冗余 N/K 掩码但保留 M 边界；其余形状保留原掩码，包含首个 K 余数块。8 次编码 MMA 的顺序与 BF16 cast 位置保留，`reference` 保留原逐元素加载。
+四精度 `input_fused` 保留既有 FP32 参考投影和 FP32 校验累加。FP8/NVFP4 的输入码值与 scale 仍按原路径解码参与参考，不能称为原生 FP8/FP4 checksum。native 使用原五张量证据和 epilogue 输出非有限标记，再由 `common/finalize.cu` 合并判定，避免重新全局扫描 C；必要的初始化仍计入调用。所有 native 路径当前均不定位，返回 `located=false`、`location=[-1,-1]`；Classic 的 Python reference 定位规则保留原有适用范围。
+
+BF16 增广 `native` 的数据流与资源约定如下：
+
+1. `codegen.sm80.generate_augmented_header()` 保留官方主循环原语句顺序。在共享 A 就绪后调用 `consume()` 计算 `WA`。`native` 通过官方 CuTe `make_tiled_copy_A` 将共享 A 加载到编码 MMA 的寄存器片段：行主序 A 使用 `SM75_U16x8_LDSM_T`，列主序 A 使用 `SM75_U32x4_LDSM_N`；静态检查覆盖 copy/MMA 坐标对应与连续对齐向量。权重通过 `UniversalCopy<uint32_t>` 成对加载。主机仅在 `N%128==0 && K%64==0` 时派发 `FullKN` 实例，去除冗余 N/K 掩码但保留 M 边界；其余形状保留原掩码，包含首个 K 余数块。8 次编码 MMA 的顺序与 BF16 cast 位置保留，`reference` 保留原逐元素加载。
 2. 在官方 B transform 后、原主 MMA 前调用 `propagate()`，复用 `warp_transformed_frag_B_`。B 到附加 MMA A 操作数的寄存器映射由官方 CuTe 布局推导，每个 warp 负责的 N32 半片在编译期选择，避免再次读取共享 B 或动态寄存器索引。使用官方 CuTe `recast<uint32_t>` 保留 BF16 寄存器对，q 通过官方 32 位 copy atom 加载。非 `FullKN` 实例仍分别判断每个半字的 K 边界，支持奇数 K。原 `reference` 仍从共享 B 执行附加传播。
 3. q 使用双缓冲，按 K tile 交替。保留发布 q 的 CTA barrier，并结合官方 `gmem_wait` 保护缓冲生命周期，去除多余的初始化/consume 尾部同步。编码次序、BF16 cast 位置与主 MMA 顺序保留。源码去除新增 hook 后与官方一致，只能证明原语句未被重排；新增寄存器、共享内存、指令和同步仍可能改变占用率及流水性能。
 4. epilogue 按固定 ThreadMap 找到每列的 8 个贡献槽，替代遍历 1024 槽及动态列索引表，保持贡献槽升序累加；每个输出向量的 8 个值共享一次行有效性/故障行判断，只加载该行的两个权重，各列仍保留边界检查。通过官方 `NumericArrayConverter` 批量转换 BF16，再用官方 `cutlass::isfinite` 检查实际输出，不重新扫描 C。每次写满局部校验、padding 与标记，使用 `at::empty` 而无预清零内核。
-5. `abft_augmented_compact(a,b,weights,row,col,bit)` 返回 `output`、FP32 `partials[3,2,m_tiles,padded_N]` 和 int32 `tile_flags[m_tiles,n_tiles]`。`partials` 第一维依次为 observed、predicted、magnitude；flags bit0 表示注入命中，bit1 表示实际 BF16 输出非有限。
-6. `abft_finalize(partials,tile_flags,n,atol,rtol,reference,diagnostics)` 合并全局列校验、比较阈值并生成设备报告，不重读 C。`N*m_tiles < 8192` 时保留单 CTA256；其余形状使用 CTA128 按列×校验通道分配工作，总网格不超过 256 CTA，再由一个 CUB 内核归约整数状态位。每个通道/列仍由一个线程按 M tile 升序累加，跨 CTA 不使用浮点原子操作。返回 `reference[2,2,N]`（predicted、magnitude）、可选 residual/threshold、五个 bool 标记、hit、location。阈值乘加明确分开舍入，复检仍读取首次 reference。并行路径保留旧 native 的浮点顺序；该顺序可能与 Torch `sum` 不同，不能无条件声称与 `implementation: reference` 的校验逐位一致。
-7. `native.py` 只缓存不可变 BF16 classic 权重，键为设备和 M，最多 32 条/16 MiB；CUDA Event、流等待和 `record_stream` 保证跨流使用顺序。每次调用独立拥有 output、partials、flags 与报告张量，不缓存共享可变 scratch。`report/none` 不通过 `.item()` 读取设备判定；`raise/recompute` 按已有策略同步。
+5. `abft_augmented_compact` 保留原实参并允许选择编译算法，默认 Classic。返回 `output`、FP32 `partials[3,channels,m_tiles,padded_N]` 和 int32 `tile_flags[m_tiles,n_tiles]`。`partials` 第一维依次为 observed、predicted、magnitude；flags bit0 表示注入命中，bit1 表示实际 BF16 输出非有限。
+6. 公共 `abft_finalize`（增广）与 `abft_finalize_reference`（输入融合）合并全局列校验、比较阈值并生成设备报告，不重读 C。`N*m_tiles < 8192` 时保留单 CTA256；其余形状使用 CTA128 按列×校验通道分配工作，总网格不超过 256 CTA，再由一个 CUB 内核归约整数状态位。每个通道/列仍由一个线程按 M tile 升序累加，跨 CTA 不使用浮点原子操作。返回 `reference[2,channels,N]`（predicted、magnitude）、可选 residual/threshold、五个 bool 标记、hit、location。阈值乘加明确分开舍入，复检仍读取首次 reference。该浮点顺序可能与 Torch `sum` 不同，不能无条件声称与 `implementation: reference` 的校验逐位一致。
+7. `native.py` 仅对未覆写准备逻辑的内置无状态 Classic/Sum 缓存不可变权重，按方法、设备、M 和权重 dtype 区分，最多 32 条/16 MiB；CUDA Event、流等待和 `record_stream` 保证跨流使用顺序。自定义或有状态方法执行自己的 `prepare_*()`。每次调用独立拥有 output、partials、flags 与报告张量，不缓存共享可变 scratch。`report/none` 不通过 `.item()` 读取设备判定；`raise/recompute` 按已有策略同步。
 8. 报警重算使用同一份干净输入，不重复量化。首次 finalize 的 reference 留存；第二次 finalize 只用首次 reference 复检，不能以重算产生的新预测替代。失败不替换原输出，成功才采用重算结果。`located` 始终为 false，location 为 `[-1,-1]`。
 
 当前注入与保护证据仅限 `accumulator`：epilogue 中主 MMA 结束、输出 cast 之前的 FP32 值。复用 B 寄存器可能使数据与参考共同使用受损 B，不能声称检测这类共模错误，也不能将现有注入结果推广为 MMA 内任意时刻、任意寄存器的故障覆盖。报告通过 `reference_operand_reuse: main_B_register_fragments` 记录该数据流。
@@ -129,21 +138,41 @@ BF16 `reference_mode: augmented` 由 `abft_augmented.cu/.h` 实现。保留官�
 | --- | --- |
 | [config.py](../src/abft/config.py) | 方法、阈值、恢复与注入配置 |
 | [operands.py](../src/abft/operands.py) | 准备操作数、分块解码、码值注入与原生调用 |
-| [methods.py](../src/abft/methods.py) | 方法注册、`prepare/propagate/verify/recover` 接口和 `classic` 示例 |
+| [methods.py](../src/abft/methods.py) | 方法注册、`CompiledPolicy`、支持组合与参数检查、Classic/Sum 及状态接口 |
+| [session.py](../src/abft/session.py) | 方法实例隔离、物理调用计数、历史与 RNG 快照恢复 |
 | [engine.py](../src/abft/engine.py) | 调用编排、一次干净重算与复检、设备报告和显式序列化 |
-| [native.py](../src/abft/native.py) | BF16 增广专用编排、不可变权重缓存、首次参考复检 |
-| [abft_augmented.cu](../src/cutlass_gemm/abft_augmented.cu)、[abft_augmented.h](../src/cutlass_gemm/abft_augmented.h) | BF16 附加校验 MMA、B 寄存器复用与静态输出归约 |
-| [abft_finalize.cu](../src/cutlass_gemm/abft_finalize.cu) | 按规模选择单 CTA 或并行合并、比较、非有限值与报告标记 |
-| [abft_legacy.cu](../src/cutlass_gemm/abft_legacy.cu)、[abft_legacy_kernel.h](../src/cutlass_gemm/abft_legacy_kernel.h) | FP32/BF16 epilogue visitor 与分块投影 |
-| [abft_fp8.cu](../src/cutlass_gemm/abft_fp8.cu)、[abft_nvfp4.cu](../src/cutlass_gemm/abft_nvfp4.cu)、[abft_sm120.cuh](../src/cutlass_gemm/abft_sm120.cuh) | FP8/NVFP4 epilogue 注入与两路 reduction |
+| [native.py](../src/abft/native.py) | 四精度输入融合/BF16 增广的设备判定编排、权重缓存、首次参考复检 |
+| [fp32_bf16/bf16_augmented.cu](../src/cutlass_gemm/csrc/abft/fp32_bf16/bf16_augmented.cu)、[bf16_augmented.h](../src/cutlass_gemm/csrc/abft/fp32_bf16/bf16_augmented.h) | BF16 附加校验 MMA、B 寄存器复用与静态输出归约 |
+| [common/policy.cuh](../src/cutlass_gemm/csrc/abft/common/policy.cuh) | 编译算法类型注册及编码、传播、输出观察、合并与判定公式 |
+| [common/finalize.cu](../src/cutlass_gemm/csrc/abft/common/finalize.cu) | 公共输入融合/增广合并、阈值覆盖、非有限值与报告标记 |
+| [fp32_bf16/fp32_bf16_observe.cu](../src/cutlass_gemm/csrc/abft/fp32_bf16/fp32_bf16_observe.cu)、[fp32_bf16_observe.h](../src/cutlass_gemm/csrc/abft/fp32_bf16/fp32_bf16_observe.h) | FP32/BF16 epilogue visitor 与分块投影 |
+| [fp32_bf16/fp32_bf16_reference.cu](../src/cutlass_gemm/csrc/abft/fp32_bf16/fp32_bf16_reference.cu)、[fp32_bf16_reference.h](../src/cutlass_gemm/csrc/abft/fp32_bf16/fp32_bf16_reference.h) | FP32/BF16 输入融合入口及片内参考计算 |
+| [fp8/fp8_observe.cu](../src/cutlass_gemm/csrc/abft/fp8/fp8_observe.cu)、[fp8_reference.cu](../src/cutlass_gemm/csrc/abft/fp8/fp8_reference.cu)、[fp8_mainloop.cuh](../src/cutlass_gemm/csrc/abft/fp8/fp8_mainloop.cuh)、[fp8_reference.cuh](../src/cutlass_gemm/csrc/abft/fp8/fp8_reference.cuh) | FP8 输出投影、输入融合连接、共享 tile 消费与参考公式 |
+| [nvfp4/nvfp4_observe.cu](../src/cutlass_gemm/csrc/abft/nvfp4/nvfp4_observe.cu)、[nvfp4_reference.cu](../src/cutlass_gemm/csrc/abft/nvfp4/nvfp4_reference.cu)、[nvfp4_mainloop.cuh](../src/cutlass_gemm/csrc/abft/nvfp4/nvfp4_mainloop.cuh)、[nvfp4_reference.cuh](../src/cutlass_gemm/csrc/abft/nvfp4/nvfp4_reference.cuh) | NVFP4 输出投影、输入融合连接及包含 block16 scale 的参考计算 |
+| [common/context.cuh](../src/cutlass_gemm/csrc/abft/common/context.cuh) | 共享的 `TileReferenceContext` 声明；FP8 参考公式保留在 `fp8/fp8_reference.cuh` |
+| [common/sm120_epilogue.cuh](../src/cutlass_gemm/csrc/abft/common/sm120_epilogue.cuh) | FP8/NVFP4 共用的 epilogue 注入与两路 reduction |
+
+表中 CUDA 路径相对 `src/cutlass_gemm/csrc/abft/`。各精度目录内，`*_observe` 收集输出校验，`*_reference` 生成输入参考，`*_mainloop` 连接对应的官方主循环；BF16 的增广单独命名，公共判定位于 `common/finalize.cu`。
 
 `benchmark.py` 的控制台按形状汇总，不输出逐次测量日志。`profile_repeats > 0` 时显示 GPU 阶段中位数表（μs）及输出逐位一致性/正常报警计数；CPU 范围、均值和完整 samples 只保留在 JSON，内部计时存储单位仍为 ms。关闭分阶段采集时显示 CUDA Event 调用时延，明确其可能包含 CPU 提交间隙。`progress` 只控制加载和设备信息，`preview_size` 独立控制矩阵预览，示例默认 0；FP32/BF16 只预览实际输入，FP8/NVFP4 的预览明确为转换前输入。汇总、报告读取与打印都在测量区间外，不能将缩减控制台输出当作内核优化收益。
 
-原生路径保留官方 mainloop 的原语句，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；独立参考路径的输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。`implementation: reference` 每次受保护 GEMM 调用均执行方法工厂，当前未接入插件历史状态的检查点保存。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
+原生路径保留官方 mainloop 的原语句，通过 epilogue 收集校验。`accumulator` 注入点位于 MMA 之后；独立参考路径的输入注入修改准备好的码值。恢复复用干净码值和尺度，不重复量化。独立无状态调用可由工厂创建方法；有状态调用须传入持有的 `method_instance`，或通过 `MethodSession.call` 管理，不能依赖每次新建实例保存历史。配置、报告和方法扩展步骤集中在 [GEMM 教程](../docs/gemm.md#启用-abft)。
 
-输入融合的原生入口为 `abft_reference_mm`（FP32/BF16）、`abft_fp8_reference_mm`、`abft_nvfp4_reference_mm`，返回 `(output, observed_partials, hit, predicted_partials, magnitude_partials)`。局部数组均为 `[2,ceil(M/tileM),padded_N]`，保持全局行权重，最终沿 M tile 合并。融合模式只接受计算故障，重算复检继续使用首次参考。`parameters` 提供方法专用 YAML 参数，`validate_config/prepare_fused/bind_reference` 用于扩展方法；默认 `classic` 不接受额外参数。
+输入融合的原生入口为 `abft_reference_mm`（FP32/BF16）、`abft_fp8_reference_mm`、`abft_nvfp4_reference_mm`，返回 `(output, observed_partials, hit, predicted_partials, magnitude_partials)`。局部数组均为 `[channels,ceil(M/tileM),padded_N]`，保持全局行权重，最终沿 M tile 合并；默认算法 ID 仍为 Classic，现有调用可继续省略。融合模式只接受计算故障，重算复检继续使用首次参考。`parameters` 提供方法专用 YAML 参数，`validate_config/prepare_fused/bind_reference` 用于扩展方法；内置 Classic/Sum 均不接受额外参数。
 
-`official_adapter.py` 与 `legacy_adapter.py` 对固定哈希的官方源码生成独立类型，不修改 `/opt/cutlass`。两份 SM120 consumer 函数在剔除新增校验调用后与官方一致，见 `test_mainloop_preservation.py`。legacy iterator 先处理 K 余数块，再处理完整块，参考路径的 K 掩码必须遵循该顺序。
+### 方法状态、阈值与检查点
+
+`prepare_fused/prepare_augmented` 返回本次调用的 `state`。native 可读取其中的连续、同设备 FP32 `thresholds[channels,N]` 或 `thresholds[1]`；未提供时，公共 policy 使用 `atol + rtol*magnitude`。方法须在 prepare 阶段对可变历史、权重和随机向量取快照，避免当前计算或重试期间更新它们。engine 保留同一份阈值和首次参考用于一次重算复检，完成后调用一次 `commit(state, decision, context)`。commit 只接收观察到的判定、残差/阈值与执行元数据，不接收故障位置、注入命中或其他注入真值。
+
+方法声明 `needs_diagnostics=True` 后，native 会为 `commit()` 保留残差与阈值；YAML 的 `diagnostics` 仅控制最终报告是否显示它们。有状态或需要这些统计的方法将提交工作计入 `state_update` 阶段；默认 Classic/Sum 不增加该阶段的计时事件。
+
+`MethodSession` 的配置签名覆盖算法配置与版本；有状态实例按层、forward/dgrad/wgrad、设备、精度、M/N/K 和缩放配置隔离，无状态方法复用单一实例。动态 amax 数值保留在每次调用的设备操作数中，不为分组读回主机。每次实际 GEMM 请求（包括激活重计算）增加物理 `call_index`，内部恢复复用本次索引。session 不推断逻辑 replay ID；有状态算法如何处理激活重计算，必须由实验协议明确。当前有状态 session 拒绝并发主机调用和切换 CUDA stream。
+
+独立实验使用 `with session.call(a,b,precision,scaling,global_scale,layer,role) as (method,context)`，并将 `method_instance=method` 与该 context 传给 `execute()`。`session.state_dict()` 冻结配置、物理计数和各方法的历史/RNG；`load_state_dict()` 校验 schema、算法与执行配置后恢复。算法 RNG 保存其状态张量，不把 generator 对象放进检查点。普通无状态 benchmark 不会自动建立校准历史或重置实验状态；有状态配对比较需明确校准集、初始快照、提交时机与重放规则。
+
+训练 `_Protection` 持有 session，`AlgorithmState` 回调在 `checkpoint-<step>/abft_state.pt` 保存层映射和 session 快照，续训前恢复。无状态旧检查点缺少该文件时允许续训，物理调用计数从 0 开始；有状态方法缺少状态文件会拒绝恢复。`gemm.fault` 与 resume 的组合仍禁止，因为故障续训协议尚未验证，不再以“未保存调用计数”为理由。此接口接通不代表有状态论文算法、阈值校准或故障续训实验已经完成。
+
+`codegen/sm120.py` 与 `codegen/sm80.py` 对固定哈希的官方源码生成独立类型，不修改 `/opt/cutlass`。两份 SM120 consumer 函数在剔除新增校验调用后与官方一致，见 `test_mainloop_preservation.py`。SM80 iterator 先处理 K 余数块，再处理完整块，参考路径的 K 掩码必须遵循该顺序。
 
 | 输入融合路径 | 原流水线级数 | 新增共享校验缓冲 | 完整 kernel 共享存储 |
 | --- | ---: | ---: | ---: |
@@ -179,6 +208,8 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 
 ## 已有验证记录
 
+本节源码引用按当前目录定位，历史提交号、构建标识、实验数值和结果目录保留原值。
+
 以下为统一入口改造前的 BF16 基线记录。最初记录日期为 2026-10-13，对应提交 `1c79d21`：
 
 - 在项目 Docker 中完成 SM120a 扩展编译、链接和加载，构建标识为 `5d8c186a22f49b11`。
@@ -213,7 +244,7 @@ FP8 对每个操作数做 tensorwise 缩放。`global_scale: amax` 时，FP8 的
 
 同日提交 `b2bb9d0` 分离 `execute_prepared()` 与量化准备，并加入 YAML 驱动的配对 GEMM 测量。保护计时覆盖参考生成至设备判定，输入量化与布局准备不计入；阶段计时默认关闭。训练及接口回归通过 136 项，测量和框架检查通过 59 项。
 
-随后接入 FP8 `input_fused` 原型：`abft_fp8_mainloop.cuh` 仅在固定官方 `mma()` 的 stage wait 后消费共享输入，`official_adapter.py` 从固定哈希的官方 kernel 生成独立类，只扩展 MMA 调用点。原始 CUTLASS 安装目录和无保护实例不改。参考部分使用全局行权重，保留原检查粒度；预测与 magnitude 作为局部和返回。寄存器保存列累加器后，新增共享缓冲为 1024 字节，流水线仍为 6 级，完整动态共享内存为 101376 字节。全扩展 `b4e2a13b8c17b118` 编译、链接与加载成功；完整检查为 301 项通过、112 项 GPU 跳过、55 项子测试通过，Ruff 通过。日志在 `results/validation/abft-input-fused/`；无实机时延或数值结论。
+随后接入 FP8 `input_fused` 原型：当前对应的 `csrc/abft/fp8/fp8_mainloop.cuh` 仅在固定官方 `mma()` 的 stage wait 后消费共享输入，`codegen/sm120.py` 从固定哈希的官方 kernel 生成独立类，只扩展 MMA 调用点。原始 CUTLASS 安装目录和无保护实例不改。参考部分使用全局行权重，保留原检查粒度；预测与 magnitude 作为局部和返回。寄存器保存列累加器后，新增共享缓冲为 1024 字节，流水线仍为 6 级，完整动态共享内存为 101376 字节。全扩展 `b4e2a13b8c17b118` 编译、链接与加载成功；完整检查为 301 项通过、112 项 GPU 跳过、55 项子测试通过，Ruff 通过。日志在 `results/validation/abft-input-fused/`；无实机时延或数值结论。
 
 2026-10-15 四精度输入融合已接通，示例测量及 ABFT 训练配置使用 `input_fused`。完整扩展 `aeac1951a13c2293` 编译、链接、加载和三个 CUDA 接口注册检查通过，构建标识为 `e51127644c279838`。完整本地检查为 316 项通过、171 项 GPU 跳过、55 项子测试通过；Ruff 通过。独立检查修正了 legacy 余数块先行时的 K 掩码，以及第二路权重索引的 int32 加法溢出。最终源码对照的 6 项检查通过。
 

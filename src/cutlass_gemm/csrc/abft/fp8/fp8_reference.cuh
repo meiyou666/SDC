@@ -3,25 +3,19 @@
 #include "cute/tensor.hpp"
 #include "cutlass/arch/barrier.h"
 #include "cutlass/float8.h"
+#include "abft/common/context.cuh"
+#include "abft/common/policy.cuh"
 
 namespace sdc_abft {
-// Supplied from the scheduler's actual work tile, never from blockIdx.
-// This initial interface supports L=1, full-K work tiles only (no split-K).
-struct TileReferenceContext {
-  float* partial;
-  float const* alpha;
-  float const* weights;
-  float* magnitude;
-  int rows, columns, tile_m, tile_n, tiles_m, padded_n;
-};
-
-template<int M, int N, int K, int Threads>
+template<int M, int N, int K, int Threads, class Policy = policy::Classic>
 struct Fp8TileReference {
   static_assert(N <= Threads, "One consumer thread owns each reference column");
-  // q/q_abs[2,K]: 1024 shared bytes for the current 128x64x64 tile.
-  // Each participating column owner keeps its four accumulators in registers.
-  struct Accumulators { float r0 = 0.f, r1 = 0.f, a0 = 0.f, a1 = 0.f; };
-  struct Storage { float q[2][K]; float q_abs[2][K]; };
+  static constexpr int kChecksums = Policy::kChecksums;
+  // This existing reference path encodes decoded FP8 values in FP32. It does
+  // not quantize checksum rows back to FP8. Each channel retains its original
+  // row/K accumulation order and applies alpha only when storing evidence.
+  struct Accumulators { float r[kChecksums]{}; float a[kChecksums]{}; };
+  struct Storage { float q[kChecksums][K]; float q_abs[kChecksums][K]; };
   CUTLASS_DEVICE static void sync() {
     cutlass::arch::NamedBarrier::sync(
         Threads, cutlass::arch::ReservedNamedBarriers::Sm120MainloopBarrier);
@@ -35,35 +29,36 @@ struct Fp8TileReference {
     // Explicit coordinate reads honor the official swizzled shared layouts.
     // A/B global memory is never revisited. TMA zeros the residual K extent.
     for (int k = tid; k < K; k += Threads) {
-      float q0 = 0.f, q1 = 0.f, a0 = 0.f, a1 = 0.f;
+      float encoded[kChecksums]{}, magnitude[kChecksums]{};
       for (int m = 0; m < M; ++m) {
         int row = c.tile_m * M + m;
         if (row < c.rows) {
           float value = decode(a(m, k, stage));
-          float w0 = c.weights[row], w1 = c.weights[int64_t(c.rows) + row];
-          q0 = fmaf(w0, value, q0);
-          q1 = fmaf(w1, value, q1);
-          a0 = fmaf(fabsf(w0), fabsf(value), a0);
-          a1 = fmaf(fabsf(w1), fabsf(value), a1);
+          CUTLASS_PRAGMA_UNROLL
+          for (int p = 0; p < kChecksums; ++p) {
+            float weight = c.weights[int64_t(p) * c.rows + row];
+            encoded[p] = Policy::encode(weight, value, encoded[p]);
+            magnitude[p] = Policy::encode(fabsf(weight), fabsf(value), magnitude[p]);
+          }
         }
       }
-      s.q[0][k] = q0; s.q[1][k] = q1;
-      s.q_abs[0][k] = a0; s.q_abs[1][k] = a1;
+      CUTLASS_PRAGMA_UNROLL
+      for (int p = 0; p < kChecksums; ++p) {
+        s.q[p][k] = encoded[p];
+        s.q_abs[p][k] = magnitude[p];
+      }
     }
     sync();
     for (int n = tid; n < N; n += Threads) {
       if (c.tile_n * N + n < c.columns) {
-        float r0 = registers.r0, r1 = registers.r1;
-        float a0 = registers.a0, a1 = registers.a1;
         for (int k = 0; k < K; ++k) {
           float value = decode(b(n, k, stage));
-          r0 = fmaf(s.q[0][k], value, r0);
-          r1 = fmaf(s.q[1][k], value, r1);
-          a0 = fmaf(s.q_abs[0][k], fabsf(value), a0);
-          a1 = fmaf(s.q_abs[1][k], fabsf(value), a1);
+          CUTLASS_PRAGMA_UNROLL
+          for (int p = 0; p < kChecksums; ++p) {
+            registers.r[p] = Policy::propagate(s.q[p][k], value, registers.r[p]);
+            registers.a[p] = Policy::propagate(s.q_abs[p][k], fabsf(value), registers.a[p]);
+          }
         }
-        registers.r0 = r0; registers.r1 = r1;
-        registers.a0 = a0; registers.a1 = a1;
       }
     }
     // Protect q reuse and ensure all reads complete before stage release.
@@ -76,10 +71,11 @@ struct Fp8TileReference {
       if (column < c.padded_n) {
         int64_t offset = int64_t(c.tile_m) * c.padded_n + column;
         int64_t plane = int64_t(c.tiles_m) * c.padded_n;
-        c.partial[offset] = alpha * registers.r0;
-        c.partial[plane + offset] = alpha * registers.r1;
-        c.magnitude[offset] = fabsf(alpha) * registers.a0;
-        c.magnitude[plane + offset] = fabsf(alpha) * registers.a1;
+        CUTLASS_PRAGMA_UNROLL
+        for (int p = 0; p < kChecksums; ++p) {
+          c.partial[int64_t(p) * plane + offset] = alpha * registers.r[p];
+          c.magnitude[int64_t(p) * plane + offset] = fabsf(alpha) * registers.a[p];
+        }
       }
     }
     sync();
