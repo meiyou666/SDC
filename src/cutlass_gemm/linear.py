@@ -9,6 +9,7 @@ from torch import nn
 from torch.autograd.function import once_differentiable
 
 from abft.config import parse_abft_config, parse_fault_config
+from abft.session import MethodSession
 
 from . import backend
 
@@ -22,11 +23,14 @@ class _Protection:
     """
 
     def __init__(self, abft, fault, report_max_records=0, report_path=None):
-        self.abft = parse_abft_config(abft)
-        self.fault = parse_fault_config(fault)
+        self.session = MethodSession(abft, fault)
+        self.abft, self.fault = self.session.config, self.session.fault
         self.reports = deque(maxlen=report_max_records)
         self.report_path = Path(report_path) if report_path else None
-        self.call_index = 0
+
+    @property
+    def call_index(self):
+        return self.session.call_index
 
     def record(self, report):
         if report is None:
@@ -41,18 +45,15 @@ class _Protection:
     def product(self, a, b, precision, scaling, global_scale, layer, role):
         import abft
 
-        self.call_index += 1
-        context = {"layer": layer, "role": role, "call_index": self.call_index,
-                   "execution_kind": "forward_or_recompute" if role == "forward" else "backward",
-                   "retry": 0}
-        try:
-            output, report = abft.execute(a, b, precision, scaling, global_scale,
-                                          self.abft, self.fault, context)
-        except Exception as exc:
-            self.record(getattr(exc, "report", None))
-            raise
-        self.record(report)
-        return output
+        with self.session.call(a, b, precision, scaling, global_scale, layer, role) as (method, context):
+            try:
+                output, report = abft.execute(a, b, precision, scaling, global_scale,
+                                              self.abft, self.fault, context, method_instance=method)
+            except Exception as exc:
+                self.record(getattr(exc, "report", None))
+                raise
+            self.record(report)
+            return output
 
 
 def packed(matrix):
@@ -126,6 +127,24 @@ class CutlassLinear(nn.Linear):
         args = (x, self.weight, self.bias, dtype, precision, self.scaling, self.global_scale)
         return _Linear.apply(*args) if self.protection is None else _Linear.apply(
             *args, self.protection, self.layer_name)
+
+
+def protection_sessions(model):
+    """Return distinct controllers with stable layer paths, including tied aliases.
+
+    Controllers stay plain Python objects: adaptive history must never enter
+    model parameters, buffers or safetensors. Layer membership is checkpoint
+    metadata, so attaching the same state to a different model is rejected.
+    """
+    groups = {}
+    for name, module in model.named_modules(remove_duplicate=False):
+        if isinstance(module, CutlassLinear) and module.protection is not None:
+            entry = groups.setdefault(id(module.protection), {"layers": [], "session": module.protection.session})
+            entry["layers"].append(name)
+    result = list(groups.values())
+    for entry in result:
+        entry["layers"].sort()
+    return sorted(result, key=lambda entry: entry["layers"])
 
 
 def install(model, precision=None, scaling="none", global_scale="amax", *,

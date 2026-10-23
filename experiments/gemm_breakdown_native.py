@@ -16,12 +16,12 @@ import torch
 from torch.utils.cpp_extension import load
 
 from cutlass_gemm import backend
-from cutlass_gemm.legacy_adapter import generate_augmented_header
+from cutlass_gemm.codegen import sm80
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "src/cutlass_gemm/abft_augmented.h"
-SOURCE_SHA256 = "8e64ed1eb175e249a60b5edb0205c564d2d6de86b369a8c4352d824928f5a6b2"
+SOURCE = ROOT / "src/cutlass_gemm/csrc/abft/fp32_bf16/bf16_augmented.h"
+SOURCE_SHA256 = "fc4081d02ebed4d2a1da97c4ad4a07364a74e33a1c56b2f11cedf8febfcd37d6"
 
 
 def _replace_once(text, anchor, replacement):
@@ -37,7 +37,7 @@ def generate_headers(cutlass, destination):
         raise RuntimeError("Production augmented GEMM changed; review the diagnostic generator first")
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
-    official = generate_augmented_header(cutlass, destination).read_text(encoding="utf-8")
+    official = sm80.generate_augmented_header(cutlass, destination).read_text(encoding="utf-8")
     official = official.replace("sdc_abft::", "sdc_breakdown_detail::")
     official = official.replace("AugmentedMmaMultistage", "BreakdownMmaMultistage")
     text = source.decode("utf-8")
@@ -64,7 +64,7 @@ def generate_headers(cutlass, destination):
         scratch.q[q_slot][p][k] = encoded;
         // Every mode consumes all valid BF16 q elements, not just the last K tile.
         diagnostic_q_sink += float(encoded);""")
-    text = _replace_once(text, """    // The two BF16 rows live beside A, not in its original 128 data rows.
+    text = _replace_once(text, """    // The BF16 checksum rows live beside A, not in its original 128 data rows.
     __syncthreads();""", """    // Only this extra publication barrier is masked. The host rejects qB
     // without it; all original pipeline and shared-union barriers stay intact.
     if (projection.diagnostic_mask & 8) __syncthreads();""")
@@ -76,10 +76,8 @@ def generate_headers(cutlass, destination):
     ChecksumMma mma;""")
     # The native visitor has its own helper. Mask its actual projection work,
     # leaving data conversion, injection, and nonfinite checks in every mode.
-    text = _replace_once(text, """      const float row_weights[2] = {
-          float(params_.weights[row]),""", """      if (params_.diagnostic_mask & 4) {
-      const float row_weights[2] = {
-          float(params_.weights[row]),""")
+    text = _replace_once(text, "      float row_weights[kChecksums];", """      if (params_.diagnostic_mask & 4) {
+      float row_weights[kChecksums];""")
     text = _replace_once(text, """            magnitude_[p][slot] += fabsf(term);
           }
         }
@@ -92,10 +90,10 @@ def generate_headers(cutlass, destination):
       }
     }
     OutputVector& output""")
-    text = _replace_once(text, """      for (int p = 0; p < 2; ++p) {
+    text = _replace_once(text, """      for (int p = 0; p < kChecksums; ++p) {
         shared_.sums[p][index] = sums_[p][c];
         shared_.magnitude[p][index] = magnitude_[p][c];
-      }""", """      if (params_.diagnostic_mask & 4) for (int p = 0; p < 2; ++p) {
+      }""", """      if (params_.diagnostic_mask & 4) for (int p = 0; p < kChecksums; ++p) {
         shared_.sums[p][index] = sums_[p][c];
         shared_.magnitude[p][index] = magnitude_[p][c];
       }""")
@@ -103,6 +101,10 @@ def generate_headers(cutlass, destination):
             // Match the legacy thread-major/slot-major summation order exactly.""", """          if (col < extent_.column() && (params_.diagnostic_mask & 4)) {
             // Match the legacy thread-major/slot-major summation order exactly.""")
     text = text.replace("sdc_abft", "sdc_breakdown_detail")
+    text = _replace_once(text, "namespace sdc_breakdown_detail {\n\nstatic constexpr", """namespace sdc_breakdown_detail {
+namespace policy = ::sdc_abft::policy;
+
+static constexpr""")
     text = text.replace("AugmentedMmaMultistage", "BreakdownMmaMultistage")
     text = _replace_once(text, '#include "abft_augmented_mma_multistage.h"',
                          '#include "breakdown_mma_multistage.h"')
@@ -129,7 +131,8 @@ def load_diagnostic():
     wrapper = Path(__file__).with_name("gemm_breakdown_kernel.cu")
     digest = hashlib.sha256(json.dumps(config, sort_keys=True).encode())
     digest.update(f"{torch.__version__}:{torch._C._GLIBCXX_USE_CXX11_ABI}".encode())
-    for path in (Path(__file__), wrapper, SOURCE, ROOT / "src/cutlass_gemm/legacy_adapter.py"):
+    for path in (Path(__file__), wrapper, SOURCE, ROOT / "src/cutlass_gemm/codegen/sm80.py",
+                 ROOT / "src/cutlass_gemm/csrc/abft/common/policy.cuh"):
         digest.update(path.read_bytes())
     build = ROOT / ".sdc/diagnostics/gemm_breakdown" / digest.hexdigest()[:16]
     generated = generate_headers(cutlass, build / "generated")
@@ -139,7 +142,8 @@ def load_diagnostic():
         name="sdc_breakdown_" + build.name,
         sources=[str(wrapper)],
         build_directory=str(build),
-        extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"), str(generated)],
+        extra_include_paths=[str(cutlass / "include"), str(cutlass / "tools/util/include"),
+                             str(ROOT / "src/cutlass_gemm/csrc"), str(generated)],
         extra_cflags=["-O2", f"-std={config['cxx_standard']}"],
         extra_cuda_cflags=["-O2", f"-std={config['cxx_standard']}",
                           f"-gencode=arch=compute_{arch},code=sm_{arch}",

@@ -137,9 +137,10 @@ def test_protected_roles_context_checkpoint_and_bounded_reports(monkeypatch, ree
         def to_record(self):
             pytest.fail("In-memory reporting must not synchronize")
 
-    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context):
+    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context, *, method_instance=None):
         calls.append(dict(context))
         assert abft_config.method == "classic"
+        assert method_instance is not None
         assert fault_config.location == "none"
         return a @ b, Report()
 
@@ -168,8 +169,9 @@ def test_unprotected_fault_and_exception_report(monkeypatch, tmp_path):
     class DetectionError(RuntimeError):
         report = Report()
 
-    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context):
+    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context, *, method_instance=None):
         assert abft_config.method == "none"
+        assert method_instance is None
         assert fault_config.location == "accumulator"
         raise DetectionError("fault")
 
@@ -188,8 +190,9 @@ def test_protected_shared_parameters_and_gradients(monkeypatch):
 
     contexts = []
 
-    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context):
+    def execute(a, b, precision, scaling, global_scale, abft_config, fault_config, context, *, method_instance=None):
         contexts.append(context)
+        assert method_instance is not None
         return a @ b, None
 
     monkeypatch.setattr(abft, "execute", execute)

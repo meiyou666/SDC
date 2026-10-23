@@ -218,7 +218,7 @@ def validate(config: Config) -> Config:
         raise ValueError("augmented 当前只支持 BF16 GEMM。")
     fault = parse_fault_config(g.fault)
     if fault.location != "none" and t.resume is not None:
-        raise ValueError("故障注入调用计数尚未写入检查点，gemm.fault 不支持 resume。")
+        raise ValueError("故障注入续训协议尚未验证，gemm.fault 不支持 resume。")
     if g.backend != "cutlass" and (abft.method != "none" or fault.location != "none"):
         raise ValueError("ABFT 与故障注入要求 gemm.backend: cutlass。")
     _positive(g.report_max_records, "gemm.report_max_records", 0)

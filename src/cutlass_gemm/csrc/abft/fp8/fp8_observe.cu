@@ -40,10 +40,12 @@
 #include "cutlass/epilogue/collective/collective_builder.hpp"
 #include "cutlass/gemm/collective/collective_builder.hpp"
 #include "cutlass/util/packed_stride.hpp"
-#include "abft_sm120.cuh"
+#include "abft/common/sm120_epilogue.cuh"
 
 namespace {
 using namespace cute;
+template<class Policy>
+struct KernelTypes {
   using ElementA = cutlass::float_e4m3_t;
   using ElementB = cutlass::float_e4m3_t;
   using ElementC = float;
@@ -72,7 +74,7 @@ using namespace cute;
       cutlass::epilogue::collective::EpilogueScheduleAuto
     >::CollectiveOp;
 
-  using Projection = sdc_abft::ProjectionEpilogue<TileShape, ElementD>;
+  using Projection = sdc_abft::ProjectionEpilogue<TileShape, ElementD, Policy>;
   using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
       cutlass::arch::Sm120, cutlass::arch::OpClassTensorOp,
       TileShape, ClusterShape, cutlass::epilogue::collective::EpilogueTileAuto,
@@ -101,16 +103,25 @@ using namespace cute;
   >;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
+};
 void check_status(cutlass::Status status, const char* operation) {
   TORCH_CHECK(status == cutlass::Status::kSuccess,
               "CUTLASS FP8 ", operation, " failed: ", cutlassGetStatusString(status));
 }
 }  // namespace
 
+template<class Policy>
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
-sdc_cutlass_abft_fp8_mm(const at::Tensor& a, const at::Tensor& b,
+fp8_observe(const at::Tensor& a, const at::Tensor& b,
                        const at::Tensor& alpha, const at::Tensor& weights,
-                       int64_t row, int64_t col, int64_t bit) {
+                       int64_t row, int64_t col, int64_t bit,
+                       const std::optional<at::Tensor>& nonfinite) {
+  using Types = KernelTypes<Policy>;
+  using Gemm = typename Types::Gemm;
+  using GemmKernel = typename Types::GemmKernel;
+  using Projection = typename Types::Projection;
+  using ElementA = typename Types::ElementA;
+  using ElementB = typename Types::ElementB;
   TORCH_CHECK(a.is_cuda() && b.is_cuda() && a.device() == b.device(),
               "A and B must be on the same CUDA device");
   TORCH_CHECK(a.layout() == at::kStrided && b.layout() == at::kStrided &&
@@ -132,31 +143,48 @@ sdc_cutlass_abft_fp8_mm(const at::Tensor& a, const at::Tensor& b,
   TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major == 12,
               "Official FP8 GEMM requires SM120/SM121");
   const int m = a.size(0), n = b.size(0), k = a.size(1);
-  sdc_abft::check_projection_arguments(a, weights, m, n, row, col, bit);
+  if (nonfinite) {
+    at::assert_no_overlap(*nonfinite, b);
+    at::assert_no_overlap(*nonfinite, alpha);
+  }
+  sdc_abft::check_projection_arguments<Policy>(a, weights, m, n, row, col, bit, nonfinite);
   const int64_t tiles_m = (int64_t(m) + 127) / 128;
   const int64_t padded_n = ((int64_t(n) + 63) / 64) * 64;
-  auto partial = at::zeros({2, tiles_m, padded_n}, a.options().dtype(at::kFloat));
+  at::Tensor partial = at::zeros({Policy::kChecksums, tiles_m, padded_n}, a.options().dtype(at::kFloat));
   auto hit = at::zeros({1}, a.options().dtype(at::kInt));
   // Preserve the official column-major FP32 epilogue layout.
   auto output = at::empty_strided({m, n}, {1, m}, a.options().dtype(at::kFloat));
-  auto stride_a = cutlass::make_cute_packed_stride(GemmKernel::StrideA{}, {m, k, 1});
-  auto stride_b = cutlass::make_cute_packed_stride(GemmKernel::StrideB{}, {n, k, 1});
-  auto stride_c = cutlass::make_cute_packed_stride(GemmKernel::StrideC{}, {m, n, 1});
-  auto stride_d = cutlass::make_cute_packed_stride(GemmKernel::StrideD{}, {m, n, 1});
-  Gemm::Arguments arguments{
+  auto stride_a = cutlass::make_cute_packed_stride(typename GemmKernel::StrideA{}, {m, k, 1});
+  auto stride_b = cutlass::make_cute_packed_stride(typename GemmKernel::StrideB{}, {n, k, 1});
+  auto stride_c = cutlass::make_cute_packed_stride(typename GemmKernel::StrideC{}, {m, n, 1});
+  auto stride_d = cutlass::make_cute_packed_stride(typename GemmKernel::StrideD{}, {m, n, 1});
+  typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm, {m, n, k, 1},
       {reinterpret_cast<const ElementA*>(a.const_data_ptr()), stride_a,
        reinterpret_cast<const ElementB*>(b.const_data_ptr()), stride_b},
       {Projection::arguments(alpha.const_data_ptr<float>(), weights.const_data_ptr<float>(),
                              m, partial.data_ptr<float>(), tiles_m * padded_n,
-                             hit.data_ptr<int>(), row, col, bit), output.data_ptr<float>(), stride_c,
+                             hit.data_ptr<int>(), row, col, bit,
+                             nonfinite ? nonfinite->data_ptr<int>() : nullptr),
+       output.data_ptr<float>(), stride_c,
        output.data_ptr<float>(), stride_d}};
   Gemm gemm;
   check_status(gemm.can_implement(arguments), "can_implement");
-  auto workspace = at::empty({static_cast<int64_t>(Gemm::get_workspace_size(arguments))},
+  at::Tensor workspace = at::empty({static_cast<int64_t>(Gemm::get_workspace_size(arguments))},
                              a.options().dtype(at::kByte));
   auto stream = at::cuda::getCurrentCUDAStream(a.get_device());
   check_status(gemm.initialize(arguments, workspace.mutable_data_ptr(), stream.stream()), "initialize");
   check_status(gemm.run(stream.stream()), "run");
   return {output, partial, hit};
+}
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor>
+sdc_cutlass_abft_fp8_mm(const at::Tensor& a, const at::Tensor& b,
+                       const at::Tensor& alpha, const at::Tensor& weights,
+                       int64_t row, int64_t col, int64_t bit, int64_t algorithm,
+                       const std::optional<at::Tensor>& nonfinite) {
+  return sdc_abft::policy::dispatch(algorithm, [&](auto tag) {
+    using Algorithm = typename decltype(tag)::Type;
+    return fp8_observe<Algorithm>(a, b, alpha, weights, row, col, bit, nonfinite);
+  });
 }

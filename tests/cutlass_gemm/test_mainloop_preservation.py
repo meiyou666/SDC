@@ -7,7 +7,7 @@ import re
 import pytest
 
 
-SOURCE = Path(__file__).resolve().parents[2] / "src/cutlass_gemm"
+SOURCE = Path(__file__).resolve().parents[2] / "src/cutlass_gemm/csrc/abft"
 CUTLASS = Path(os.environ.get("CUTLASS_PATH", "/opt/cutlass"))
 
 
@@ -23,8 +23,8 @@ def function_body(source, name):
 
 
 @pytest.mark.parametrize("local,official", [
-    ("abft_fp8_mainloop.cuh", "sm120_mma_tma.hpp"),
-    ("abft_nvfp4_mainloop.cuh", "sm120_blockscaled_mma_tma.hpp"),
+    ("fp8/fp8_mainloop.cuh", "sm120_mma_tma.hpp"),
+    ("nvfp4/nvfp4_mainloop.cuh", "sm120_blockscaled_mma_tma.hpp"),
 ])
 def test_only_checksum_calls_are_added_to_official_mma(local, official):
     upstream = CUTLASS / "include/cutlass/gemm/collective" / official
@@ -42,17 +42,38 @@ def test_only_checksum_calls_are_added_to_official_mma(local, official):
 
 
 def test_augmented_preserves_pinned_multistage_source(tmp_path):
-    from cutlass_gemm.legacy_adapter import generate_augmented_header
+    from cutlass_gemm.codegen import sm80
 
     upstream = CUTLASS / "include/cutlass/gemm/threadblock/mma_multistage.h"
     if not upstream.is_file():
         pytest.skip("Pinned CUTLASS source is installed in the NVIDIA environment")
-    adapted = generate_augmented_header(CUTLASS, tmp_path).read_text()
-    restored = adapted.replace("AugmentedMmaMultistage", "MmaMultistage").replace(
-        "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
+    adapted = sm80.generate_augmented_header(CUTLASS, tmp_path).read_text()
+    assert adapted.count(sm80.ALGORITHM_PARAMETER) == 1
+    restored = adapted.replace(sm80.ALGORITHM_PARAMETER, "", 1).replace("AugmentedMmaMultistage", "MmaMultistage").replace(
+        "  using Encoding = sdc_abft::AugmentedTileEncoding<Base, Algorithm>;\n"
         "  Encoding* encoding = nullptr;\n", "", 1,
     ).replace("\n      if (encoding) encoding->consume(smem_read_stage_idx_);", "", 1).replace(
         "      if (encoding) encoding->propagate(\n"
         "          warp_mma_k, pipe_state.warp_transformed_frag_B_[warp_mma_k % 2]);\n\n", "", 1,
     )
     assert restored == upstream.read_text()
+
+
+@pytest.mark.parametrize("stem,name,stage", [
+    ("mma_multistage", "MmaMultistage", "smem_read_stage_idx_"),
+    ("mma_pipelined", "MmaPipelined", "smem_write_stage_idx ^ 1"),
+])
+def test_legacy_algorithm_adapter_preserves_pinned_source(tmp_path, stem, name, stage):
+    from cutlass_gemm.codegen import sm80
+
+    directory = CUTLASS / "include/cutlass/gemm/threadblock"
+    if any(not (directory / (item + ".h")).is_file() for item in sm80.SOURCES):
+        pytest.skip("Pinned CUTLASS source is installed in the NVIDIA environment")
+    generated = sm80.generate_legacy_reference_headers(CUTLASS, tmp_path)
+    adapted = next(path for path in generated if path.name == "abft_" + stem + ".h").read_text()
+    assert adapted.count(sm80.ALGORITHM_PARAMETER) == 1
+    restored = adapted.replace(sm80.ALGORITHM_PARAMETER, "", 1).replace("Abft" + name, name).replace(
+        "  using Reference = sdc_abft::LegacyTileReference<Base, Algorithm>;\n"
+        "  Reference* reference = nullptr;\n", "", 1,
+    ).replace(f"\n      if (reference) reference->consume({stage});", "", 1)
+    assert restored == (directory / (stem + ".h")).read_text()

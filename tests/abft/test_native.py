@@ -65,14 +65,29 @@ def _stub_native(monkeypatch, detections=(False,)):
                            references=references, flags=flags, outputs=outputs)
 
 
-@pytest.mark.parametrize("changes", [
-    {"method": "other"}, {"parameters": {"extra": 1}}, {"implementation": "typo"},
-    {"reference_mode": "input_fused", "threshold_scale": "input"},
-    {"reference_mode": "separate", "threshold_scale": "input"},
-])
-def test_native_configuration_rejects_unsupported_contract(changes):
+@pytest.mark.parametrize("changes", [{"implementation": "typo"},
+                                     {"method": "none", "reference_mode": "separate", "threshold_scale": "input"}])
+def test_native_configuration_rejects_invalid_generic_contract(changes):
     with pytest.raises(ValueError, match="implementation"):
         _config(**changes)
+
+
+@pytest.mark.parametrize("changes", [
+    {"method": "other"}, {"parameters": {"extra": 1}},
+    {"reference_mode": "separate", "threshold_scale": "input"},
+])
+def test_native_method_declares_and_validates_execution_contract(monkeypatch, changes):
+    stub = _stub_native(monkeypatch)
+    cfg = _config(**changes)  # Configuration parsing does not import a method or Torch.
+    with pytest.raises(ValueError):
+        execute_prepared(stub.prepared, cfg)
+    assert not stub.calls
+
+
+@pytest.mark.parametrize("method", ["classic", "sum"])
+def test_native_input_fused_configuration_is_allowed(method):
+    cfg = _config(method=method, reference_mode="input_fused", threshold_scale="input")
+    assert cfg.method == method and cfg.implementation == "native"
 
 
 @pytest.mark.parametrize("override", ["raw_fn", "reference_mm", "collector_fn", "reference_collector_fn"])

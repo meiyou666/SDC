@@ -58,36 +58,41 @@ class PreparedGemm:
             return torch.ops.sdc_cutlass.fp8_mm(self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn), self.alpha)
         return torch.ops.sdc_cutlass.nvfp4_mm(self.a, self.b, self.sfa, self.sfb, self.k, self.alpha)
 
-    def collected_native(self, weights, fault=(-1, -1, -1)):
+    def collected_native(self, weights, fault=(-1, -1, -1), *, algorithm=0, nonfinite=None):
+        # Preserve the exact legacy call arity for default Classic callers and
+        # dependency-injection tests. Extra arguments select a real CUDA policy.
+        policy = () if algorithm == 0 and nonfinite is None else (algorithm, nonfinite)
         if self.precision in {"fp32", "bf16"}:
             backend.require_device(self.a.device)
-            return torch.ops.sdc_cutlass.abft_mm(self.a, self.b, weights, *fault)
+            return torch.ops.sdc_cutlass.abft_mm(self.a, self.b, weights, *fault, *policy)
         if self.precision == "fp8":
-            return torch.ops.sdc_cutlass.abft_fp8_mm(self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn), self.alpha, weights, *fault)
-        return torch.ops.sdc_cutlass.abft_nvfp4_mm(self.a, self.b, self.sfa, self.sfb, self.k, self.alpha, weights, *fault)
+            return torch.ops.sdc_cutlass.abft_fp8_mm(self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn), self.alpha, weights, *fault, *policy)
+        return torch.ops.sdc_cutlass.abft_nvfp4_mm(self.a, self.b, self.sfa, self.sfb, self.k, self.alpha, weights, *fault, *policy)
 
-    def collected_reference_native(self, weights, fault=(-1, -1, -1)):
+    def collected_reference_native(self, weights, fault=(-1, -1, -1), *, algorithm=0, nonfinite=None):
         """Return output, observed, hit, predicted and magnitude partials."""
+        policy = () if algorithm == 0 and nonfinite is None else (algorithm, nonfinite)
         if self.precision in {"fp32", "bf16"}:
             backend.require_device(self.a.device)
-            return torch.ops.sdc_cutlass.abft_reference_mm(self.a, self.b, weights, *fault)
+            return torch.ops.sdc_cutlass.abft_reference_mm(self.a, self.b, weights, *fault, *policy)
         if self.precision not in INPUT_REFERENCE_PRECISIONS:
             raise NotImplementedError(f"input_fused reference is not implemented for {self.precision}")
         if self.precision == "nvfp4":
             return torch.ops.sdc_cutlass.abft_nvfp4_reference_mm(
-                self.a, self.b, self.sfa, self.sfb, self.k, self.alpha, weights, *fault,
+                self.a, self.b, self.sfa, self.sfb, self.k, self.alpha, weights, *fault, *policy,
             )
         return torch.ops.sdc_cutlass.abft_fp8_reference_mm(
             self.a.view(torch.float8_e4m3fn), self.b.view(torch.float8_e4m3fn),
-            self.alpha, weights, *fault,
+            self.alpha, weights, *fault, *policy,
         )
 
-    def augmented_native(self, weights, fault=(-1, -1, -1)):
+    def augmented_native(self, weights, fault=(-1, -1, -1), *, algorithm=0):
         """BF16 tile encoding and augmented main MMA, without global A re-reads."""
         if self.precision != "bf16":
             raise ValueError("augmented currently requires BF16 GEMM")
         backend.require_device(self.a.device)
-        return torch.ops.sdc_cutlass.abft_augmented_mm(self.a, self.b, weights, *fault)
+        policy = () if algorithm == 0 else (algorithm,)
+        return torch.ops.sdc_cutlass.abft_augmented_mm(self.a, self.b, weights, *fault, *policy)
 
     def decode_block(self, start, end):
         if not 0 <= start < end <= self.k:

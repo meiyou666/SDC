@@ -6,7 +6,7 @@
 #include <tuple>
 #include <type_traits>
 #include "cutlass/device_kernel.h"
-#include "abft_augmented.h"
+#include "abft/fp32_bf16/bf16_augmented.h"
 
 namespace {
 using Row = cutlass::layout::RowMajor;
@@ -17,7 +17,7 @@ using CompactResult = std::tuple<at::Tensor, at::Tensor, at::Tensor>;
 template<bool Compact>
 using LaunchResult = std::conditional_t<Compact, CompactResult, Result>;
 
-template<bool Compact, class LayoutA, class LayoutB, bool FullKN = false>
+template<bool Compact, class Algorithm, class LayoutA, class LayoutB, bool FullKN = false>
 LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
                             const at::Tensor& weights, int row, int col, int bit) {
   // Same SM80 official BF16 main MMA, warp tile and three-stage schedule as
@@ -26,7 +26,7 @@ LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
   using Gemm = cutlass::gemm::device::Gemm<Element, LayoutA, Element, LayoutB,
       Element, Row, float, cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
       cutlass::gemm::GemmShape<128,128,64>>;
-  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel, Compact, FullKN>;
+  using Kernel = sdc_abft::AugmentedKernel<typename Gemm::GemmKernel, Compact, FullKN, Algorithm>;
   const int m = a.size(0), n = b.size(1), k = a.size(1);
   const int lda = a.stride(std::is_same_v<LayoutA, Row> ? 0 : 1);
   const int ldb = b.stride(std::is_same_v<LayoutB, Row> ? 0 : 1);
@@ -40,13 +40,13 @@ LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
   if constexpr (Compact) {
     // Every CTA owns its complete tile slice, including padded N columns.
     // There are no atomics across CTAs and no pre-launch zeroing kernels.
-    partials = at::empty({3, 2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
+    partials = at::empty({3, Algorithm::kChecksums, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
     observed = partials.select(0, 0);
     predicted = partials.select(0, 1);
     magnitude = partials.select(0, 2);
     tile_flags = at::empty({m_tiles, n_tiles}, a.options().dtype(at::kInt));
   } else {
-    observed = at::zeros({2, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
+    observed = at::zeros({Algorithm::kChecksums, m_tiles, n_tiles * 128}, a.options().dtype(at::kFloat));
     predicted = at::zeros_like(observed);
     magnitude = at::zeros_like(observed);
     hit = at::zeros({1}, a.options().dtype(at::kInt));
@@ -82,20 +82,20 @@ LaunchResult<Compact> launch(const at::Tensor& a, const at::Tensor& b,
   else return {d, observed, hit, predicted, magnitude};
 }
 
-template<bool Compact, class LayoutA, class LayoutB>
+template<bool Compact, class Algorithm, class LayoutA, class LayoutB>
 LaunchResult<Compact> launch_selected(const at::Tensor& a, const at::Tensor& b,
                                     const at::Tensor& weights, int row, int col, int bit) {
   if constexpr (Compact) {
     // Only remove K/N masks for complete native tiles. M tails continue to
     // use the same masks, checksum weights, and output footprint as before.
     if (b.size(1) % 128 == 0 && a.size(1) % 64 == 0) {
-      return launch<Compact, LayoutA, LayoutB, true>(a, b, weights, row, col, bit);
+      return launch<Compact, Algorithm, LayoutA, LayoutB, true>(a, b, weights, row, col, bit);
     }
   }
-  return launch<Compact, LayoutA, LayoutB, false>(a, b, weights, row, col, bit);
+  return launch<Compact, Algorithm, LayoutA, LayoutB, false>(a, b, weights, row, col, bit);
 }
 
-template<bool Compact>
+template<bool Compact, class Algorithm>
 LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
     const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
   TORCH_CHECK(a.is_cuda() && b.is_cuda() && weights.is_cuda() &&
@@ -122,8 +122,9 @@ LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
   TORCH_CHECK(row_b || (b.stride(0) == 1 && b.stride(1) == b.size(0)),
               "Augmented ABFT B requires packed row-major or column-major storage");
   TORCH_CHECK(weights.layout() == at::kStrided && weights.scalar_type() == at::kBFloat16 &&
-                  weights.dim() == 2 && weights.size(0) == 2 && weights.size(1) == a.size(0) &&
-                  weights.is_contiguous(), "Augmented ABFT weights must be contiguous BF16 [2,M]");
+                  weights.dim() == 2 && weights.size(0) == Algorithm::kChecksums && weights.size(1) == a.size(0) &&
+                  weights.is_contiguous(), "Augmented ABFT weights must be contiguous BF16 [",
+                  Algorithm::kChecksums, ",M]");
   TORCH_CHECK((row == -1 && col == -1 && bit == -1) ||
                   (row >= 0 && row < a.size(0) && col >= 0 && col < b.size(1) && bit >= 0 && bit < 32),
               "Augmented ABFT fault must be all -1, or a valid row/column and FP32 bit 0..31");
@@ -131,20 +132,31 @@ LaunchResult<Compact> dispatch(const at::Tensor& a, const at::Tensor& b,
   TORCH_CHECK(at::cuda::getCurrentDeviceProperties()->major >= 8,
               "Augmented ABFT GEMM requires SM80 or newer");
   if (row_a) {
-    if (row_b) return launch_selected<Compact, Row, Row>(a, b, weights, row, col, bit);
-    return launch_selected<Compact, Row, Col>(a, b, weights, row, col, bit);
+    if (row_b) return launch_selected<Compact, Algorithm, Row, Row>(a, b, weights, row, col, bit);
+    return launch_selected<Compact, Algorithm, Row, Col>(a, b, weights, row, col, bit);
   }
-  if (row_b) return launch_selected<Compact, Col, Row>(a, b, weights, row, col, bit);
-  return launch_selected<Compact, Col, Col>(a, b, weights, row, col, bit);
+  if (row_b) return launch_selected<Compact, Algorithm, Col, Row>(a, b, weights, row, col, bit);
+  return launch_selected<Compact, Algorithm, Col, Col>(a, b, weights, row, col, bit);
+}
+
+template<bool Compact>
+LaunchResult<Compact> dispatch_algorithm(const at::Tensor& a, const at::Tensor& b,
+    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit, int64_t algorithm) {
+  // The common host registry chooses the compiled policy once; there is no
+  // algorithm-ID branch in encoding, propagation, or output reduction loops.
+  return sdc_abft::policy::dispatch(algorithm, [&](auto tag) {
+    using Algorithm = typename decltype(tag)::Type;
+    return dispatch<Compact, Algorithm>(a, b, weights, row, col, bit);
+  });
 }
 }  // namespace
 
 Result sdc_cutlass_abft_augmented_mm(const at::Tensor& a, const at::Tensor& b,
-    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
-  return dispatch<false>(a, b, weights, row, col, bit);
+    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit, int64_t algorithm) {
+  return dispatch_algorithm<false>(a, b, weights, row, col, bit, algorithm);
 }
 
 CompactResult sdc_cutlass_abft_augmented_compact(const at::Tensor& a, const at::Tensor& b,
-    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit) {
-  return dispatch<true>(a, b, weights, row, col, bit);
+    const at::Tensor& weights, int64_t row, int64_t col, int64_t bit, int64_t algorithm) {
+  return dispatch_algorithm<true>(a, b, weights, row, col, bit, algorithm);
 }

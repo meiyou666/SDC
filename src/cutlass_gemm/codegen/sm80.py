@@ -8,6 +8,16 @@ SOURCES = {
     "mma_multistage": "3f89e410ca96b06e4a56ba19f90399e8fdd2744a28c45d458a60940708b4171b",
     "mma_pipelined": "fac90ae04135ccacc0ea48440d20c1059c555ad6355a8608df0e6a74a8a7b4e5",
 }
+ALGORITHM_PARAMETER = ",\n    class Algorithm = sdc_abft::policy::Classic"
+
+
+def _add_algorithm_parameter(text):
+    # Append after the official final Enable parameter, keeping every original
+    # parameter/default in place. Both pinned legacy declarations use this site.
+    anchor = "typename Enable = bool"
+    if text.count(anchor) != 1:
+        raise RuntimeError("Legacy algorithm template insertion site changed")
+    return text.replace(anchor, anchor + ALGORITHM_PARAMETER, 1)
 
 
 def generate_legacy_reference_headers(cutlass, destination):
@@ -17,13 +27,13 @@ def generate_legacy_reference_headers(cutlass, destination):
         source = (Path(cutlass) / "include/cutlass/gemm/threadblock" / (stem + ".h")).read_bytes()
         if hashlib.sha256(source).hexdigest() != digest:
             raise RuntimeError("Legacy mainloop differs from pinned CUTLASS: " + stem)
-        text = source.decode("utf-8")
+        text = _add_algorithm_parameter(source.decode("utf-8"))
         name = "MmaMultistage" if stem == "mma_multistage" else "MmaPipelined"
         text = text.replace(name, "Abft" + name)
         anchor = "  using Shape = Shape_;"
         if text.count(anchor) != 1:
             raise RuntimeError("Legacy reference type insertion site changed")
-        text = text.replace(anchor, "  using Reference = sdc_abft::LegacyTileReference<Base>;\n"
+        text = text.replace(anchor, "  using Reference = sdc_abft::LegacyTileReference<Base, Algorithm>;\n"
                             "  Reference* reference = nullptr;\n" + anchor, 1)
         if stem == "mma_multistage":
             anchor = "    for (; gemm_k_iterations > (-Base::kStages + 1);) {"
@@ -51,10 +61,10 @@ def generate_augmented_header(cutlass, destination):
     source = (Path(cutlass) / "include/cutlass/gemm/threadblock/mma_multistage.h").read_bytes()
     if hashlib.sha256(source).hexdigest() != SOURCES["mma_multistage"]:
         raise RuntimeError("Augmented mainloop differs from pinned CUTLASS: mma_multistage")
-    text = source.decode("utf-8").replace("MmaMultistage", "AugmentedMmaMultistage")
+    text = _add_algorithm_parameter(source.decode("utf-8")).replace("MmaMultistage", "AugmentedMmaMultistage")
     replacements = {
         "  using Shape = Shape_;": (
-            "  using Encoding = sdc_abft::AugmentedTileEncoding<Base>;\n"
+            "  using Encoding = sdc_abft::AugmentedTileEncoding<Base, Algorithm>;\n"
             "  Encoding* encoding = nullptr;\n"
             "  using Shape = Shape_;"
         ),

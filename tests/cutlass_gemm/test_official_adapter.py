@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from cutlass_gemm import official_adapter as adapter
+from cutlass_gemm.codegen import sm120 as adapter
 
 
 def test_adapter_only_changes_class_and_mma_call(tmp_path, monkeypatch):

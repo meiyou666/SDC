@@ -46,10 +46,8 @@ class AbftConfig:
             raise ValueError(f"{self.reference_mode} requires threshold_scale={required_scale}")
         if self.implementation not in {"reference", "native"}:
             raise ValueError("implementation must be reference or native")
-        if self.implementation == "native" and (
-            self.reference_mode != "augmented" or self.method != "classic" or self.parameters
-        ):
-            raise ValueError("native implementation requires augmented classic without extra parameters")
+        if self.implementation == "native" and self.method == "none":
+            raise ValueError("native implementation requires an ABFT method")
         if not isinstance(self.method, str) or not self.method:
             raise ValueError("ABFT method must be a nonempty registered name")
         for value in (self.atol, self.rtol):
