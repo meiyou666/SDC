@@ -293,6 +293,133 @@ def test_real_forward_backward_update_and_exact_resume(config, tmp_path, wrapped
         train(config, resume="latest", offline=True, **transform)
 
 
+@pytest.fixture
+def stateful_abft(monkeypatch):
+    """Small lifecycle fixture, not a reproduction of an adaptive paper method."""
+    import abft
+    from abft.engine import execute
+    import abft.methods as methods
+
+    class History(methods.Classic):
+        stateful = True
+        compiled_policy = None
+
+        def __init__(self):
+            self.count = 0
+            self.history = torch.empty(0)
+            self.rng = torch.Generator().manual_seed(719)
+
+        def prepare(self, operands, config, mm=None):
+            state = super().prepare(operands, config, mm)
+            generator = torch.Generator()
+            generator.set_state(self.rng.get_state())
+            state["sample"] = torch.rand(1, generator=generator)
+            state["rng_next"] = generator.get_state()
+            return state
+
+        def commit(self, state, decision, context):
+            assert "fault_hit" not in decision and "fault" not in context
+            self.count += 1
+            self.history = torch.cat((self.history, state["sample"]))
+            self.rng.set_state(state["rng_next"])
+
+        def state_dict(self):
+            return {"count": self.count, "history": self.history, "rng": self.rng.get_state()}
+
+        def load_state_dict(self, state):
+            self.count, self.history = state["count"], state["history"]
+            self.rng.set_state(state["rng"])
+
+    monkeypatch.setattr(methods, "_METHODS", {**methods._METHODS, "test_history": History})
+
+    def collect(operands, weights, fault):
+        assert fault[0] == -1
+        a, b = operands.decode_block(0, operands.k)
+        result = a @ b
+        return result, (weights @ result).unsqueeze(1), torch.zeros(1, dtype=torch.int32)
+
+    def cpu_execute(*args, **kwargs):
+        return execute(*args, **kwargs, reference_mm=torch.mm, collector_fn=collect)
+
+    monkeypatch.setattr(abft, "execute", cpu_execute)
+    return {"method": "test_history", "atol": 1000., "rtol": 0.}
+
+
+def test_stateful_abft_training_restores_before_first_call_and_matches_full_run(config, tmp_path, stateful_abft):
+    from cutlass_gemm.linear import install, protection_sessions
+
+    prepare_data(config)
+    transform = {"model_transform": install, "transform_id": "stateful-abft:test",
+                 "transform_params": {"precision": "fp32", "abft_config": stateful_abft}}
+    full, _ = train(config, offline=True, **transform)
+    resumed_config = replace(config, training=replace(config.training, output_dir=str(tmp_path / "resumed-history")))
+    partial, _ = train(resumed_config, offline=True, callbacks=[StopAtOne()], **transform)
+    checkpoint = tmp_path / "resumed-history" / "checkpoint-1"
+    snapshot = torch.load(checkpoint / "abft_state.pt", weights_only=True)
+    saved_session = snapshot["controllers"][0]["session"]
+    assert saved_session["call_index"] > 0 and saved_session["instances"]
+    # The runner's final evaluation advances the stopped model after saving;
+    # compare resume against the checkpoint, not that post-save evaluation.
+    assert protection_sessions(partial.model)[0]["session"].call_index > saved_session["call_index"]
+
+    class CheckRestored(TrainerCallback):
+        checked = False
+
+        def on_init_end(self, args, state, control, model, **kwargs):
+            restored = protection_sessions(model)[0]["session"].state_dict()
+            assert restored["call_index"] == saved_session["call_index"]
+            for before, after in zip(saved_session["instances"], restored["instances"], strict=True):
+                assert before["scope"] == after["scope"]
+                assert before["state"]["count"] == after["state"]["count"]
+                assert torch.equal(before["state"]["rng"], after["state"]["rng"])
+                assert torch.equal(before["state"]["history"], after["state"]["history"])
+            self.checked = True
+
+    check = CheckRestored()
+    resumed, _ = train(resumed_config, resume="latest", offline=True, callbacks=[check], **transform)
+    assert check.checked
+    for name, tensor in full.model.state_dict().items():
+        assert torch.equal(tensor, resumed.model.state_dict()[name]), name
+    full_state = protection_sessions(full.model)[0]["session"].state_dict()
+    resumed_state = protection_sessions(resumed.model)[0]["session"].state_dict()
+    assert full_state["call_index"] == resumed_state["call_index"]
+    for before, after in zip(full_state["instances"], resumed_state["instances"], strict=True):
+        assert before["scope"] == after["scope"]
+        assert before["state"]["count"] == after["state"]["count"]
+        assert torch.equal(before["state"]["rng"], after["state"]["rng"])
+        assert torch.equal(before["state"]["history"], after["state"]["history"])
+    assert not any("history" in name or "session" in name for name in resumed.model.state_dict())
+    assert json.loads((tmp_path / "resumed-history" / "run.json").read_text())["abft_session"]["status"] == "restored"
+
+
+def test_algorithm_state_missing_file_and_layer_schema_validation(tmp_path, stateful_abft):
+    from cutlass_gemm.linear import install
+    from training.runner import AlgorithmState
+
+    stateful = AlgorithmState(install(torch.nn.Sequential(torch.nn.Linear(2, 2)), abft_config=stateful_abft))
+    with pytest.raises(ValueError, match="requires abft_state.pt"):
+        stateful.restore(tmp_path, device="cpu")
+    stateless = AlgorithmState(install(torch.nn.Linear(2, 2), abft_config="classic"))
+    stateless.restore(tmp_path, device="cpu")
+    assert stateless.status == "legacy_stateless_no_history"
+    assert stateless.sessions[0]["session"].call_index == 0
+    checkpoint = tmp_path / "checkpoint-1"
+    checkpoint.mkdir()
+    stateful.on_save(SimpleNamespace(output_dir=str(tmp_path)),
+                     SimpleNamespace(is_world_process_zero=True, global_step=1), None)
+    stateful.restore(checkpoint, device="cpu")
+    payload = torch.load(checkpoint / "abft_state.pt", weights_only=True)
+    payload["controllers"][0]["layers"] = ["wrong.layer"]
+    torch.save(payload, checkpoint / "abft_state.pt")
+    with pytest.raises(ValueError, match="layer layout"):
+        stateful.restore(checkpoint, device="cpu")
+    payload["controllers"][0]["layers"] = ["0"]
+    payload["schema_version"] = True
+    torch.save(payload, checkpoint / "abft_state.pt")
+    with pytest.raises(ValueError, match="schema"):
+        stateful.restore(checkpoint, device="cpu")
+
+
 class CountingLinear(torch.nn.Module):
     def __init__(self, linear):
         super().__init__()
@@ -650,3 +777,48 @@ def test_qwen_config_changes_only_device_and_output(runtime, device, monkeypatch
         shared.training, device=device,
         output_dir=shared.training.output_dir.replace("{device}", device),
     )
+
+
+def test_abft_fault_config_and_signatures(config):
+    from abft.config import AbftConfig, FaultConfig
+
+    base = replace(config, gemm=GemmConfig("cutlass", "fp32"),
+                   training=replace(config.training, device="cuda"))
+    protected = validate(replace(base, gemm=replace(base.gemm,
+                         abft={"method": "classic", "on_error": "report"},
+                         fault={"location": "accumulator", "role": "wgrad"},
+                         report_max_records=4)))
+    assert isinstance(protected.gemm.abft, AbftConfig)
+    assert isinstance(protected.gemm.fault, FaultConfig)
+    assert run_signature(validate(base)) != run_signature(protected)
+    assert protected.to_dict()["gemm"]["fault"]["role"] == "wgrad"
+    with pytest.raises(ValueError, match="resume"):
+        validate(replace(protected, training=replace(protected.training, resume="latest")))
+    with pytest.raises(ValueError):
+        validate(replace(base, gemm=replace(base.gemm, report_max_records=-1)))
+    with pytest.raises(ValueError):
+        validate(replace(base, gemm=replace(base.gemm, abft={"typo": True})))
+
+
+def test_runner_passes_protection_configuration(config, monkeypatch, tmp_path):
+    from cutlass_gemm import backend
+    import training.runner as runner
+
+    task = replace(config, gemm=GemmConfig("cutlass", "fp32", abft={"method": "classic"},
+                   fault={"location": "accumulator", "bit": 20}, report_max_records=3,
+                   report_path=str(tmp_path / "report.jsonl")),
+                   training=replace(config.training, device="cuda"))
+    captured = []
+    monkeypatch.setattr(backend, "build_key", lambda: "test-build")
+
+    def capture(transform, identifier, parameters):
+        captured.append(parameters)
+        raise RuntimeError("captured before loading data")
+
+    monkeypatch.setattr(runner, "transform_record", capture)
+    with pytest.raises(RuntimeError, match="captured"):
+        train(task)
+    assert captured[0]["abft_config"]["method"] == "classic"
+    assert captured[0]["fault_config"]["bit"] == 20
+    assert captured[0]["report_max_records"] == 3
+    assert captured[0]["report_path"] == str(tmp_path / "report.jsonl")

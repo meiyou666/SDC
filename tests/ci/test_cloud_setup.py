@@ -79,8 +79,18 @@ def test_generated_configuration_does_not_follow_external_directory(project, tmp
 
 
 def shell(body, *args, script=SETUP):
-    # SSH accounts have a passwd entry; a CI container's numeric UID may not.
-    identity = 'id() { if [[ $# == 1 && $1 == -un ]]; then printf "sdc\\n"; else command id "$@"; fi; }\n'
+    # Model an SSH account without requiring it in the test host's passwd file.
+    identity = '''
+id() {
+    case "$*" in
+        -un) printf 'sdc\\n' ;;
+        sdc) printf 'uid=1000(sdc) gid=1000(sdc) groups=1000(sdc)\\n' ;;
+        '-u sdc'|'-g sdc') printf '1000\\n' ;;
+        '-nG sdc') printf 'sdc\\n' ;;
+        *) command id "$@" ;;
+    esac
+}
+'''
     return subprocess.run(["bash", "-c", 'source "$1"\nshift\n' + identity + body, "cloud-test", str(script), *args], text=True, capture_output=True, env={**os.environ, "SUDO_USER": ""})
 
 

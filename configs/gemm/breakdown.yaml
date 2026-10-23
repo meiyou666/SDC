@@ -1,0 +1,15 @@
+# 诊断专用：BF16、Row/Row、128×128×64 tile；所有消融共用一个 CUDA kernel。
+device: cuda:0
+shapes:
+  - [128, 128, 128]
+  - [512, 1024, 1024]
+  - [2048, 2048, 2048]
+seeds: [2026]
+input_std: 1.0
+warmup: 5
+repeats: 30
+diagnostic_seed: 0.125
+# Nsight 的单次目标；可改为 official、production 或 full 等诊断模式。
+ncu_variant: production
+ncu_shape_index: 1
+output: results/gemm/kernel-breakdown/diagnostic.json

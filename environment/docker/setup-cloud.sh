@@ -134,9 +134,9 @@ sdc_setup_cloud() {
     if [[ $sdc_profile == ascend ]]; then
         sdc_build_args+=(--build-arg "ASCEND_SOC=$sdc_soc")
     fi
-    sdc_docker build --platform "$sdc_platform" --target "$sdc_target" \
+    sdc_docker build --network host --platform "$sdc_platform" --target "$sdc_target" \
         --tag "$sdc_image" --file environment/docker/Dockerfile "${sdc_build_args[@]}" .
-    sdc_docker run --rm --user "$sdc_uid:$sdc_gid" --entrypoint python \
+    sdc_docker run --rm --network host --user "$sdc_uid:$sdc_gid" --entrypoint python \
         --volume "$sdc_project:/workspace/SDC" "$sdc_image" \
         /workspace/SDC/environment/docker/configure-cloud.py \
         --profile "$sdc_profile" --platform "$sdc_platform" \

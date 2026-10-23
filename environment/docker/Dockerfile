@@ -34,7 +34,7 @@ WORKDIR /workspace/SDC
 CMD ["bash"]
 
 FROM tooling AS common
-ENV VIRTUAL_ENV=/opt/venv \
+ENV SDC_DEPLOYMENT=docker VIRTUAL_ENV=/opt/venv \
     NPM_CONFIG_REGISTRY=https://registry.npmmirror.com \
     NPM_CONFIG_PREFIX=/home/sdc/.local \
     NPM_CONFIG_CACHE=/home/sdc/.cache/npm \

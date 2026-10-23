@@ -68,11 +68,32 @@ def accelerator_smoke(runtime, baseline):
     return {"device": device_name, "count": backend.device_count(), "name": backend.get_device_name(0)}
 
 
-def check_distribution(baseline, release):
+def check_distribution(baseline, release, platform_environment=False):
     expected = (baseline.get("os_id"), baseline.get("os_version"))
     actual = (release.get("ID"), release.get("VERSION_ID"))
-    if actual != expected:
+    allowed = baseline.get("platform_os_versions", [expected[1]]) if platform_environment else [expected[1]]
+    if actual[0] != expected[0] or actual[1] not in allowed:
         raise ValueError(f"Distribution: expected {expected[0]} {expected[1]}, found {actual[0]} {actual[1]}.")
+
+
+def verify_platform_environment(project, state):
+    if Path(sys.prefix).resolve() != (project / ".venv").resolve():
+        raise ValueError("Activate this project's .venv with source environment/activate.sh.")
+    if os.environ.get("SDC_RUNTIME") != state["runtime"]:
+        raise ValueError("SDC_RUNTIME differs from the installed platform profile. Activate the project environment.")
+    snapshot = project / ".sdc/project"
+    verify_baked_files(project, snapshot)
+    if (project / "environment/gemm.json").read_bytes() != (snapshot / "environment/gemm.json").read_bytes():
+        raise ValueError("GEMM configuration changed. Run setup-platform.sh again.")
+    subprocess.run([sys.executable, str(project / "environment/configure_platform.py"), "check", "--profile", state["runtime"]], check=True)
+    if state["runtime"] == "nvidia":
+        if os.environ.get("CUDA_HOME") != state["CUDA_HOME"] or os.environ.get("CUTLASS_PATH") != state["CUTLASS_PATH"]:
+            raise ValueError("CUDA_HOME or CUTLASS_PATH differs from the configured platform environment.")
+        expected = json.loads((project / "environment/gemm.json").read_text())["cutlass_commit"]
+        actual = subprocess.check_output(["git", "-C", state["CUTLASS_PATH"], "rev-parse", "HEAD"], text=True).strip()
+        dirty = subprocess.check_output(["git", "-C", state["CUTLASS_PATH"], "status", "--porcelain"], text=True).strip()
+        if actual != expected or dirty:
+            raise ValueError("CUTLASS source does not match the shared commit.")
 
 
 def check_torch_version(baseline, runtime):
@@ -131,9 +152,15 @@ def main():
     parser.add_argument("--accelerator", action="store_true", help="Exercise the selected GPU/NPU")
     args = parser.parse_args()
     try:
-        verify_baked_files(args.project, Path("/opt/sdc/project"))
+        state_file = args.project / ".sdc/environment.json"
+        native = state_file.is_file() and os.environ.get("SDC_DEPLOYMENT") != "docker"
+        if native:
+            verify_platform_environment(args.project, json.loads(state_file.read_text()))
+        else:
+            verify_baked_files(args.project, Path("/opt/sdc/project"))
         baseline = json.loads((args.project / "environment/baseline.json").read_text())
-        check_distribution(baseline, platform.freedesktop_os_release())
+        release = platform.freedesktop_os_release()
+        check_distribution(baseline, release, platform_environment=native)
         uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
         errors = differences(baseline, platform.python_version(), platform.system(), platform.machine(), uv_version)
         if errors:
@@ -147,10 +174,10 @@ def main():
             smoke_test()
         accelerator = accelerator_smoke(runtime, baseline) if args.accelerator else "not checked"
     except (OSError, ValueError, ImportError, RuntimeError, AssertionError, subprocess.CalledProcessError) as exc:
-        print(f"Environment verification failed:\n{exc}\nUse the shared container; rebuild it after environment updates.", file=sys.stderr)
+        print(f"Environment verification failed:\n{exc}\nRe-run setup-platform.sh for a platform environment, or rebuild the project Docker image.", file=sys.stderr)
         return 1
     if not args.quiet:
-        print(json.dumps({"profile": runtime, "os": baseline["os_id"] + " " + baseline["os_version"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": accelerator}, indent=2))
+        print(json.dumps({"profile": runtime, "deployment": "platform" if native else "docker", "os": release["ID"] + " " + release["VERSION_ID"], "python": baseline["python"], "uv": uv_version, "packages": len(list(importlib.metadata.distributions())), "smoke_test": "passed" if args.smoke else "not requested", "accelerator": accelerator}, indent=2))
     return 0
 
 
